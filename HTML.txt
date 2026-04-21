@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TimberSmith Workforce Terminal</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @keyframes scan { 0% { top: 0%; } 100% { top: 100%; } }
+        .custom-scrollbar::-webkit-scrollbar { width: 5px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #333; border-radius: 10px; }
+        body { background: #000; overflow: hidden; height: 100vh; margin: 0; color: white; font-family: sans-serif; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+        const { LayoutDashboard, HardHat, ShieldAlert, UserPlus, Trash2, KeyRound, 
+                BarChart3, Scale, Clock, HandCoins, X, Activity, UserX, FileText } = lucide;
+
+        const SUPER_USER_PIN = "Melkmy74";
+
+        const App = () => {
+            // Internal Testing Data
+            const [employees, setEmployees] = useState([
+                { id: '1', name: "Elrico", surname: "Greyvenstein", role: "Senior Artisan", status: "In", todayHours: 6.5, weeklyHours: 49.0, yesterdayHours: 9.0, monthlyHours: 184.0, personalCode: "2024" },
+                { id: '2', name: "Hendrik", surname: "Viljoen", role: "Master Carpenter", status: "In", todayHours: 4.2, weeklyHours: 46.5, yesterdayHours: 8.5, monthlyHours: 168.0, personalCode: "1234" }
+            ]);
+
+            const [view, setView] = useState('dashboard');
+            const [appMode, setAppMode] = useState('admin');
+            const [showSuperModal, setShowSuperModal] = useState(false);
+            const [targetDelete, setTargetDelete] = useState(null);
+            const [superPin, setSuperPin] = useState('');
+
+            const removeEmployee = (e) => {
+                e.preventDefault();
+                if (superPin === SUPER_USER_PIN) {
+                    setEmployees(employees.filter(emp => emp.id !== targetDelete.id));
+                    setShowSuperModal(false);
+                    setSuperPin('');
+                }
+            };
+
+            return (
+                <div className="h-screen w-full bg-[#161616] flex flex-col overflow-hidden">
+                    {/* Header */}
+                    <header className="p-6 border-b border-[#ff8c00]/30 flex justify-between items-center bg-black/40">
+                        <div className="flex items-center gap-3">
+                            <HardHat className="text-[#ff8c00]" />
+                            <h1 className="text-xl font-black italic uppercase">TimberSmith</h1>
+                        </div>
+                    </header>
+
+                    {/* Main Content */}
+                    <main className="flex-1 overflow-y-auto p-8 custom-scrollbar">
+                        {view === 'dashboard' && (
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                                {employees.map(emp => (
+                                    <div key={emp.id} className="bg-[#1e1e1e] p-6 rounded-[2rem] border border-white/5 flex flex-col items-center">
+                                        <div className="w-16 h-16 rounded-full bg-gray-800 flex items-center justify-center mb-4 font-black">{emp.name[0]}</div>
+                                        <p className="font-black uppercase italic">{emp.name}</p>
+                                        <button onClick={() => { setTargetDelete(emp); setShowSuperModal(true); }} className="mt-4 text-red-500"><Trash2 size={16}/></button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        {view === 'analytics' && (
+                            <div className="bg-[#1e1e1e] p-8 rounded-[2rem]">
+                                <table className="w-full text-left">
+                                    <thead><tr className="text-gray-500 text-[10px] uppercase"><th>Name</th><th>Weekly</th><th>Monthly</th></tr></thead>
+                                    <tbody>
+                                        {employees.map(e => (
+                                            <tr key={e.id} className="border-t border-white/5">
+                                                <td className="p-4">{e.name}</td>
+                                                <td className="p-4 font-mono">{e.weeklyHours}h</td>
+                                                <td className="p-4 font-mono">{e.monthlyHours}h</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+                    </main>
+
+                    {/* Delete Modal */}
+                    {showSuperModal && (
+                        <div className="fixed inset-0 bg-black/90 flex items-center justify-center">
+                            <div className="bg-[#111] p-10 rounded-[3rem] text-center w-80">
+                                <UserX className="mx-auto text-red-500 mb-6" size={48} />
+                                <input type="password" placeholder="Enter Super PIN" className="w-full bg-black p-4 rounded-xl text-center mb-4" value={superPin} onChange={e => setSuperPin(e.target.value)} />
+                                <button onClick={removeEmployee} className="w-full py-4 bg-red-600 rounded-xl font-bold uppercase text-[10px]">Confirm Removal</button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Footer Taskbar */}
+                    <footer className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-black/90 p-3 rounded-full flex gap-4">
+                        <button className="p-4 bg-white/10 rounded-full" onClick={() => setView('dashboard')}><LayoutDashboard /></button>
+                        <button className="p-4 bg-white/10 rounded-full" onClick={() => setView('analytics')}><BarChart3 /></button>
+                    </footer>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
