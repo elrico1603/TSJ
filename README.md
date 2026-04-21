@@ -10,7 +10,9 @@
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide React UMD -->
     <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://unpkg.com/lucide-react@latest"></script>
 
     <style>
         @keyframes scan { 0% { top: 0%; } 100% { top: 100%; } }
@@ -20,7 +22,6 @@
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #333; border-radius: 10px; }
         body { background: #000; overflow: hidden; height: 100vh; margin: 0; color: white; font-family: sans-serif; }
         video { transform: scaleX(-1); }
-        .lucide { display: inline-block; vertical-align: middle; }
     </style>
 </head>
 <body>
@@ -33,6 +34,13 @@
         const ADMIN_PIN = "2026"; 
         const SUPER_USER_PIN = "Melkmy74";
 
+        // Destructure Lucide Icons from the global lucideReact object
+        const { 
+            LayoutDashboard, HardHat, ShieldAlert, UserPlus, Trash2, KeyRound, 
+            BarChart3, Scale, Clock, HandCoins, X, Activity, UserX, FileText,
+            ArrowLeft, FilePlus, FolderOpen, ClipboardList, Send, CheckCircle, AlertTriangle 
+        } = lucideReact;
+
         const App = () => {
             // Internal Testing Data
             const [employees, setEmployees] = useState([
@@ -41,6 +49,9 @@
                 { id: '3', name: "Sipho", surname: "Dlamini", role: "Joiner", status: "Out", todayHours: 0.0, weeklyHours: 38.0, yesterdayHours: 7.0, monthlyHours: 142.5, personalCode: "5566", address: "45 Pine Avenue, Durban", employeeIdNumber: "9205056000083", hourlyRate: "95" },
                 { id: '4', name: "Sarah", surname: "Stone", role: "Joiner", status: "In", todayHours: 5.5, weeklyHours: 48.0, yesterdayHours: 8.5, monthlyHours: 172.0, personalCode: "4433", address: "10 Rose Garden, Nelspruit", employeeIdNumber: "9302145000089", hourlyRate: "110" }
             ]);
+
+            // Local storage for Warnings/Records (Simulation)
+            const [allHrRecords, setAllHrRecords] = useState([]);
 
             const [currentTime, setCurrentTime] = useState(new Date());
             const [appMode, setAppMode] = useState('employee'); 
@@ -62,15 +73,8 @@
 
             // HR Vault
             const [selectedHrVaultEmployee, setSelectedHrVaultEmployee] = useState(null);
-            const [hrRecords, setHrRecords] = useState([]);
             const [showAddRecord, setShowAddRecord] = useState(false);
-            const [newRecord, setNewRecord] = useState({ title: '', category: 'Note', content: '' });
-
-            const { 
-                LayoutDashboard, HardHat, ShieldAlert, UserPlus, Trash2, KeyRound, 
-                BarChart3, Scale, Clock, HandCoins, X, Activity, UserX, FileText,
-                ArrowLeft, FilePlus, FolderOpen, ClipboardList, Send, CheckCircle, AlertTriangle
-            } = lucide;
+            const [newRecord, setNewRecord] = useState({ title: '', category: 'Warning', content: '' });
 
             useEffect(() => {
                 const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -100,7 +104,6 @@
 
             const handleLoanRequest = (e) => {
                 e.preventDefault();
-                // Simulation of sending request
                 setShowLoanModal(false);
                 setViewLoanSuccess(true);
                 setTimeout(() => {
@@ -109,6 +112,21 @@
                     setSelectedEmployee(null);
                 }, 3000);
             };
+
+            const saveHrRecord = (e) => {
+                e.preventDefault();
+                const record = {
+                    ...newRecord,
+                    id: Date.now(),
+                    employeeId: selectedHrVaultEmployee.id,
+                    date: new Date().toISOString()
+                };
+                setAllHrRecords([record, ...allHrRecords]);
+                setNewRecord({ title: '', category: 'Warning', content: '' });
+                setShowAddRecord(false);
+            };
+
+            const currentEmployeeRecords = allHrRecords.filter(r => r.employeeId === selectedHrVaultEmployee?.id);
 
             return (
                 <div className="h-screen w-full bg-[#161616] flex flex-col overflow-hidden">
@@ -124,7 +142,7 @@
                     {/* Main Content */}
                     <main className="flex-1 overflow-y-auto p-6 custom-scrollbar pb-32">
                         
-                        {/* 1. Dashboard */}
+                        {/* Dashboard */}
                         {appMode === 'employee' && view === 'dashboard' && (
                             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
                                 {employees.map(emp => (
@@ -140,7 +158,7 @@
                             </div>
                         )}
 
-                        {/* 2. Employee Home */}
+                        {/* Employee Home */}
                         {view === 'emp_home' && selectedEmployee && (
                             <div className="max-w-4xl mx-auto p-10 bg-[#1e1e1e] rounded-[4rem] border border-white/5 shadow-2xl animate-in slide-in-from-bottom-10">
                                 <div className="flex items-center gap-10 mb-14">
@@ -164,7 +182,7 @@
                             </div>
                         )}
 
-                        {/* 3. Analytics */}
+                        {/* Analytics */}
                         {appMode === 'analytics' && (
                             <div className="bg-[#1e1e1e] rounded-[3rem] border border-white/5 shadow-2xl overflow-hidden animate-in slide-in-from-right-10">
                                 <div className="p-8 border-b border-white/5 bg-black/20 flex justify-between items-center">
@@ -200,7 +218,7 @@
                             </div>
                         )}
 
-                        {/* 4. HR Vault */}
+                        {/* HR Vault */}
                         {appMode === 'hr' && (
                             <div className="h-full">
                                 {!selectedHrVaultEmployee ? (
@@ -225,24 +243,47 @@
                                     <div className="space-y-8 animate-in slide-in-from-bottom-5">
                                         <div className="bg-[#1e1e1e] p-8 rounded-[3rem] flex justify-between items-center border border-white/5">
                                             <div className="flex items-center gap-8">
-                                                <button onClick={() => setSelectedHrVaultEmployee(null)} className="p-4 bg-black/40 rounded-2xl"><ArrowLeft /></button>
+                                                <button onClick={() => setSelectedHrVaultEmployee(null)} className="p-4 bg-black/40 rounded-2xl hover:bg-black/60"><ArrowLeft /></button>
                                                 <div className="w-20 h-20 bg-gray-800 rounded-2xl flex items-center justify-center font-black text-3xl border-2 border-indigo-500">{selectedHrVaultEmployee.name[0]}</div>
-                                                <div><h2 className="text-4xl font-black uppercase italic tracking-tighter">{selectedHrVaultEmployee.name} {selectedHrVaultEmployee.surname}</h2><p className="text-indigo-400 uppercase font-black tracking-widest text-[10px] mt-1 italic">Digital Personnel File</p></div>
+                                                <div><h2 className="text-4xl font-black uppercase italic tracking-tighter leading-none">{selectedHrVaultEmployee.name} {selectedHrVaultEmployee.surname}</h2><p className="text-indigo-400 uppercase font-black tracking-widest text-[10px] mt-1 italic">Digital Personnel File</p></div>
                                             </div>
-                                            <button onClick={() => setShowAddRecord(true)} className="bg-orange-600 px-8 py-4 rounded-2xl font-black uppercase text-[10px] tracking-widest flex items-center gap-3">
+                                            <button onClick={() => setShowAddRecord(true)} className="bg-orange-600 px-8 py-4 rounded-2xl font-black uppercase text-[10px] tracking-widest flex items-center gap-3 shadow-lg active:scale-95">
                                                 <AlertTriangle size={18}/><span>Upload Warning</span>
                                             </button>
                                         </div>
-                                        <div className="bg-black/20 rounded-[3rem] p-12 border border-white/5 min-h-[400px] flex flex-col items-center justify-center opacity-30">
-                                            <FolderOpen size={64} />
-                                            <p className="font-black uppercase tracking-widest mt-4">Record History Empty</p>
+                                        
+                                        <div className="bg-black/20 rounded-[3rem] p-12 border border-white/5 min-h-[400px]">
+                                            {currentEmployeeRecords.length === 0 ? (
+                                                <div className="flex flex-col items-center justify-center h-full opacity-30 mt-20">
+                                                    <FolderOpen size={64} />
+                                                    <p className="font-black uppercase tracking-widest mt-4 text-xs italic">No Warning or Note History Found</p>
+                                                </div>
+                                            ) : (
+                                                <div className="space-y-6">
+                                                    {currentEmployeeRecords.map(record => (
+                                                        <div key={record.id} className="bg-white/5 p-6 rounded-3xl border border-white/5 border-l-4 border-l-orange-500">
+                                                            <div className="flex justify-between items-start mb-4">
+                                                                <div className="flex items-center gap-3">
+                                                                    <AlertTriangle className="text-orange-500" size={20} />
+                                                                    <div>
+                                                                        <p className="font-black uppercase text-lg italic leading-none">{record.title}</p>
+                                                                        <p className="text-[10px] text-gray-500 font-bold uppercase mt-1">Classification: {record.category}</p>
+                                                                    </div>
+                                                                </div>
+                                                                <p className="text-[10px] font-mono text-gray-600">{new Date(record.date).toLocaleDateString()}</p>
+                                                            </div>
+                                                            <p className="text-gray-300 text-sm leading-relaxed">{record.content}</p>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
                                 )}
                             </div>
                         )}
 
-                        {/* 5. Registry (Admin Mode) */}
+                        {/* Admin Mode Registry */}
                         {appMode === 'admin' && view === 'dashboard' && (
                             <div className="bg-[#1e1e1e] rounded-[3rem] border border-white/5 shadow-2xl overflow-hidden">
                                 <div className="p-8 border-b border-white/5 bg-black/20 flex justify-between items-center">
@@ -291,7 +332,7 @@
                         <div className="fixed inset-0 z-[1000] bg-black/95 flex items-center justify-center">
                             <div className="bg-[#111] p-12 rounded-[4rem] border-2 border-red-500/20 text-center w-full max-w-md">
                                 <UserX className="mx-auto text-red-500 mb-8" size={60} />
-                                <h2 className="text-2xl font-black uppercase italic mb-8 tracking-tighter leading-none">Security Override Required</h2>
+                                <h2 className="text-2xl font-black uppercase italic mb-8 tracking-tighter leading-none italic">Security Override Required</h2>
                                 <input type="password" placeholder="Enter Super PIN" className="w-full bg-black border border-white/10 p-6 rounded-3xl text-center text-3xl font-mono tracking-widest outline-none mb-8" value={superPinInput} onChange={e => setSuperPinInput(e.target.value)} autoFocus />
                                 <div className="flex gap-4">
                                     <button onClick={() => setShowSuperModal(false)} className="flex-1 py-5 rounded-2xl bg-white/5 font-black uppercase text-[10px]">Cancel</button>
@@ -306,15 +347,48 @@
                             <div className="bg-[#1e1e1e] p-14 rounded-[5rem] border border-white/10 w-full max-w-xl text-center relative shadow-2xl">
                                 <button onClick={() => setShowLoanModal(false)} className="absolute top-10 right-10 p-4 hover:bg-white/5 rounded-full"><X size={32}/></button>
                                 <HandCoins size={80} className="mx-auto text-emerald-500 mb-10" />
-                                <h2 className="text-4xl font-black uppercase italic tracking-tighter mb-10 leading-none">Loan Application</h2>
+                                <h2 className="text-4xl font-black uppercase italic tracking-tighter mb-10 leading-none italic">Loan Application</h2>
                                 <form onSubmit={handleLoanRequest} className="space-y-10">
                                     <div className="relative group">
                                         <span className="absolute left-10 top-1/2 -translate-y-1/2 font-black text-4xl text-emerald-500">R</span>
                                         <input type="number" placeholder="0.00" className="w-full bg-black border-2 border-white/5 focus:border-emerald-500/50 p-10 pl-20 rounded-[3rem] text-5xl font-mono font-black outline-none transition-all" value={loanAmount} onChange={e => setLoanAmount(e.target.value)} required />
                                     </div>
-                                    <button type="submit" className="w-full py-8 bg-emerald-600 rounded-[3rem] font-black uppercase tracking-[0.3em] text-xl shadow-2xl active:scale-95 transition-all">
+                                    <button type="submit" className="w-full py-8 bg-emerald-600 rounded-[3rem] font-black uppercase tracking-[0.3em] text-xl shadow-2xl active:scale-95 transition-all italic">
                                         Send Request to Janah
                                     </button>
+                                </form>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Add Warning/Note Overlay */}
+                    {showAddRecord && (
+                        <div className="fixed inset-0 z-[1100] bg-black/95 flex items-center justify-center p-10">
+                            <div className="bg-[#111] p-14 rounded-[4rem] border border-white/10 w-full max-w-3xl shadow-2xl">
+                                <h2 className="text-3xl font-black uppercase italic mb-10 tracking-tighter leading-none italic">Add Disciplinary Record: {selectedHrVaultEmployee.name}</h2>
+                                <form onSubmit={saveHrRecord} className="space-y-8">
+                                    <div className="grid grid-cols-2 gap-8">
+                                        <div className="flex flex-col gap-2">
+                                            <label className="text-[10px] font-black uppercase text-gray-500 ml-4">Record Title</label>
+                                            <input required placeholder="e.g. Late Arrival" className="bg-black border border-white/10 p-6 rounded-3xl outline-none focus:border-orange-500 font-bold" value={newRecord.title} onChange={e => setNewRecord({...newRecord, title: e.target.value})} />
+                                        </div>
+                                        <div className="flex flex-col gap-2">
+                                            <label className="text-[10px] font-black uppercase text-gray-500 ml-4">Classification</label>
+                                            <select className="bg-black border border-white/10 p-6 rounded-3xl outline-none focus:border-orange-500 font-bold appearance-none text-white cursor-pointer" value={newRecord.category} onChange={e => setNewRecord({...newRecord, category: e.target.value})}>
+                                                <option value="Warning">Official Warning</option>
+                                                <option value="Note">Internal Note</option>
+                                                <option value="Certificate">Certificate / ID</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div className="flex flex-col gap-2">
+                                        <label className="text-[10px] font-black uppercase text-gray-500 ml-4">Incident Details</label>
+                                        <textarea required placeholder="Explain the context of the warning or note here..." className="w-full bg-black border border-white/10 p-8 rounded-[2.5rem] outline-none focus:border-orange-500 min-h-[200px] resize-none font-medium" value={newRecord.content} onChange={e => setNewRecord({...newRecord, content: e.target.value})} />
+                                    </div>
+                                    <div className="flex gap-6 pt-4">
+                                        <button type="button" onClick={() => setShowAddRecord(false)} className="flex-1 py-6 bg-white/5 rounded-3xl font-black uppercase tracking-widest text-[10px] hover:bg-white/10">Cancel</button>
+                                        <button type="submit" className="flex-1 py-6 bg-orange-600 rounded-3xl font-black uppercase tracking-widest text-[10px] shadow-xl hover:bg-orange-500 active:scale-95 transition-all italic">Save Disciplinary File</button>
+                                    </div>
                                 </form>
                             </div>
                         </div>
@@ -330,14 +404,14 @@
 
                     {/* Footer Taskbar */}
                     <footer className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-black/90 backdrop-blur-3xl p-3 rounded-full border border-white/10 flex items-center gap-4 shadow-2xl z-50">
-                        <button className={`p-5 rounded-full transition-all ${appMode === 'employee' ? 'bg-white/10 text-[#ff8c00]' : 'text-gray-600 hover:text-white'}`} onClick={() => { setAppMode('employee'); setView('dashboard'); setSelectedEmployee(null); setSelectedHrVaultEmployee(null); }}><LayoutDashboard size={24}/></button>
+                        <button className={`p-5 rounded-full transition-all ${appMode === 'employee' ? 'bg-white/10 text-[#ff8c00] shadow-inner shadow-orange-500/20' : 'text-gray-600 hover:text-white'}`} onClick={() => { setAppMode('employee'); setView('dashboard'); setSelectedEmployee(null); setSelectedHrVaultEmployee(null); }}><LayoutDashboard size={24}/></button>
                         <div className="w-[1px] h-8 bg-white/10" />
                         <button className={`p-5 rounded-full transition-all ${!isLocked ? 'text-blue-500 bg-blue-500/10' : 'text-gray-600 hover:text-white'}`} onClick={() => isLocked ? setShowPinModal(true) : setIsLocked(true)}><KeyRound size={24}/></button>
                         {!isLocked && (
-                            <div className="flex gap-4 border-l border-white/10 pl-4">
-                                <button className={`p-5 rounded-full transition-all ${appMode === 'admin' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:text-white'}`} onClick={() => setAppMode('admin')}><Users size={24}/></button>
-                                <button className={`p-5 rounded-full transition-all ${appMode === 'analytics' ? 'bg-white/10 text-blue-400' : 'text-gray-600 hover:text-white'}`} onClick={() => setAppMode('analytics')}><BarChart3 size={24}/></button>
-                                <button className={`p-5 rounded-full transition-all ${appMode === 'hr' ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:text-white'}`} onClick={() => setAppMode('hr')}><Scale size={24}/></button>
+                            <div className="flex gap-4 border-l border-white/10 pl-4 animate-in slide-in-from-left-5">
+                                <button className={`p-5 rounded-full transition-all ${appMode === 'admin' ? 'bg-blue-600 text-white shadow-xl' : 'text-gray-600 hover:text-white'}`} onClick={() => { setAppMode('admin'); setView('dashboard'); setSelectedHrVaultEmployee(null); }}><Users size={24}/></button>
+                                <button className={`p-5 rounded-full transition-all ${appMode === 'analytics' ? 'bg-white/10 text-blue-400' : 'text-gray-600 hover:text-white'}`} onClick={() => { setAppMode('analytics'); setView('dashboard'); setSelectedHrVaultEmployee(null); }}><BarChart3 size={24}/></button>
+                                <button className={`p-5 rounded-full transition-all ${appMode === 'hr' ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-600/20' : 'text-gray-600 hover:text-white'}`} onClick={() => { setAppMode('hr'); setView('dashboard'); setSelectedHrVaultEmployee(null); }}><Scale size={24}/></button>
                             </div>
                         )}
                     </footer>
