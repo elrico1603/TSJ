@@ -1,1 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TimberSmith Workforce Terminal</title>
+    
+    <!-- Stable CDN Dependencies -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
 
+    <style>
+        @keyframes scan { 0% { top: 0%; } 100% { top: 100%; } }
+        @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+        .animate-shake { animation: shake 0.2s ease-in-out infinite; }
+        .custom-scrollbar::-webkit-scrollbar { width: 5px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #333; border-radius: 10px; }
+        body { background: #000; overflow: hidden; height: 100vh; margin: 0; color: white; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
+        video { transform: scaleX(-1); }
+        .lucide { display: inline-block; vertical-align: middle; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+        
+        const ADMIN_PIN = "2026"; 
+        const SUPER_USER_PIN = "Melkmy74";
+
+        // Stable Icon Component
+        const Icon = ({ name, size = 24, className = "", strokeWidth = 2 }) => {
+            useEffect(() => {
+                if (window.lucide) {
+                    window.lucide.createIcons();
+                }
+            }, [name, size, className]);
+            return <i data-lucide={name} className={className} style={{ width: size, height: size, strokeWidth: strokeWidth }}></i>;
+        };
+
+        // Navigation Button with Hover Tooltip Popup
+        const NavButton = ({ iconName, tooltip, active, onClick, disabled = false, colorClass = "" }) => (
+            <div className="relative group flex items-center">
+                {/* Tooltip Popup */}
+                <div className="absolute bottom-full mb-5 left-1/2 -translate-x-1/2 px-4 py-2 bg-black/95 backdrop-blur-md border border-white/10 rounded-2xl opacity-0 group-hover:opacity-100 transition-all duration-300 pointer-events-none whitespace-nowrap z-[100] shadow-[0_10px_30px_rgba(0,0,0,0.5)] translate-y-2 group-hover:translate-y-0">
+                    <p className="text-[11px] font-black uppercase tracking-[0.1em] text-white italic">{tooltip}</p>
+                    <div className="absolute top-full left-1/2 -translate-x-1/2 border-[8px] border-transparent border-t-black/95"></div>
+                </div>
+                
+                <button 
+                    onClick={onClick} 
+                    disabled={disabled} 
+                    className={`p-4 rounded-full transition-all duration-300 ${active ? (colorClass || 'bg-white/10 text-white shadow-inner scale-110') : 'text-gray-600 hover:bg-white/5 hover:text-gray-200'} ${disabled ? 'opacity-10 pointer-events-none' : 'opacity-100 hover:scale-110'}`}
+                >
+                    <Icon name={iconName} size={22} strokeWidth={active ? 3 : 2} />
+                </button>
+            </div>
+        );
+
+        const TimberSmithApp = () => {
+            const [employees, setEmployees] = useState([
+                { id: '1', name: "Elrico", surname: "Greyvenstein", role: "Senior Artisan", status: "In", todayHours: 6.5, weeklyHours: 49.0, yesterdayHours: 9.0, monthlyHours: 184.0, personalCode: "2024" },
+                { id: '2', name: "Hendrik", surname: "Viljoen", role: "Master Carpenter", status: "In", todayHours: 4.2, weeklyHours: 46.5, yesterdayHours: 8.5, monthlyHours: 168.0, personalCode: "1234" },
+                { id: '3', name: "Sipho", surname: "Dlamini", role: "Joiner", status: "Out", todayHours: 0.0, weeklyHours: 38.0, yesterdayHours: 7.0, monthlyHours: 142.5, personalCode: "5566" },
+                { id: '4', name: "Pieter", surname: "Rossouw", role: "Apprentice", status: "Out", todayHours: 0.0, weeklyHours: 42.5, yesterdayHours: 9.0, monthlyHours: 155.0, personalCode: "9900" },
+                { id: '5', name: "Jack", surname: "Miller", role: "Joiner", status: "Out", todayHours: 0.0, weeklyHours: 44.0, yesterdayHours: 8.0, monthlyHours: 160.0, personalCode: "1122" },
+                { id: '6', name: "Sarah", surname: "Stone", role: "Joiner", status: "In", todayHours: 5.5, weeklyHours: 48.0, yesterdayHours: 8.5, monthlyHours: 172.0, personalCode: "4433" },
+                { id: '7', name: "Dave", surname: "Wood", role: "Apprentice", status: "Out", todayHours: 0.0, weeklyHours: 40.0, yesterdayHours: 7.5, monthlyHours: 135.0, personalCode: "7788" }
+            ]);
+
+            const [currentTime, setCurrentTime] = useState(new Date());
+            const [appMode, setAppMode] = useState('employee'); 
+            const [isLocked, setIsLocked] = useState(true); 
+            const [showPinModal, setShowPinModal] = useState(false);
+            const [pinInput, setPinInput] = useState('');
+            const [view, setView] = useState('dashboard'); 
+            const [selectedEmployee, setSelectedEmployee] = useState(null);
+            const [scanComplete, setScanComplete] = useState(false);
+            const [showSuperModal, setShowSuperModal] = useState(false);
+            const [superPinInput, setSuperPinInput] = useState('');
+            const [targetDelete, setTargetDelete] = useState(null);
+
+            const videoRef = useRef(null);
+
+            useEffect(() => {
+                const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+                return () => clearInterval(timer);
+            }, []);
+
+            useEffect(() => {
+                if (view === 'scanning' && videoRef.current) {
+                    navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } })
+                        .then(s => { if(videoRef.current) videoRef.current.srcObject = s; })
+                        .catch(e => console.log("Camera inactive"));
+                }
+            }, [view]);
+
+            const handleAdminPin = (n) => {
+                const newPin = pinInput + n;
+                setPinInput(newPin);
+                if (newPin === ADMIN_PIN) {
+                    setIsLocked(false);
+                    setShowPinModal(false);
+                    setPinInput('');
+                    setAppMode('admin');
+                    setView('dashboard');
+                } else if (newPin.length >= 4) {
+                    setPinInput('');
+                }
+            };
+
+            const processClockEvent = (emp) => {
+                setScanComplete(true);
+                setTimeout(() => {
+                    const updated = employees.map(e => 
+                        e.id === emp.id ? { ...e, status: e.status === 'In' ? 'Out' : 'In' } : e
+                    );
+                    setEmployees(updated);
+                    setView('success_screen');
+                    setTimeout(() => {
+                        setView('dashboard');
+                        setSelectedEmployee(null);
+                        setScanComplete(false);
+                    }, 2500);
+                }, 1500);
+            };
+
+            const removeEmployee = () => {
+                if (superPinInput === SUPER_USER_PIN) {
+                    setEmployees(employees.filter(emp => emp.id !== targetDelete.id));
+                    setShowSuperModal(false);
+                    setSuperPinInput('');
+                }
+            };
+
+            const PhotoAvatar = ({ emp, size = 40, className = "" }) => (
+                <div className={`rounded-2xl flex items-center justify-center overflow-hidden border-2 border-white/10 shadow-inner bg-[#111] ${className}`} 
+                     style={{ width: size, height: size }}>
+                    <span className="font-black text-white opacity-50 uppercase" style={{ fontSize: size * 0.4 }}>{emp.name[0]}</span>
+                </div>
+            );
+
+            return (
+                <div className="h-screen w-full bg-[#161616] flex flex-col overflow-hidden relative">
+                    {/* Persistent Header */}
+                    <header className={`p-6 border-b-2 ${!isLocked ? 'border-blue-500 shadow-[0_0_30px_rgba(59,130,246,0.2)]' : 'border-[#ff8c00]'} transition-all bg-black/40 backdrop-blur-md sticky top-0 z-50`}>
+                        <div className="flex justify-between items-center px-4">
+                            <div className="flex items-center space-x-3">
+                                <Icon name="hard-hat" size={28} className={!isLocked ? 'text-blue-500' : 'text-[#ff8c00]'} />
+                                <h1 className="text-2xl font-black italic tracking-tighter uppercase leading-none text-white">TimberSmith</h1>
+                            </div>
+                            <div className="text-right">
+                                <p className="text-xl font-mono font-black italic leading-none">{currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+                                <p className="text-[9px] font-bold text-gray-500 uppercase mt-1 tracking-widest">{currentTime.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })}</p>
+                            </div>
+                        </div>
+                    </header>
+
+                    {/* Main Content Area */}
+                    <main className="flex-1 overflow-y-auto p-6 custom-scrollbar pb-32">
+                        
+                        {/* 1. Artisan Selection Grid (Home) */}
+                        {appMode === 'employee' && view === 'dashboard' && (
+                            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6 animate-in fade-in duration-500">
+                                {employees.map(emp => (
+                                    <div key={emp.id} className="bg-[#1e1e1e] p-6 rounded-[2.5rem] flex flex-col items-center border-2 border-transparent hover:border-[#ff8c00] transition-all cursor-pointer shadow-2xl active:scale-95 group" onClick={() => { setSelectedEmployee(emp); setView('emp_home'); }}>
+                                        <div className="relative mb-4">
+                                            <PhotoAvatar emp={emp} size={90} className="group-hover:scale-105 transition-transform" />
+                                            <div className={`absolute -bottom-1 -right-1 w-6 h-6 rounded-full border-4 border-[#1e1e1e] ${emp.status === 'In' ? 'bg-green-500 animate-pulse shadow-[0_0_10px_#22c55e]' : 'bg-red-500'}`} />
+                                        </div>
+                                        <p className="font-black text-sm uppercase italic tracking-tighter text-center leading-none group-hover:text-[#ff8c00] transition-colors">{emp.name} {emp.surname}</p>
+                                        <p className="text-[8px] text-gray-600 mt-2 font-black uppercase tracking-widest">{emp.role}</p>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        {/* 2. Employee Landing Page */}
+                        {view === 'emp_home' && selectedEmployee && (
+                            <div className="max-w-4xl mx-auto p-10 bg-[#1e1e1e] rounded-[4rem] border border-white/5 shadow-2xl animate-in slide-in-from-bottom-10 duration-500">
+                                <div className="flex items-center gap-10 mb-14">
+                                    <div className="w-32 h-32 rounded-[2rem] bg-gray-800 flex items-center justify-center font-black text-5xl border-4 border-[#ff8c00] uppercase text-white/20 shadow-2xl">{selectedEmployee.name[0]}</div>
+                                    <div>
+                                        <h2 className="text-5xl font-black uppercase italic tracking-tighter leading-none text-white">{selectedEmployee.name} {selectedEmployee.surname}</h2>
+                                        <p className="text-xl text-gray-500 font-black uppercase tracking-[0.3em] mt-3 italic">{selectedEmployee.role}</p>
+                                    </div>
+                                    <button onClick={() => setView('dashboard')} className="ml-auto p-5 bg-white/5 rounded-full text-gray-500 hover:text-white transition-all shadow-xl active:scale-90"><Icon name="x" size={32}/></button>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                                    <button onClick={() => setView('scanning')} className="bg-black/40 p-12 rounded-[3.5rem] flex flex-col items-center gap-6 hover:border-[#ff8c00] border-2 border-transparent transition-all active:scale-95 shadow-inner">
+                                        <Icon name="clock" size={64} className="text-[#ff8c00]" />
+                                        <span className="font-black uppercase italic text-2xl text-white tracking-widest">Clocking</span>
+                                    </button>
+                                    <button className="bg-black/40 p-12 rounded-[3.5rem] flex flex-col items-center gap-6 hover:border-indigo-500 border-2 border-transparent transition-all active:scale-95 shadow-inner">
+                                        <Icon name="scale" size={64} className="text-indigo-400" />
+                                        <span className="font-black uppercase italic text-2xl text-white tracking-widest">Compliance</span>
+                                    </button>
+                                    <div className="bg-black/40 p-12 rounded-[3.5rem] flex flex-col items-center justify-center opacity-20 border-2 border-transparent shadow-inner">
+                                        <Icon name="id-card" size={64} className="text-blue-400" />
+                                        <span className="font-black uppercase italic text-2xl text-white tracking-widest text-center">My Details</span>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* 3. Scanning Simulation */}
+                        {view === 'scanning' && selectedEmployee && (
+                            <div className="fixed inset-0 z-[200] bg-black/95 flex flex-col items-center justify-center p-12 animate-in zoom-in duration-300">
+                                <div className="w-full max-w-xl aspect-square relative rounded-[4rem] overflow-hidden border-[16px] border-[#222] shadow-[0_0_100px_rgba(255,140,0,0.15)]">
+                                    <video ref={videoRef} autoPlay playsInline muted className="absolute inset-0 w-full h-full object-cover grayscale opacity-40 scale-x-[-1]" />
+                                    <div className="absolute inset-0 flex flex-col items-center justify-center p-10">
+                                        <div className={`w-3/4 aspect-square border-4 rounded-[4rem] transition-all duration-700 ${scanComplete ? 'border-green-500 scale-105' : 'border-[#ff8c00] animate-pulse'}`}>
+                                            <div className="absolute inset-0 opacity-10 flex items-center justify-center"><Icon name="fingerprint" size={150}/></div>
+                                            {!scanComplete && <div className="absolute w-full h-2 bg-[#ff8c00] top-0 animate-[scan_2s_linear_infinite] shadow-[0_0_30px_#ff8c00]" />}
+                                        </div>
+                                    </div>
+                                </div>
+                                <h3 className="mt-10 text-[#ff8c00] font-black uppercase text-xl tracking-[0.5em] animate-pulse italic">Identity Scan: {selectedEmployee.name}</h3>
+                                <div className="mt-12 flex gap-10">
+                                    <button onClick={() => processClockEvent(selectedEmployee)} className="bg-emerald-600 text-black px-12 py-5 rounded-[2rem] font-black uppercase text-sm tracking-widest shadow-2xl active:scale-95 hover:bg-emerald-500 transition-all">Verify Biometrics</button>
+                                    <button onClick={() => setView('emp_home')} className="text-gray-500 font-black uppercase text-xs tracking-widest underline decoration-2 underline-offset-8">Abort</button>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* 4. Analytics Node */}
+                        {appMode === 'analytics' && (
+                            <div className="bg-[#1e1e1e] rounded-[3rem] border border-white/5 shadow-2xl overflow-hidden animate-in slide-in-from-right-10 duration-500">
+                                <div className="p-10 border-b border-white/5 bg-black/20 flex justify-between items-center">
+                                    <div>
+                                        <h2 className="text-3xl font-black uppercase italic tracking-tighter leading-none text-white">Workshop Analytics</h2>
+                                        <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mt-2 italic">Real-time Shift & Labor Tracking</p>
+                                    </div>
+                                    <div className="p-4 bg-blue-500/10 text-blue-500 rounded-2xl shadow-inner"><Icon name="activity" size={32} /></div>
+                                </div>
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-left">
+                                        <thead>
+                                            <tr className="bg-black/30 text-[9px] font-black uppercase tracking-[0.2em] text-gray-600">
+                                                <th className="px-10 py-6">Artisan</th>
+                                                <th className="px-6 py-6 text-center">Status</th>
+                                                <th className="px-6 py-6 text-center">Today</th>
+                                                <th className="px-6 py-6 text-center">Yesterday</th>
+                                                <th className="px-6 py-6 text-center">Weekly</th>
+                                                <th className="px-6 py-6 text-center">Monthly</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-white/5">
+                                            {employees.map(e => (
+                                                <tr key={e.id} className="hover:bg-white/5 transition-colors group">
+                                                    <td className="px-10 py-6 font-black uppercase italic text-sm group-hover:text-blue-400 transition-colors">{e.name} {e.surname}</td>
+                                                    <td className="px-6 py-6 text-center"><span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest ${e.status === 'In' ? 'bg-green-500/10 text-green-500 shadow-[0_0_10px_#22c55e22]' : 'bg-red-500/10 text-red-500'}`}>{e.status}</span></td>
+                                                    <td className="px-6 py-6 text-center font-mono font-bold text-orange-500">{e.todayHours}h</td>
+                                                    <td className="px-6 py-6 text-center font-mono font-bold text-gray-400">{e.yesterdayHours}h</td>
+                                                    <td className="px-6 py-6 text-center font-mono font-bold text-blue-500">{e.weeklyHours}h</td>
+                                                    <td className="px-6 py-6 text-center font-mono font-bold text-emerald-400">{e.monthlyHours}h</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* 5. Registry (Admin Mode) */}
+                        {appMode === 'admin' && view === 'dashboard' && (
+                            <div className="bg-[#1e1e1e] rounded-[3rem] border border-white/5 shadow-2xl overflow-hidden animate-in slide-in-from-right-10 duration-500">
+                                <div className="p-8 border-b border-white/5 bg-black/20 flex justify-between items-center">
+                                    <h2 className="text-xl font-black uppercase italic tracking-tighter text-white">Staff Registry</h2>
+                                    <button className="bg-blue-600 text-white px-6 py-3 rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-xl flex items-center gap-2 active:scale-95 transition-all">
+                                        <Icon name="user-plus" size={18} /><span>Enroll Carpenter</span>
+                                    </button>
+                                </div>
+                                <div className="p-10 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                                    {employees.map(emp => (
+                                        <div key={emp.id} className="bg-[#161616] p-8 rounded-[2.5rem] border border-white/5 flex flex-col group transition-all hover:bg-black/40">
+                                            <div className="flex items-start space-x-6">
+                                                <PhotoAvatar emp={emp} size={90} className="border-2 border-black" />
+                                                <div className="flex-1">
+                                                    <h3 className="text-xl font-black italic leading-none uppercase text-white">{emp.name}</h3>
+                                                    <p className="text-[10px] text-blue-500 font-black uppercase tracking-widest mt-2">{emp.role}</p>
+                                                </div>
+                                                <button onClick={() => { setTargetDelete(emp); setShowSuperModal(true); }} className="text-red-500/20 hover:text-red-500 transition-all active:scale-90"><Icon name="trash-2" size={20} /></button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </main>
+
+                    {/* Modals */}
+                    {showPinModal && (
+                        <div className="fixed inset-0 z-[900] bg-black/90 backdrop-blur-xl flex items-center justify-center animate-in fade-in duration-300">
+                            <div className="bg-[#1e1e1e] p-10 rounded-[3rem] text-center border border-white/10 w-80 shadow-2xl">
+                                <Icon name="shield-alert" size={54} className="mx-auto text-blue-500 mb-6" />
+                                <p className="text-[10px] font-black uppercase tracking-widest text-gray-500 mb-8 italic">Management Authentication</p>
+                                <div className="flex justify-center space-x-3 mb-10">
+                                    {[1,2,3,4].map(i => <div key={i} className={`h-4 w-4 rounded-full transition-all ${pinInput.length >= i ? 'bg-blue-500 shadow-[0_0_15px_#3b82f6]' : 'bg-white/10'}`} />)}
+                                </div>
+                                <div className="grid grid-cols-3 gap-4">
+                                    {[1,2,3,4,5,6,7,8,9, 'C', 0, 'X'].map(n => (
+                                        <button key={n} className="h-16 bg-white/5 rounded-2xl font-black text-xl text-white active:bg-blue-600 transition-all" onClick={() => n === 'X' ? setShowPinModal(false) : n === 'C' ? setPinInput('') : handleAdminPin(n.toString())}>{n}</button>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {showSuperModal && (
+                        <div className="fixed inset-0 z-[1000] bg-black/95 flex items-center justify-center animate-in fade-in duration-300">
+                            <div className="bg-[#111] p-12 rounded-[4rem] border-2 border-red-500/20 text-center w-full max-w-md shadow-2xl">
+                                <Icon name="user-x" className="mx-auto text-red-500 mb-8 shadow-[0_0_20px_#ef444433]" size={64} />
+                                <h2 className="text-2xl font-black uppercase italic mb-10 tracking-tighter leading-none italic">Authorize Deletion: <span className="text-red-500">{targetDelete?.name}</span></h2>
+                                <input type="password" placeholder="Enter Super PIN" className="w-full bg-black border-2 border-white/10 p-6 rounded-3xl text-center text-3xl font-mono tracking-widest outline-none mb-10 focus:border-red-600 transition-all" value={superPinInput} onChange={e => setSuperPinInput(e.target.value)} autoFocus />
+                                <div className="flex gap-6">
+                                    <button onClick={() => setShowSuperModal(false)} className="flex-1 py-6 bg-white/5 rounded-[2rem] font-black uppercase text-[10px] tracking-widest active:scale-95">Cancel</button>
+                                    <button onClick={removeEmployee} className="flex-1 py-6 bg-red-600 rounded-[2rem] font-black uppercase text-[10px] tracking-widest shadow-xl active:scale-95 hover:bg-red-500 transition-all">Authorize</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Verification Screen */}
+                    {view === 'success_screen' && selectedEmployee && (
+                        <div className="fixed inset-0 z-[1000] bg-[#0f0f0f] flex flex-col items-center justify-center p-12 text-center animate-in fade-in duration-500">
+                            <div className="w-72 h-72 rounded-full border-[20px] border-green-500 p-2 shadow-[0_0_120px_rgba(34,197,94,0.4)] mb-16"><PhotoAvatar emp={selectedEmployee} size="100%" className="border-0 rounded-full" /></div>
+                            <h2 className="text-9xl font-black italic uppercase tracking-tighter text-green-500 mb-6 leading-none italic text-white">VERIFIED</h2>
+                            <p className="text-4xl font-black text-gray-500 uppercase tracking-[0.4em] mb-12 italic">{selectedEmployee.name} {selectedEmployee.surname}</p>
+                            <div className="bg-[#1e1e1e] px-24 py-12 rounded-[5rem] border-b-[12px] border-green-500 shadow-2xl animate-in slide-in-from-bottom-10">
+                                <p className="text-7xl font-mono font-black italic text-white uppercase">{selectedEmployee.status === 'In' ? 'Shift Started' : 'Shift Completed'}</p>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Navigation Bar with Hover Tooltips */}
+                    <footer className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-black/90 backdrop-blur-3xl p-3 rounded-full border border-white/10 flex items-center gap-4 shadow-2xl z-50 transition-all">
+                        <NavButton 
+                            iconName="layout-dashboard" 
+                            tooltip="Terminal Home" 
+                            active={appMode === 'employee'} 
+                            onClick={() => { setAppMode('employee'); setView('dashboard'); setSelectedEmployee(null); }}
+                        />
+                        <div className="w-[1px] h-10 bg-white/10 mx-1" />
+                        <NavButton 
+                            iconName={isLocked ? "lock" : "unlock"} 
+                            tooltip={isLocked ? "Unlock Management" : "Lock Hub"} 
+                            active={!isLocked} 
+                            colorClass="text-blue-500 bg-blue-500/10 shadow-[0_0_20px_rgba(59,130,246,0.1)]"
+                            onClick={() => isLocked ? setShowPinModal(true) : setIsLocked(true)} 
+                        />
+                        {!isLocked && (
+                            <div className="flex gap-4 border-l border-white/10 pl-4 animate-in slide-in-from-left-5">
+                                <NavButton 
+                                    iconName="users" 
+                                    tooltip="Staff Registry" 
+                                    active={appMode === 'admin'} 
+                                    colorClass="bg-blue-600 text-white shadow-xl"
+                                    onClick={() => { setAppMode('admin'); setView('dashboard'); }} 
+                                />
+                                <NavButton 
+                                    iconName="bar-chart-3" 
+                                    tooltip="Shift Analytics" 
+                                    active={appMode === 'analytics'} 
+                                    colorClass="bg-white/10 text-blue-400 shadow-inner"
+                                    onClick={() => { setAppMode('analytics'); setView('dashboard'); }} 
+                                />
+                                <NavButton 
+                                    iconName="scale" 
+                                    tooltip="Secure Vault" 
+                                    active={appMode === 'hr'} 
+                                    colorClass="bg-indigo-600 text-white shadow-xl"
+                                    onClick={() => { setAppMode('hr'); setView('dashboard'); }} 
+                                />
+                            </div>
+                        )}
+                    </footer>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<TimberSmithApp />);
+    </script>
+</body>
+</html>
