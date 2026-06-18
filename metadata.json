@@ -1,0 +1,6 @@
+{
+  "name": "TimberSmith Workforce Portal",
+  "description": "Comprehensive workforce, clocking, order management, and Kanban design portal for TimberSmith Joinery.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
