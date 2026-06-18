@@ -1,0 +1,75 @@
+@import "tailwindcss";
+
+@keyframes scan { 0% { top: 0%; } 100% { top: 100%; } }
+@keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+.animate-shake { animation: shake 0.2s ease-in-out infinite; }
+.custom-scrollbar::-webkit-scrollbar { width: 6px; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background: #333; border-radius: 10px; }
+
+/* Apply app background default and overflow limit unless printing */
+body { 
+  background: #0c0c0c; 
+  margin: 0; 
+  color: white; 
+  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; 
+  overflow: hidden; 
+  height: 100vh; 
+}
+
+video { transform: scaleX(-1); border-radius: 2.5rem; }
+.glass { background: rgba(0, 0, 0, 0.4); backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.08); }
+.tooltip-arrow { border-left: 8px solid transparent; border-right: 8px solid transparent; border-top: 8px solid rgba(0,0,0,0.9); }
+input::placeholder, textarea::placeholder { color: #555; }
+input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1); cursor: pointer; }
+
+@keyframes pulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+
+/* Print Engine Overrides */
+@media print {
+    * {
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+    }
+    body, html { 
+        background: white !important; 
+        color: black !important; 
+        overflow: visible !important; 
+        height: auto !important; 
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+    .no-print { display: none !important; }
+    .print-wrapper {
+        position: static !important;
+        display: block !important;
+        width: 100% !important;
+        height: auto !important;
+        overflow: visible !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        background: white !important;
+    }
+    @page { margin: 0.5cm; }
+    tr, td, th, .avoid-break { 
+        page-break-inside: avoid !important; 
+        break-inside: avoid !important; 
+    }
+    table { page-break-inside: auto; }
+}
+
+.bg-watermark {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-image: 
+        url('https://elrico1603.github.io/TSJApp/background.jpg'), 
+        url('https://elrico1603.github.io/TSJApp/App%20Background%20Watermark.jpg');
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    opacity: 0.18; 
+    z-index: -10; 
+    pointer-events: none; 
+}
