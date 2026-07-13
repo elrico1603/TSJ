@@ -26,8 +26,10 @@ import { EmployeeDetailsModal } from './components/EmployeeDetailsModal';
 import { ReportPrintTemplate } from './components/ReportPrintTemplate';
 import { PrintLayout } from './components/PrintLayout';
 import { KanbanTemplateManagerPage, DEFAULT_SAMPLE_TEMPLATE } from './components/KanbanTemplateManagerPage';
+import { KanbanDesigner } from './pages/KanbanDesigner';
+import { KanbanPreview } from './pages/KanbanPreview';
 
-const { ADMIN_PIN, SUPER_USER_PIN } = SECURITY;
+const { SUPER_USER_PIN } = SECURITY;
 
 export default function App() {
   // ==========================================
@@ -42,9 +44,11 @@ export default function App() {
   const [currentTime, setCurrentTime] = useState(new Date());
   
   // Navigation State
-  const [appMode, setAppMode] = useState<string>('home'); 
+  const [appMode, setAppMode] = useState<string>('employee'); 
   const [isLocked, setIsLocked] = useState(true); 
   const [showPinModal, setShowPinModal] = useState(false);
+  const [unlockUsername, setUnlockUsername] = useState('');
+  const [unlockPassword, setUnlockPassword] = useState('');
   const [pinInput, setPinInput] = useState('');
   const [view, setView] = useState<string>('dashboard'); 
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
@@ -52,19 +56,47 @@ export default function App() {
   // Kanban Job Cards State
   const [kanbanCards, setKanbanCards] = useState<KanbanCard[]>([]);
   const [showCardEditor, setShowCardEditor] = useState(false);
+  const [scannedKanbanCard, setScannedKanbanCard] = useState<KanbanCard | null>(null);
+  const [showScannedCardModal, setShowScannedCardModal] = useState(false);
   const initialCardForm = {
     templateId: '',
     cardData: {
-      productImage: '', partDescription: '', partNumber: '', supplierPartNumber: '',
-      supplier: '', orderQuantity: '', reorderPoint: '', deliveryTime: '',
-      location: '', contactDetails: '', reorderInfo: '', notes: ''
+      productDescription: '',
+      imageUrl: '',
+      supplierPartNumber: '',
+      supplierName: '',
+      orderQuantity: '',
+      binQuantity: '1 Bin',
+      deliveryTime: '',
+      kanbanId: '',
+      createdBy: '',
+      createdDate: '',
+      lastModified: '',
+      location: {
+        letter: '',
+        number: '',
+        colour: ''
+      },
+      locationFormat: 'A12 RED', // Default format
+      // Keep legacy properties for backwards compatibility
+      productImage: '',
+      partDescription: '',
+      partNumber: '',
+      supplier: '',
+      reorderPoint: '',
+      contactDetails: '',
+      reorderInfo: '',
+      notes: '',
+      locationRaw: '' // Legacy location string
     }
   };
   const [cardForm, setCardForm] = useState(initialCardForm);
   const [kanbanTemplates, setKanbanTemplates] = useState<KanbanTemplate[]>([]);
+  const [v2PrintPreview, setV2PrintPreview] = useState<{ template: any; cardData: any } | null>(null);
   const [printingItem, setPrintingItem] = useState<{ card: KanbanCard; template: KanbanTemplate } | null>(null);
   const [printingTemplate, setPrintingTemplate] = useState<{ template: KanbanTemplate; cardData: any } | null>(null);
   const [kanbanEditingId, setKanbanEditingId] = useState<string | null>(null);
+  const [imageDragActive, setImageDragActive] = useState(false);
 
   // Clocking, Time off and Money Borrowing parameters
   const [lastClockResult, setLastClockResult] = useState<string | null>(null);
@@ -90,15 +122,57 @@ export default function App() {
   const [authView, setAuthView] = useState<'login' | 'register'>('login'); 
   const [authForm, setAuthForm] = useState({ name: '', email: '', password: '', role: 'Artisan', pin: '' });
   const [activeUsers, setActiveUsers] = useState<AppUser[]>([]);
+  const [userPermissions, setUserPermissions] = useState<Record<string, Record<string, boolean>>>({});
   const [pendingUsers, setPendingUsers] = useState<AppUser[]>([]);
   const [showAddUserModal, setShowAddUserModal] = useState(false);
   const [newUserForm, setNewUserForm] = useState({ name: '', email: '', pin: '', role: 'Supervisor' });
 
   // Permissions & Roles
-  const isSupervisorUser = ['Admin', 'Supervisor'].includes(currentUser?.role || '');
-  const canManageOrders = rolePermissions.canManageOrders(currentUser?.role || '');
-  const canManageUsers = rolePermissions.canManageUsers(currentUser?.role || '');
-  const canViewAnalytics = rolePermissions.canViewAnalytics(currentUser?.role || '');
+  const userPerms = currentUser ? (userPermissions[currentUser.id] || {}) : {};
+
+  const isSupervisorUser = userPerms.canManageUsers !== undefined 
+    ? userPerms.canManageUsers 
+    : ['Admin', 'Supervisor'].includes(currentUser?.role || '');
+
+  const canManageOrders = userPerms.canManageOrders !== undefined 
+    ? userPerms.canManageOrders 
+    : rolePermissions.canManageOrders(currentUser?.role || '');
+
+  const canManageUsers = userPerms.canManageUsers !== undefined 
+    ? userPerms.canManageUsers 
+    : rolePermissions.canManageUsers(currentUser?.role || '');
+
+  const canViewAnalytics = userPerms.canViewAnalytics !== undefined 
+    ? userPerms.canViewAnalytics 
+    : rolePermissions.canViewAnalytics(currentUser?.role || '');
+
+  const updateActiveUser = async (userId: string, updates: Partial<AppUser>) => {
+    try {
+      const targetRef = db.collection('artifacts')
+        .doc(APP_ID_PATH)
+        .collection('private')
+        .doc('users')
+        .collection('active')
+        .doc(userId);
+      
+      const doc = await targetRef.get();
+      const userData = doc.exists ? doc.data() : null;
+      const userName = userData?.name || userId;
+
+      await targetRef.update(updates);
+
+      let logMsg = `Updated settings for user ${userName}.`;
+      if (updates.role) logMsg += ` New Role: ${updates.role}.`;
+      if (updates.pin) logMsg += ` PIN / Password changed.`;
+      if (updates.permissions) logMsg += ` Permissions updated.`;
+
+      await auditLogger.log('USER_UPDATED', userData?.email || 'N/A', logMsg);
+      announce("User successfully updated.");
+    } catch (e) {
+      console.error("Failed to update active user:", e);
+      announce("Error updating user.");
+    }
+  };
 
   // Details Modal and Debt management
   const [showEmpDetailsModal, setShowEmpDetailsModal] = useState(false);
@@ -137,7 +211,6 @@ export default function App() {
 
   // Administration portal permissions checkboxes
   const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [userPermissions, setUserPermissions] = useState<Record<string, Record<string, boolean>>>({});
 
   // Media Stream variables
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -326,7 +399,17 @@ export default function App() {
         db.collection('artifacts').doc(APP_ID_PATH).collection('private').doc('users').collection('active')
           .onSnapshot(snap => {
             if (!snap.empty) {
-              setActiveUsers(snap.docs.map(d => ({ id: d.id, ...d.data() } as AppUser)));
+              const users = snap.docs.map(d => ({ id: d.id, ...d.data() } as AppUser));
+              setActiveUsers(users);
+              
+              // Load custom permission overrides from users directly
+              const perms: Record<string, Record<string, boolean>> = {};
+              users.forEach(u => {
+                if ((u as any).permissions) {
+                  perms[u.id] = (u as any).permissions;
+                }
+              });
+              setUserPermissions(perms);
             } else {
               setActiveUsers([]);
             }
@@ -352,6 +435,89 @@ export default function App() {
       clearInterval(clockInterval);
     };
   }, []);
+
+  // Intercept PWA Kanban QR code scans from window location pathname
+  useEffect(() => {
+    const checkPathnameAndLoad = () => {
+      const path = window.location.pathname;
+      if (path && path.includes('/kanban/')) {
+        const parts = path.split('/kanban/');
+        const rawId = parts[parts.length - 1]?.trim();
+        if (rawId && kanbanCards.length > 0) {
+          const found = kanbanCards.find(c => 
+            c.cardData?.kanbanId?.toLowerCase() === rawId.toLowerCase() || 
+            c.cardData?.partNumber?.toLowerCase() === rawId.toLowerCase()
+          );
+          if (found) {
+            setScannedKanbanCard(found);
+            setShowScannedCardModal(true);
+            announce(`Loaded scanned Kanban card ${rawId}`);
+          }
+        }
+      }
+    };
+    checkPathnameAndLoad();
+  }, [window.location.pathname, kanbanCards]);
+
+  const handleEmailOrder = async (card: KanbanCard) => {
+    const data = card.cardData || {};
+    const kanbanId = data.kanbanId || data.partNumber || 'KAN-000000';
+    const desc = data.productDescription || data.partDescription || 'N/A';
+    const supplier = data.supplierName || data.supplier || 'N/A';
+    const partNo = data.supplierPartNumber || 'N/A';
+    const orderQty = data.orderQuantity || 'N/A';
+    const binQty = data.binQuantity || '1 Bin';
+    const deliveryTime = data.deliveryTime || 'N/A';
+    
+    // Format location display
+    let locStr = 'N/A';
+    if (data.location && typeof data.location === 'object') {
+      const l = data.location;
+      locStr = `${l.letter || ''}${l.number || ''} ${l.colour || ''}`.trim();
+    } else {
+      locStr = data.locationRaw || (typeof data.location === 'string' ? data.location : 'N/A');
+    }
+
+    const requestedBy = currentUser?.name || currentUser?.email || 'System User';
+    const currentDate = new Date().toLocaleDateString('en-ZA');
+
+    const subject = encodeURIComponent(`REORDER REQUEST: ${kanbanId} - ${desc}`);
+    const body = encodeURIComponent(
+`TS JOINERY REORDER SYSTEM - REPLENISHMENT REQUEST
+
+Dear Procurement / Supplier,
+
+Please process the following inventory replenishment order:
+
+• Kanban ID: ${kanbanId}
+• Product Description: ${desc}
+• Supplier: ${supplier}
+• Supplier Part Number: ${partNo}
+• Order Quantity: ${orderQty}
+• Bin Quantity: ${binQty}
+• Delivery Time: ${deliveryTime}
+• Storage Location: ${locStr}
+
+---
+• Requested By: ${requestedBy}
+• Date of Request: ${currentDate}
+• Company: TS Joinery
+
+Comments:
+This reorder was triggered automatically via the TS Joinery Kanban QR Scan. Please confirm receipt and delivery date.
+
+Kind Regards,
+${requestedBy}
+TS Joinery Kanban System`
+    );
+
+    const mailtoLink = `mailto:janah@tsjoinery.co.za?subject=${subject}&body=${body}`;
+    window.open(mailtoLink, '_blank');
+
+    // Audit Log the Order replenishment
+    await auditLogger.log('KANBAN_REORDER_TRIGGERED', requestedBy, `Replenishment order email generated for ${kanbanId} - ${desc} (Supplier: ${supplier})`);
+    announce(`Order email drafted for ${kanbanId}`);
+  };
 
   // Cameras and users scan verification action
   useEffect(() => {
@@ -400,15 +566,133 @@ export default function App() {
   // ==========================================
   const handleSaveCard = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!cardForm.templateId || !cardForm.cardData.partDescription?.trim()) {
-      announce("A template and part description are required.");
+    const data = cardForm.cardData;
+    
+    // VALIDATION
+    if (!cardForm.templateId) {
+      announce("Please select a Kanban template.");
+      alert("Please select a Kanban template.");
       return;
     }
+    if (!data.productDescription?.trim()) {
+      announce("Product Description is required.");
+      alert("Product Description is required.");
+      return;
+    }
+    if (!data.supplierPartNumber?.trim()) {
+      announce("Supplier Part Number is required.");
+      alert("Supplier Part Number is required.");
+      return;
+    }
+    if (!data.supplierName?.trim()) {
+      announce("Supplier Name is required.");
+      alert("Supplier Name is required.");
+      return;
+    }
+    if (!data.orderQuantity?.trim()) {
+      announce("Order Quantity is required.");
+      alert("Order Quantity is required.");
+      return;
+    }
+    if (!data.deliveryTime?.trim()) {
+      announce("Delivery Time is required.");
+      alert("Delivery Time is required.");
+      return;
+    }
+    
+    const letter = data.location?.letter?.trim() || '';
+    const number = data.location?.number?.trim() || '';
+    const colour = data.location?.colour?.trim() || '';
+    
+    if (!letter || !number || !colour) {
+      announce("All location fields (Letter, Number, Colour) are required.");
+      alert("All location fields (Letter, Number, Colour) are required.");
+      return;
+    }
+
+    // Determine location display string based on chosen format
+    let formattedLocation = '';
+    if (data.locationFormat === 'A-12 RED') {
+      formattedLocation = `${letter}-${number} ${colour}`;
+    } else {
+      formattedLocation = `${letter}${number} ${colour}`;
+    }
+
+    // Assign a unique sequential Kanban ID if it doesn't already exist
+    let assignedKanbanId = data.kanbanId;
+    if (!assignedKanbanId) {
+      let maxNum = 0;
+      kanbanCards.forEach(c => {
+        const kid = c.cardData?.kanbanId;
+        if (kid && kid.startsWith('KAN-')) {
+          const numPart = parseInt(kid.substring(4), 10);
+          if (!isNaN(numPart) && numPart > maxNum) {
+            maxNum = numPart;
+          }
+        }
+      });
+      assignedKanbanId = `KAN-${String(maxNum + 1).padStart(6, '0')}`;
+    }
+
+    const creatorUser = data.createdBy || currentUser?.name || currentUser?.email || 'System User';
+    const createDate = data.createdDate || new Date().toISOString();
+    const modDate = new Date().toISOString();
+
+    // Prepare complete, backwards-compatible, synchronized card data structure
+    const updatedCardData = {
+      ...data,
+      // Section 1 Master Database Fields
+      productDescription: data.productDescription.trim(),
+      imageUrl: data.imageUrl || '',
+      supplierPartNumber: data.supplierPartNumber.trim(),
+      supplierName: data.supplierName.trim(),
+      orderQuantity: data.orderQuantity.trim(),
+      binQuantity: (data.binQuantity || '1 Bin').trim(),
+      deliveryTime: data.deliveryTime.trim(),
+      kanbanId: assignedKanbanId,
+      createdBy: creatorUser,
+      createdDate: createDate,
+      lastModified: modDate,
+      location: {
+        letter: letter,
+        number: number,
+        colour: colour
+      },
+      locationFormat: data.locationFormat || 'A12 RED',
+
+      // Legacies automatically mapped from Section 1 master data:
+      partDescription: data.productDescription.trim(),
+      productImage: data.imageUrl || '',
+      supplier: data.supplierName.trim(),
+      partNumber: assignedKanbanId, // Ensure partNumber matches the unique Kanban ID for general template compatibility
+      locationRaw: formattedLocation
+    };
+
+    // To prevent layout or preview systems failing, override cardData.location display string as the combined value
+    // other components can also read cardData.location if it's a string, or fallback to locationRaw
+    const finalPayload = {
+      templateId: cardForm.templateId,
+      cardData: {
+        ...updatedCardData,
+        // Since some parts of print/view may read cardData.location directly as string, keep it as the formatted string.
+        // But we ALSO save the distinct location object fields as requested.
+        location: {
+          letter: letter,
+          number: number,
+          colour: colour
+        },
+        locationString: formattedLocation, // Saved as string display helper
+        locationLegacy: formattedLocation // Saved as legacy display
+      }
+    };
+
     const targetRef = db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('data').collection('kanbanCards');
     if (kanbanEditingId) {
-      await targetRef.doc(kanbanEditingId).update(cardForm);
+      await targetRef.doc(kanbanEditingId).set(finalPayload, { merge: true });
+      await auditLogger.log('KANBAN_CARD_UPDATED', creatorUser, `Updated Kanban card ${assignedKanbanId} - ${data.productDescription}`);
     } else {
-      await targetRef.add({ ...cardForm, createdAt: new Date().toISOString() });
+      const addedDoc = await targetRef.add({ ...finalPayload, createdAt: new Date().toISOString() });
+      await auditLogger.log('KANBAN_CARD_CREATED', creatorUser, `Created Kanban card ${assignedKanbanId} (${addedDoc.id})`);
     }
     setShowCardEditor(false);
     announce("Kanban card saved successfully.");
@@ -416,7 +700,61 @@ export default function App() {
 
   const openCardEditor = (card: KanbanCard | null = null) => {
     if (card) {
-      setCardForm({ templateId: card.templateId, cardData: { ...initialCardForm.cardData, ...card.cardData } });
+      const cardData = card.cardData || {};
+      
+      // Parse legacy location if it's stored as a string or legacy field
+      let parsedLetter = '';
+      let parsedNumber = '';
+      let parsedColour = '';
+      
+      if (cardData.location && typeof cardData.location === 'object') {
+        parsedLetter = (cardData.location as any).letter || '';
+        parsedNumber = (cardData.location as any).number || '';
+        parsedColour = (cardData.location as any).colour || '';
+      } else if (typeof cardData.location === 'string' && cardData.location) {
+        // e.g., "A12 RED" or "A-12 RED"
+        const cleanLoc = (cardData.location as string).trim();
+        const parts = cleanLoc.split(/\s+/);
+        parsedColour = parts[1] || 'RED';
+        const mainPart = parts[0] || '';
+        const hyphenIndex = mainPart.indexOf('-');
+        if (hyphenIndex !== -1) {
+          parsedLetter = mainPart.substring(0, hyphenIndex);
+          parsedNumber = mainPart.substring(hyphenIndex + 1);
+        } else {
+          // Extract leading letters and subsequent digits
+          const match = mainPart.match(/^([a-zA-Z]+)?(\d+)?$/);
+          if (match) {
+            parsedLetter = match[1] || '';
+            parsedNumber = match[2] || '';
+          }
+        }
+      }
+
+      setCardForm({
+        templateId: card.templateId,
+        cardData: {
+          ...initialCardForm.cardData,
+          ...cardData,
+          productDescription: cardData.productDescription || cardData.partDescription || '',
+          imageUrl: cardData.imageUrl || cardData.productImage || '',
+          supplierPartNumber: cardData.supplierPartNumber || cardData.partNumber || '',
+          supplierName: cardData.supplierName || cardData.supplier || '',
+          orderQuantity: cardData.orderQuantity || '',
+          binQuantity: cardData.binQuantity || '1 Bin',
+          deliveryTime: cardData.deliveryTime || '',
+          kanbanId: cardData.kanbanId || '',
+          createdBy: cardData.createdBy || '',
+          createdDate: cardData.createdDate || '',
+          lastModified: cardData.lastModified || '',
+          location: {
+            letter: parsedLetter || '',
+            number: parsedNumber || '',
+            colour: parsedColour || 'RED'
+          },
+          locationFormat: cardData.locationFormat || (cardData.location && typeof cardData.location === 'string' && (cardData.location as string).includes('-') ? 'A-12 RED' : 'A12 RED')
+        }
+      });
       setKanbanEditingId(card.id);
     } else {
       setCardForm(initialCardForm);
@@ -439,18 +777,64 @@ export default function App() {
   };
 
   const submitAdminPin = () => {
-    if (pinInput === ADMIN_PIN || pinInput === SUPER_USER_PIN) {
+    const trimmedUser = unlockUsername.trim().toLowerCase();
+    const trimmedPass = unlockPassword.trim();
+
+    // 1. Check for Super User Bypass
+    if (trimmedPass === SUPER_USER_PIN) {
       setIsLocked(false);
-      const localAdmin = { id: 'local-admin', name: 'Local Admin', role: 'Admin', isApproved: true };
+      const localAdmin = { id: 'local-admin', name: 'Super Admin', role: 'Admin', isApproved: true };
       setCurrentUser(localAdmin);
-      auditLogger.log('LOCAL_UNLOCK', localAdmin.name, 'Admin PIN used to unlock terminal');
+      auditLogger.log('LOCAL_UNLOCK', localAdmin.name, 'Super PIN used to unlock terminal');
       setShowPinModal(false);
-      setPinInput('');
+      setUnlockUsername('');
+      setUnlockPassword('');
       setAppMode('admin');
       setView('dashboard');
+      announce("Terminal unlocked with Super Master bypass.");
+      return;
+    }
+
+    // 2. Validate against registered active users
+    const matchedUser = activeUsers.find(
+      u => u.isApproved && 
+      (u.email?.toLowerCase().trim() === trimmedUser || u.name?.toLowerCase().trim() === trimmedUser) &&
+      u.pin === trimmedPass
+    );
+
+    if (matchedUser) {
+      setIsLocked(false);
+      setCurrentUser(matchedUser);
+      auditLogger.log('LOCAL_UNLOCK', matchedUser.email, `Unlocked Management Hub as ${matchedUser.role}`);
+      
+      // Select appropriate default mode based on user permission overrides
+      const userPerms = userPermissions[matchedUser.id] || {};
+      const canManageUsersOverride = userPerms.canManageUsers !== undefined ? userPerms.canManageUsers : ['Admin', 'Supervisor'].includes(matchedUser.role);
+      const canManageOrdersOverride = userPerms.canManageOrders !== undefined ? userPerms.canManageOrders : ['Admin', 'Supervisor', 'HR'].includes(matchedUser.role);
+      const canViewAnalyticsOverride = userPerms.canViewAnalytics !== undefined ? userPerms.canViewAnalytics : ['Admin', 'Supervisor', 'HR'].includes(matchedUser.role);
+
+      let targetMode = 'admin';
+      if (canManageUsersOverride) {
+        targetMode = 'admin';
+      } else if (canManageOrdersOverride) {
+        targetMode = 'orders';
+      } else if (canViewAnalyticsOverride) {
+        targetMode = 'analytics';
+      } else {
+        targetMode = 'employee';
+      }
+
+      setAppMode(targetMode);
+      setView('dashboard');
+      setShowPinModal(false);
+      setUnlockUsername('');
+      setUnlockPassword('');
+      announce(`Unlocked as ${matchedUser.name}.`);
     } else {
       setAdminPinError(true);
-      setTimeout(() => { setPinInput(''); setAdminPinError(false); }, 1500);
+      setTimeout(() => { 
+        setAdminPinError(false); 
+      }, 1500);
     }
   };
 
@@ -483,7 +867,17 @@ export default function App() {
   };
 
   const submitSupervisorPin = () => {
-    if (supervisorApprovalPinInput === ADMIN_PIN || supervisorApprovalPinInput === SUPER_USER_PIN) {
+    const matchedSupervisor = activeUsers.find(
+      u => u.isApproved && u.pin === supervisorApprovalPinInput && 
+      (() => {
+        const uPerms = userPermissions[u.id] || {};
+        return uPerms.canManageUsers !== undefined 
+          ? uPerms.canManageUsers 
+          : ['Admin', 'Supervisor'].includes(u.role);
+      })()
+    );
+
+    if (supervisorApprovalPinInput === SUPER_USER_PIN || matchedSupervisor) {
       if (pendingAction === 'borrow_money') {
         processMoneyBorrow(selectedEmployee!);
       } else if (pendingAction === 'archive') {
@@ -997,6 +1391,16 @@ export default function App() {
         />
       )}
 
+      {/* Kanban template print preview overlay (V2) */}
+      {v2PrintPreview && (
+        <KanbanPreview
+          template={v2PrintPreview.template}
+          cardData={v2PrintPreview.cardData}
+          onClose={() => setV2PrintPreview(null)}
+          announce={announce}
+        />
+      )}
+
       {/* Primary workshop application layout */}
       <div className={`h-screen w-full bg-transparent flex flex-col relative overflow-hidden text-white italic ${isExportingPDF || printingItem || printingTemplate ? 'hidden no-print' : ''}`}>
         <div className="bg-watermark"></div>
@@ -1129,11 +1533,11 @@ export default function App() {
                   className="w-full py-4 bg-[#ff8c00] hover:bg-[#e07b00] rounded-2xl text-xs font-black uppercase tracking-widest text-white shadow-lg active:scale-95 transition-all flex items-center justify-center space-x-3 font-sans"
                 >
                   <Icon name="lock" size={16} />
-                  <span>Unlock Portal</span>
+                  <span>Unlock Management Hub</span>
                 </button>
               ) : (
                 <button 
-                  onClick={() => { setIsLocked(true); setAppMode('home'); setCurrentUser(null); }} 
+                  onClick={() => { setIsLocked(true); setAppMode('employee'); setCurrentUser(null); }} 
                   className="w-full py-4 bg-red-600/10 border border-red-500/30 hover:bg-red-600/20 rounded-2xl text-xs font-black uppercase tracking-widest text-red-500 transition-all flex items-center justify-center space-x-3 font-sans"
                 >
                   <Icon name="unlock" size={16} />
@@ -1145,12 +1549,13 @@ export default function App() {
 
           {/* Workspace view wrapper */}
           <div className="flex-1 overflow-y-auto custom-scrollbar relative">
-            {appMode === 'template_designer' ? (
-              <KanbanTemplateManagerPage 
-                kanbanTemplates={kanbanTemplates}
+            {appMode === 'template_designer' && !showCardEditor ? (
+              <KanbanDesigner 
                 currentUser={currentUser}
                 announce={announce}
-                onPrintTemplate={handlePrintTemplate}
+                onPrintPreview={(template, cardData) => {
+                  setV2PrintPreview({ template, cardData });
+                }}
               />
             ) : (
               <div className="p-12 pb-36 font-sans">
@@ -1593,26 +1998,56 @@ export default function App() {
       {/* MASTER PIN CONTROLS OVERLAY FOR BYPASS */}
       {showPinModal && (
         <div className="fixed inset-0 z-[900] bg-black/95 backdrop-blur-xl flex items-center justify-center p-6 animate-in fade-in font-sans">
-          <div className="bg-[#151515] p-12 rounded-[5rem] text-center border border-white/10 w-full max-w-sm shadow-2xl animate-in zoom-in duration-300">
-            <div className={`p-6 rounded-full mb-8 mx-auto w-fit italic ${adminPinError ? 'bg-red-500/20 text-red-500 animate-shake' : 'bg-blue-500/10 text-blue-500 shadow-inner'}`}>
-              <Icon name="shield-alert" size={54} />
+          <div className="bg-[#151515] p-10 rounded-[4rem] text-center border border-white/10 w-full max-w-md shadow-2xl animate-in zoom-in duration-300">
+            <div className={`p-5 rounded-full mb-6 mx-auto w-fit italic ${adminPinError ? 'bg-red-500/20 text-red-500 animate-shake' : 'bg-blue-500/10 text-blue-500 shadow-inner'}`}>
+              <Icon name="shield-alert" size={48} />
             </div>
-            <p className="text-[11px] font-black uppercase tracking-[0.3em] text-gray-500 mb-12">Supervisor Unlock Required</p>
-            <form onSubmit={(e) => { e.preventDefault(); submitAdminPin(); }} className="space-y-6">
-              <input 
-                type="password"
-                placeholder="Enter bypass key..."
-                value={pinInput}
-                onChange={(e) => setPinInput(e.target.value)}
-                className="w-full bg-black/40 border border-white/10 rounded-2xl p-4 text-center text-white text-lg font-bold outline-none focus:border-blue-500"
-                autoFocus
-              />
-              <div className="flex gap-4">
-                <button type="button" onClick={() => { setShowPinModal(false); setPinInput(''); }} className="flex-1 py-4 bg-white/5 hover:bg-white/10 rounded-2xl text-xs font-black uppercase text-white font-sans">Cancel</button>
-                <button type="submit" className="flex-1 py-4 bg-[#ff8c00] hover:bg-[#e07b00] rounded-2xl text-xs font-black uppercase text-white shadow-xl font-sans">Unlock</button>
+            <p className="text-[12px] font-black uppercase tracking-[0.25em] text-gray-400 mb-8">Unlock Management Hub</p>
+            <form onSubmit={(e) => { e.preventDefault(); submitAdminPin(); }} className="space-y-5 text-left">
+              <div>
+                <label className="text-[10px] font-black uppercase text-gray-500 tracking-wider ml-1 block mb-1">Username or Email</label>
+                <input 
+                  type="text"
+                  placeholder="manager@tsjoinery.co.za"
+                  value={unlockUsername}
+                  onChange={(e) => setUnlockUsername(e.target.value)}
+                  className="w-full bg-black/40 border border-white/10 rounded-2xl p-4 text-white text-sm font-bold outline-none focus:border-[#ff8c00] transition-colors"
+                  required
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-black uppercase text-gray-500 tracking-wider ml-1 block mb-1">Password or PIN</label>
+                <input 
+                  type="password"
+                  placeholder="••••••••"
+                  value={unlockPassword}
+                  onChange={(e) => setUnlockPassword(e.target.value)}
+                  className="w-full bg-black/40 border border-white/10 rounded-2xl p-4 text-white text-sm font-bold outline-none focus:border-[#ff8c00] transition-colors tracking-widest"
+                  required
+                />
+              </div>
+              <div className="flex gap-4 pt-4">
+                <button 
+                  type="button" 
+                  onClick={() => { 
+                    setShowPinModal(false); 
+                    setUnlockUsername(''); 
+                    setUnlockPassword(''); 
+                  }} 
+                  className="flex-1 py-4 bg-white/5 hover:bg-white/10 rounded-2xl text-xs font-black uppercase text-white font-sans transition-colors"
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit" 
+                  className="flex-1 py-4 bg-[#ff8c00] hover:bg-[#e07b00] rounded-2xl text-xs font-black uppercase text-white shadow-xl font-sans transition-colors"
+                >
+                  Unlock
+                </button>
               </div>
             </form>
-            {adminPinError && <p className="mt-6 text-red-500 text-[10px] font-black uppercase animate-pulse font-bold">Authorization Denied</p>}
+            {adminPinError && <p className="mt-5 text-red-500 text-[10px] font-black uppercase animate-pulse">Authorization Denied</p>}
           </div>
         </div>
       )}
@@ -1627,6 +2062,7 @@ export default function App() {
           approvePendingUser={authManager.approvePendingUser}
           rejectPendingUser={authManager.rejectPendingUser}
           deleteActiveUser={authManager.deleteActiveUser}
+          updateActiveUser={updateActiveUser}
           setShowAddUserModal={setShowAddUserModal}
           setShowSettingsModal={setShowSettingsModal}
           announce={announce}
@@ -1695,6 +2131,358 @@ export default function App() {
           handleEnrollSubmit={handleEnrollSubmit}
           setShowEnrollModal={setShowEnrollModal}
         />
+      )}
+
+      {/* POPUP: KANBAN CARD CREATION & EDITING */}
+      {showCardEditor && (
+        <div className="fixed inset-0 z-[1200] bg-black/95 backdrop-blur-2xl flex items-center justify-center p-6 animate-in fade-in font-sans overflow-y-auto">
+          <div className="bg-[#151515] p-8 md:p-12 rounded-[3.5rem] border border-white/10 w-full max-w-4xl shadow-2xl my-8">
+            <div className="flex justify-between items-center mb-8 border-b border-white/5 pb-4">
+              <div>
+                <h3 className="text-2xl font-black uppercase tracking-tighter text-white">
+                  {kanbanEditingId ? '⚙️ Edit Kanban Card' : '✨ Create Kanban Card'}
+                </h3>
+                <p className="text-[10px] text-purple-400 font-bold uppercase tracking-widest mt-1">
+                  Section 1 - Master Data Entry Source
+                </p>
+              </div>
+              <button 
+                onClick={() => setShowCardEditor(false)} 
+                className="p-3 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white rounded-full transition-colors"
+              >
+                <Icon name="x" size={20} />
+              </button>
+            </div>
+
+            <div className="p-4 bg-purple-950/20 rounded-2xl border border-purple-500/10 mb-6 text-xs text-purple-300 leading-relaxed">
+              <strong className="text-purple-400 uppercase tracking-wider block mb-1">💡 Section 1 is the Master Data Source</strong>
+              All fields entered here represent the primary master database records. Other sections (Section 2 - Section 5) will automatically consume this data to eliminate duplicate entries and ensure perfect consistency.
+            </div>
+
+            <form onSubmit={handleSaveCard} className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                
+                {/* Column 1: Template selection & description & codes */}
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-[10px] font-black uppercase text-gray-400 tracking-wider flex items-center gap-1">
+                      Select Kanban Template <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      required
+                      value={cardForm.templateId}
+                      onChange={(e) => setCardForm(prev => ({ ...prev, templateId: e.target.value }))}
+                      className="w-full bg-black border border-white/10 rounded-2xl p-4 text-white font-sans mt-1 cursor-pointer"
+                    >
+                      <option value="">-- Choose Template --</option>
+                      {kanbanTemplates.map(t => (
+                        <option key={t.id} value={t.id || ''}>{t.templateName}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-black uppercase text-gray-400 tracking-wider flex items-center gap-1">
+                      Product Description <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. LAMINATING POUCH FOR KANBAN CARD"
+                      value={cardForm.cardData.productDescription || ''}
+                      onChange={(e) => setCardForm(prev => ({
+                        ...prev,
+                        cardData: { ...prev.cardData, productDescription: e.target.value }
+                      }))}
+                      className="w-full bg-black border border-white/10 rounded-2xl p-4 text-white font-sans mt-1"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[10px] font-black uppercase text-gray-400 tracking-wider flex items-center gap-1">
+                        Supplier Part Number <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. IBC10"
+                        value={cardForm.cardData.supplierPartNumber || ''}
+                        onChange={(e) => setCardForm(prev => ({
+                          ...prev,
+                          cardData: { ...prev.cardData, supplierPartNumber: e.target.value }
+                        }))}
+                        className="w-full bg-black border border-white/10 rounded-2xl p-4 text-white font-sans mt-1"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-black uppercase text-gray-400 tracking-wider flex items-center gap-1">
+                        Supplier Name <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. AMAZON"
+                        value={cardForm.cardData.supplierName || ''}
+                        onChange={(e) => setCardForm(prev => ({
+                          ...prev,
+                          cardData: { ...prev.cardData, supplierName: e.target.value }
+                        }))}
+                        className="w-full bg-black border border-white/10 rounded-2xl p-4 text-white font-sans mt-1"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-black uppercase text-gray-400 tracking-wider">
+                      Location Compound Field <span className="text-red-500">*</span>
+                    </label>
+                    <div className="grid grid-cols-3 gap-2 mt-1">
+                      <div>
+                        <input
+                          type="text"
+                          required
+                          maxLength={3}
+                          placeholder="Letter (e.g. A)"
+                          value={cardForm.cardData.location?.letter || ''}
+                          onChange={(e) => setCardForm(prev => ({
+                            ...prev,
+                            cardData: {
+                              ...prev.cardData,
+                              location: {
+                                ...(prev.cardData.location || { letter: '', number: '', colour: '' }),
+                                letter: e.target.value.toUpperCase()
+                              }
+                            }
+                          }))}
+                          className="w-full bg-black border border-white/10 rounded-2xl p-3 text-white text-center font-sans font-bold placeholder-gray-600 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <input
+                          type="text"
+                          required
+                          maxLength={5}
+                          placeholder="No. (e.g. 12)"
+                          value={cardForm.cardData.location?.number || ''}
+                          onChange={(e) => setCardForm(prev => ({
+                            ...prev,
+                            cardData: {
+                              ...prev.cardData,
+                              location: {
+                                ...(prev.cardData.location || { letter: '', number: '', colour: '' }),
+                                number: e.target.value
+                              }
+                            }
+                          }))}
+                          className="w-full bg-black border border-white/10 rounded-2xl p-3 text-white text-center font-sans font-bold placeholder-gray-600 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <input
+                          type="text"
+                          required
+                          maxLength={15}
+                          placeholder="Colour (e.g. RED)"
+                          value={cardForm.cardData.location?.colour || ''}
+                          onChange={(e) => setCardForm(prev => ({
+                            ...prev,
+                            cardData: {
+                              ...prev.cardData,
+                              location: {
+                                ...(prev.cardData.location || { letter: '', number: '', colour: '' }),
+                                colour: e.target.value.toUpperCase()
+                              }
+                            }
+                          }))}
+                          className="w-full bg-black border border-white/10 rounded-2xl p-3 text-white text-center font-sans font-bold placeholder-gray-600 text-sm"
+                        />
+                      </div>
+                    </div>
+                    
+                    {/* Location Format Customization preview */}
+                    <div className="mt-3 flex items-center justify-between bg-black/40 p-3 rounded-2xl border border-white/5">
+                      <span className="text-[9px] font-black uppercase text-gray-500 tracking-wider">Display Format Style</span>
+                      <select
+                        value={cardForm.cardData.locationFormat || 'A12 RED'}
+                        onChange={(e) => setCardForm(prev => ({
+                          ...prev,
+                          cardData: { ...prev.cardData, locationFormat: e.target.value }
+                        }))}
+                        className="bg-black text-[10px] text-white border border-white/10 rounded-xl px-3 py-1.5 outline-none cursor-pointer font-sans"
+                      >
+                        <option value="A12 RED">Standard (e.g., A12 RED)</option>
+                        <option value="A-12 RED">Hyphenated (e.g., A-12 RED)</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Column 2: Quantities, Location & Image */}
+                <div className="space-y-4">
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className="text-[10px] font-black uppercase text-gray-400 tracking-wider flex items-center gap-1">
+                        Order Qty <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. 100"
+                        value={cardForm.cardData.orderQuantity || ''}
+                        onChange={(e) => setCardForm(prev => ({
+                          ...prev,
+                          cardData: { ...prev.cardData, orderQuantity: e.target.value }
+                        }))}
+                        className="w-full bg-black border border-white/10 rounded-2xl p-4 text-white font-sans mt-1"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-black uppercase text-gray-400 tracking-wider flex items-center gap-1">
+                        Bin Qty <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. 2 Bins"
+                        value={cardForm.cardData.binQuantity || ''}
+                        onChange={(e) => setCardForm(prev => ({
+                          ...prev,
+                          cardData: { ...prev.cardData, binQuantity: e.target.value }
+                        }))}
+                        className="w-full bg-black border border-white/10 rounded-2xl p-4 text-white font-sans mt-1"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-black uppercase text-gray-400 tracking-wider flex items-center gap-1">
+                        Deliv. Time <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. NEXT DAY"
+                        value={cardForm.cardData.deliveryTime || ''}
+                        onChange={(e) => setCardForm(prev => ({
+                          ...prev,
+                          cardData: { ...prev.cardData, deliveryTime: e.target.value }
+                        }))}
+                        className="w-full bg-black border border-white/10 rounded-2xl p-4 text-white font-sans mt-1"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-black uppercase text-gray-400 tracking-wider">Product Image (Optional)</label>
+                    <div 
+                      className={`mt-1 border-2 border-dashed rounded-3xl p-6 transition-all text-center flex flex-col items-center justify-center cursor-pointer ${
+                        imageDragActive 
+                          ? 'border-purple-500 bg-purple-500/10' 
+                          : 'border-white/10 bg-black/40 hover:bg-black/60'
+                      }`}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        setImageDragActive(true);
+                      }}
+                      onDragLeave={() => {
+                        setImageDragActive(false);
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        setImageDragActive(false);
+                        const file = e.dataTransfer.files?.[0];
+                        if (file) {
+                          const reader = new FileReader();
+                          reader.onloadend = () => {
+                            setCardForm(prev => ({
+                              ...prev,
+                              cardData: { ...prev.cardData, imageUrl: reader.result as string }
+                            }));
+                          };
+                          reader.readAsDataURL(file);
+                        }
+                      }}
+                    >
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        id="image-file-input"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            const reader = new FileReader();
+                            reader.onloadend = () => {
+                              setCardForm(prev => ({
+                                ...prev,
+                                cardData: { ...prev.cardData, imageUrl: reader.result as string }
+                              }));
+                            };
+                            reader.readAsDataURL(file);
+                          }
+                        }}
+                      />
+                      
+                      {cardForm.cardData.imageUrl ? (
+                        <div className="flex flex-col items-center gap-3">
+                          <div className="w-24 h-24 bg-black border border-white/10 rounded-2xl overflow-hidden flex items-center justify-center relative shadow-inner">
+                            <img src={cardForm.cardData.imageUrl} className="w-full h-full object-contain" alt="Upload Preview" />
+                          </div>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setCardForm(prev => ({ ...prev, cardData: { ...prev.cardData, imageUrl: '' } }));
+                            }}
+                            className="text-xs font-black uppercase tracking-wider text-red-500 hover:text-red-400 transition-colors"
+                          >
+                            Remove Image
+                          </button>
+                        </div>
+                      ) : (
+                        <label htmlFor="image-file-input" className="cursor-pointer block w-full">
+                          <Icon name="camera" size={32} className="text-gray-500 mx-auto mb-2" />
+                          <p className="text-xs font-bold text-gray-300">Drag & Drop Image Here</p>
+                          <p className="text-[10px] text-gray-500 mt-1">or Click to select (JPG, JPEG, PNG, WEBP)</p>
+                        </label>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-black uppercase text-gray-400 tracking-wider">Legacy / Additional Notes</label>
+                    <textarea
+                      placeholder="Enter detailed notes or ordering instructions..."
+                      rows={2}
+                      value={cardForm.cardData.notes || ''}
+                      onChange={(e) => setCardForm(prev => ({
+                        ...prev,
+                        cardData: { ...prev.cardData, notes: e.target.value }
+                      }))}
+                      className="w-full bg-black border border-white/10 rounded-2xl p-4 text-white font-sans mt-1 resize-none text-sm"
+                    />
+                  </div>
+                </div>
+
+              </div>
+
+              <div className="flex gap-4 pt-4 border-t border-white/5">
+                <button
+                  type="button"
+                  onClick={() => setShowCardEditor(false)}
+                  className="flex-1 py-4 bg-white/5 hover:bg-white/10 rounded-2xl font-black uppercase text-[10px] tracking-widest text-white transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-4 bg-purple-600 hover:bg-purple-500 rounded-2xl font-black uppercase text-[10px] tracking-widest text-white transition-colors shadow-lg shadow-purple-500/20"
+                >
+                  {kanbanEditingId ? 'Save Changes' : 'Create Kanban Card'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
       {/* POPUP: REMOVE EMPLOYER ACCORDING TO SYSTEM BYPASS RULES */}
@@ -1817,6 +2605,172 @@ export default function App() {
                   </tbody>
                 </table>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* POPUP: SCAN OR TARGET PREVIEW KANBAN RECORD CARD VIEWER */}
+      {showScannedCardModal && scannedKanbanCard && (
+        <div className="fixed inset-0 z-[1100] bg-black/95 backdrop-blur-2xl flex items-center justify-center p-4 md:p-8 animate-in fade-in font-sans">
+          <div className="bg-[#151515] w-full max-w-4xl rounded-[3rem] border border-white/10 shadow-2xl overflow-hidden flex flex-col max-h-[95vh]">
+            {/* Header */}
+            <div className="p-6 md:p-8 border-b border-white/5 bg-black/20 flex justify-between items-center text-white font-sans">
+              <div>
+                <div className="flex items-center gap-3">
+                  <span className="text-[10px] font-black tracking-widest uppercase bg-purple-600/20 text-purple-400 px-3 py-1 border border-purple-500/20 rounded-full font-mono">
+                    {scannedKanbanCard.cardData?.kanbanId || scannedKanbanCard.cardData?.partNumber || 'KAN-000001'}
+                  </span>
+                  <span className="text-[10px] font-black tracking-widest uppercase bg-blue-600/20 text-blue-400 px-3 py-1 border border-blue-500/20 rounded-full">
+                    MASTER RECORD
+                  </span>
+                </div>
+                <h2 className="text-xl md:text-2xl font-black uppercase tracking-tight text-white mt-2 font-sans">
+                  {scannedKanbanCard.cardData?.productDescription || scannedKanbanCard.cardData?.partDescription || 'Kanban Part'}
+                </h2>
+                <p className="text-xs text-gray-400 font-sans mt-1">TS Joinery Automated Replenishment & Stock Control</p>
+              </div>
+              <button 
+                onClick={() => {
+                  setShowScannedCardModal(false);
+                  setScannedKanbanCard(null);
+                  if (window.location.pathname.includes('/kanban/')) {
+                    window.history.pushState({}, '', '/');
+                  }
+                }} 
+                className="p-3 bg-white/5 hover:bg-white/10 rounded-full text-gray-400 hover:text-white transition-colors"
+              >
+                <Icon name="x" size={24}/>
+              </button>
+            </div>
+
+            {/* Content Split Body */}
+            <div className="flex-1 overflow-y-auto p-6 md:p-8 custom-scrollbar grid grid-cols-1 md:grid-cols-2 gap-8">
+              {/* Left Column: Visual Assets */}
+              <div className="space-y-6 flex flex-col">
+                {/* Product Image Panel */}
+                <div className="flex-1 min-h-[220px] bg-black/40 border border-white/5 rounded-3xl p-6 flex flex-col items-center justify-center relative group">
+                  {(scannedKanbanCard.cardData?.imageUrl || scannedKanbanCard.cardData?.productImage) ? (
+                    <img 
+                      src={scannedKanbanCard.cardData?.imageUrl || scannedKanbanCard.cardData?.productImage} 
+                      className="w-full h-full max-h-[240px] object-contain rounded-2xl" 
+                      alt="Product Master" 
+                    />
+                  ) : (
+                    <div className="text-center space-y-2">
+                      <Icon name="camera" size={48} className="text-gray-600 mx-auto" />
+                      <p className="text-xs text-gray-500 font-bold font-sans">No product photo uploaded</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Secure Target QR Code Scan Info */}
+                <div className="bg-black/20 border border-white/5 rounded-3xl p-5 flex items-center gap-5">
+                  <div className="bg-white p-2.5 rounded-2xl w-24 h-24 flex items-center justify-center shadow-md">
+                    <img 
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(`${window.location.origin}/kanban/${scannedKanbanCard.cardData?.kanbanId || 'KAN-000001'}`)}`} 
+                      className="w-full h-full object-contain" 
+                      alt="Kanban QR" 
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-xs font-black uppercase tracking-wider text-gray-400">Scan Code Target</p>
+                    <p className="text-[10px] text-gray-500 font-mono mt-1 break-all select-all">
+                      {`${window.location.origin}/kanban/${scannedKanbanCard.cardData?.kanbanId || 'KAN-000001'}`}
+                    </p>
+                    <p className="text-[9px] font-bold text-purple-400 mt-2 flex items-center gap-1 font-sans">
+                      <Icon name="link" size={10} /> Pointed directly to this cloud PWA record
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Right Column: Record Specifications */}
+              <div className="space-y-6">
+                <div>
+                  <h3 className="text-xs font-black uppercase tracking-widest text-purple-400 mb-3">Specification Matrix</h3>
+                  <div className="bg-black/30 border border-white/5 rounded-3xl divide-y divide-white/5 overflow-hidden text-sm">
+                    <div className="grid grid-cols-2 p-4">
+                      <span className="font-bold text-gray-400">Supplier Name</span>
+                      <span className="text-white font-bold text-right">{scannedKanbanCard.cardData?.supplierName || scannedKanbanCard.cardData?.supplier || 'N/A'}</span>
+                    </div>
+                    <div className="grid grid-cols-2 p-4">
+                      <span className="font-bold text-gray-400">Supplier Part Number</span>
+                      <span className="text-white font-mono font-bold text-right">{scannedKanbanCard.cardData?.supplierPartNumber || 'N/A'}</span>
+                    </div>
+                    <div className="grid grid-cols-2 p-4">
+                      <span className="font-bold text-gray-400">Standard Order Qty</span>
+                      <span className="text-white font-bold text-right">{scannedKanbanCard.cardData?.orderQuantity || 'N/A'}</span>
+                    </div>
+                    <div className="grid grid-cols-2 p-4">
+                      <span className="font-bold text-gray-400">Bin Quantity (Capacity)</span>
+                      <span className="text-purple-400 font-black text-right">{scannedKanbanCard.cardData?.binQuantity || '1 Bin'}</span>
+                    </div>
+                    <div className="grid grid-cols-2 p-4">
+                      <span className="font-bold text-gray-400">Lead Delivery Time</span>
+                      <span className="text-white font-bold text-right">{scannedKanbanCard.cardData?.deliveryTime || 'N/A'}</span>
+                    </div>
+                    <div className="grid grid-cols-2 p-4">
+                      <span className="font-bold text-gray-400">Storage Location</span>
+                      <span className="text-emerald-400 font-bold text-right">
+                        {(() => {
+                          const l = scannedKanbanCard.cardData?.location;
+                          if (l && typeof l === 'object') {
+                            return `${l.letter || ''}${l.number || ''} ${l.colour || ''}`.trim();
+                          }
+                          return scannedKanbanCard.cardData?.locationRaw || 'N/A';
+                        })()}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <h3 className="text-xs font-black uppercase tracking-widest text-purple-400 mb-3">System Audit Metadata</h3>
+                  <div className="bg-black/30 border border-white/5 rounded-3xl p-4 space-y-3 text-xs">
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">Created By</span>
+                      <span className="text-gray-300 font-bold">{scannedKanbanCard.cardData?.createdBy || 'System Seed'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">Creation Date</span>
+                      <span className="text-gray-300 font-mono">
+                        {scannedKanbanCard.cardData?.createdDate ? new Date(scannedKanbanCard.cardData.createdDate).toLocaleString('en-ZA') : 'N/A'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">Last Modified</span>
+                      <span className="text-gray-300 font-mono">
+                        {scannedKanbanCard.cardData?.lastModified ? new Date(scannedKanbanCard.cardData.lastModified).toLocaleString('en-ZA') : 'N/A'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Bottom Actions Frame */}
+            <div className="p-6 md:p-8 bg-black/40 border-t border-white/5 flex flex-col md:flex-row gap-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowScannedCardModal(false);
+                  setScannedKanbanCard(null);
+                  if (window.location.pathname.includes('/kanban/')) {
+                    window.history.pushState({}, '', '/');
+                  }
+                }}
+                className="flex-1 py-4 bg-white/5 hover:bg-white/10 rounded-2xl font-black uppercase text-[10px] tracking-widest text-white transition-all text-center"
+              >
+                Close Record
+              </button>
+              <button
+                type="button"
+                onClick={() => handleEmailOrder(scannedKanbanCard)}
+                className="flex-1 py-4 bg-purple-600 hover:bg-purple-500 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest transition-all shadow-lg shadow-purple-500/20 flex items-center justify-center gap-2"
+              >
+                <Icon name="mail" size={14} /> Draft Reorder Email
+              </button>
             </div>
           </div>
         </div>

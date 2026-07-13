@@ -87,7 +87,10 @@ export interface KanbanFieldDefinition {
 export interface KanbanLayoutSection {
   width: number; // reference width in mm
   height: number; // reference height in mm
+  x?: number; // X position on the page in mm
+  y?: number; // Y position on the page in mm
   fields: KanbanFieldDefinition[];
+  layoutType?: 'freeform' | 'structured_kanban' | 'inventory_details' | 'qr_barcode' | 'status_badge';
   style?: {
     text: string;
     fontSize: number;
@@ -120,16 +123,26 @@ export interface KanbanTemplate {
   };
 }
 
+export interface KanbanLocation {
+  letter: string;
+  number: string;
+  colour: string;
+}
+
 export interface KanbanCardData {
+  productDescription?: string;
+  imageUrl?: string;
+  supplierPartNumber?: string;
+  supplierName?: string;
+  orderQuantity?: string;
+  deliveryTime?: string;
+  location?: KanbanLocation;
+  // Keep previous fields for fallback/safety
   productImage?: string;
   partDescription?: string;
   partNumber?: string;
-  supplierPartNumber?: string;
   supplier?: string;
-  orderQuantity?: string;
   reorderPoint?: string;
-  deliveryTime?: string;
-  location?: string;
   contactDetails?: string;
   reorderInfo?: string;
   notes?: string;

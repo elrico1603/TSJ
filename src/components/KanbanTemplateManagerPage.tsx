@@ -164,39 +164,55 @@ export const KanbanTemplateManagerPage: React.FC<KanbanTemplateManagerPageProps>
 
   return (
     <div className="h-full flex animate-in fade-in duration-500 font-sans">
-      <aside className="w-96 bg-black/30 p-6 flex flex-col gap-6 border-r border-white/10 shrink-0 font-sans">
-        <div className="flex justify-between items-center">
-          <h2 className="text-xl font-black uppercase tracking-wider text-white font-sans">Templates</h2>
-          <div className="flex gap-2">
-            <button onClick={handleDuplicateTemplate} disabled={!selectedTemplateId} className="px-3 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-xs font-bold uppercase text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed">Duplicate</button>
-            <button onClick={handleNewTemplate} className="px-4 py-2 bg-[#ff8c00] hover:bg-[#e07b00] rounded-lg text-xs font-black uppercase tracking-widest text-white transition-colors">
-              New
-            </button>
+      {!editingTemplate && (
+        <aside className="w-96 bg-black/30 p-6 flex flex-col gap-6 border-r border-white/10 shrink-0 font-sans animate-in slide-in-from-left duration-300">
+          <div className="flex justify-between items-center">
+            <h2 className="text-xl font-black uppercase tracking-wider text-white font-sans">Templates</h2>
+            <div className="flex gap-2">
+              <button 
+                onClick={handleDuplicateTemplate} 
+                disabled={!selectedTemplateId || selectedTemplateId === 'sample-template-local'} 
+                className="px-3 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-xs font-bold uppercase text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Duplicate
+              </button>
+              <button onClick={handleNewTemplate} className="px-4 py-2 bg-[#ff8c00] hover:bg-[#e07b00] rounded-lg text-xs font-black uppercase tracking-widest text-white transition-colors">
+                New
+              </button>
+            </div>
           </div>
-        </div>
-        <div className="flex-1 overflow-y-auto custom-scrollbar -mr-3 pr-3 space-y-3">
-          {kanbanTemplates.map(t => (
-            <div key={t.id} onClick={() => handleSelectTemplate(t)} className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${selectedTemplateId === t.id ? 'bg-purple-500/10 border-purple-500' : 'bg-black/40 border-transparent hover:border-white/20'}`}>
-              <h3 className="font-bold text-white mb-1 font-sans">{t.templateName}</h3>
-              <p className="text-xs text-gray-400 font-sans">{t.dimensions.width}mm x {t.dimensions.height}mm</p>
-            </div>
-          ))}
-          {kanbanTemplates.length === 0 && (
-            <div className="text-center py-20 font-sans">
-              <Icon name="layout-template" size={48} className="text-gray-700 mx-auto" />
-              <p className="text-xs text-gray-600 font-bold uppercase mt-4">No templates found.</p>
-              <p className="text-xs text-gray-600 mt-1">Create a new template to begin.</p>
-            </div>
+          <div className="flex-1 overflow-y-auto custom-scrollbar -mr-3 pr-3 space-y-3">
+            {kanbanTemplates.map(t => (
+              <div key={t.id} onClick={() => handleSelectTemplate(t)} className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${selectedTemplateId === t.id ? 'bg-purple-500/10 border-purple-500' : 'bg-black/40 border-transparent hover:border-white/20'}`}>
+                <h3 className="font-bold text-white mb-1 font-sans">{t.templateName}</h3>
+                <p className="text-xs text-gray-400 font-sans">{t.dimensions.width}mm x {t.dimensions.height}mm</p>
+              </div>
+            ))}
+            {kanbanTemplates.length === 0 && (
+              <div className="text-center py-20 font-sans">
+                <Icon name="layout-template" size={48} className="text-gray-700 mx-auto" />
+                <p className="text-xs text-gray-600 font-bold uppercase mt-4">No templates found.</p>
+                <p className="text-xs text-gray-600 mt-1">Create a new template to begin.</p>
+              </div>
+            )}
+          </div>
+          {selectedTemplateId && selectedTemplateId !== 'sample-template-local' && (
+            <button onClick={handleDeleteTemplate} className="w-full py-3 bg-red-600/10 hover:bg-red-600/20 border border-red-500/20 rounded-lg text-xs font-black uppercase text-red-500 font-sans">Delete Selected</button>
           )}
-        </div>
-        {selectedTemplateId && selectedTemplateId !== 'sample-template-local' && (
-          <button onClick={handleDeleteTemplate} className="w-full py-3 bg-red-600/10 hover:bg-red-600/20 border border-red-500/20 rounded-lg text-xs font-black uppercase text-red-500 font-sans">Delete Selected</button>
-        )}
-      </aside>
+        </aside>
+      )}
       <div className="flex-1 flex overflow-hidden">
         {editingTemplate ? (
           <React.Fragment>
-            <CardPreview template={editingTemplate} setTemplate={setEditingTemplate} activeField={activeField} setActiveField={setActiveField} sampleImage={sampleImage} />
+            <CardPreview 
+              template={editingTemplate} 
+              setTemplate={setEditingTemplate} 
+              activeField={activeField} 
+              setActiveField={setActiveField} 
+              sampleImage={sampleImage}
+              activeTab={editorTab}
+              setActiveTab={setEditorTab}
+            />
             <TemplatePropertiesPanel 
               template={editingTemplate} setTemplate={setEditingTemplate} 
               activeTab={editorTab} setActiveTab={setEditorTab} 
@@ -208,7 +224,15 @@ export const KanbanTemplateManagerPage: React.FC<KanbanTemplateManagerPageProps>
           </React.Fragment>
         ) : (
           <div className="flex-1 flex items-center justify-center bg-black/20 font-sans">
-            <p className="text-gray-500 font-black uppercase tracking-widest text-center">Select a template to edit or create a new one.</p>
+            <div className="text-center space-y-4">
+              <div className="p-4 bg-purple-500/10 rounded-full w-16 h-16 flex items-center justify-center mx-auto border border-purple-500/20">
+                <Icon name="layout-template" size={32} className="text-purple-400" />
+              </div>
+              <div className="space-y-1">
+                <p className="text-gray-400 font-black uppercase tracking-widest text-sm">Kanban Template Workspace</p>
+                <p className="text-xs text-gray-500 max-w-sm font-sans">Select an existing template from the list on the left, or click <strong className="text-orange-400">"New"</strong> to design or customize a new card layout.</p>
+              </div>
+            </div>
           </div>
         )}
       </div>

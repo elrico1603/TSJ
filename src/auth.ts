@@ -5,7 +5,6 @@ export const USER_ROLES = ['Artisan', 'Supervisor', 'HR', 'Admin'] as const;
 export type UserRole = typeof USER_ROLES[number];
 
 export const SECURITY = {
-  ADMIN_PIN: '2026',
   SUPER_USER_PIN: 'Elrico1603!!'
 };
 
@@ -27,6 +26,7 @@ export interface AppUser {
   isApproved: boolean;
   status: string;
   createdAt: string;
+  permissions?: Record<string, boolean>;
 }
 
 export const authManager = {
