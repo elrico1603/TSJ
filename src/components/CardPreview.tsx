@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Rnd } from 'react-rnd';
 import { Icon } from './Icon';
 import { KanbanTemplate, KanbanCardData } from '../types';
+import { getKanbanMailtoQRCodeUrl } from '../services/kanbanService';
+import { QRCodeRenderer } from './QRCodeRenderer';
 
 interface StructuredSection1LayoutProps {
   cardData: KanbanCardData;
@@ -146,7 +148,6 @@ interface QRBarcodeSectionLayoutProps {
 export const QRBarcodeSectionLayout: React.FC<QRBarcodeSectionLayoutProps> = ({ cardData }) => {
   const productDesc = cardData?.productDescription || cardData?.partDescription || 'LAMINATING POUCH';
   const kId = cardData?.kanbanId || 'KAN-000001';
-  const qrUrl = `${window.location.origin}/kanban/${kId}`;
 
   let locStr = 'N/A';
   if (cardData?.location && typeof cardData.location === 'object') {
@@ -156,14 +157,31 @@ export const QRBarcodeSectionLayout: React.FC<QRBarcodeSectionLayoutProps> = ({ 
     locStr = cardData?.locationRaw || (typeof cardData?.location === 'string' ? cardData.location : 'N/A');
   }
 
+  const supPartNo = cardData?.supplierPartNumber || cardData?.partNumber || '';
+  const supName = cardData?.supplierName || cardData?.supplier || '';
+  const ordQty = cardData?.orderQuantity || '';
+  const binQty = cardData?.binQuantity || '1 Bin';
+  const delTime = cardData?.deliveryTime || '';
+
+  const qrCodeUrl = getKanbanMailtoQRCodeUrl({
+    internalProductNumber: kId,
+    productName: productDesc,
+    supplierPartNumber: supPartNo,
+    supplier: supName,
+    orderQuantity: ordQty,
+    binQuantity: binQty,
+    location: locStr,
+    deliveryTime: delTime,
+  });
+
   return (
     <div className="w-full h-full grid grid-cols-[35%_65%] text-black bg-white overflow-hidden" style={{ border: '1px solid black' }}>
-      {/* Left side: QR Code containing link to Kanban Record */}
+      {/* Left side: QR Code containing mailto link */}
       <div className="flex flex-col items-center justify-center p-1.5 bg-white border-r border-black font-sans">
-        <img 
-          src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(qrUrl)}`} 
-          className="w-12 h-12 object-contain animate-fade-in" 
-          alt="QR Code Link"
+        <QRCodeRenderer
+          text={qrCodeUrl}
+          size={48}
+          className="flex items-center justify-center animate-fade-in"
         />
         <span className="text-[6px] font-mono mt-1 tracking-wider leading-none text-center truncate w-full">{kId}</span>
       </div>

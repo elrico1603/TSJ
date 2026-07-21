@@ -1,9 +1,11 @@
 import React from 'react';
 import { KanbanCardMaster } from '../services/kanbanService';
-import { QRCodeWidget } from './QRCodeWidget';
+import { ProductImageWidget } from './ProductImageWidget';
+import { MasterInformation as MasterInfoType } from '../types';
 
 interface WarehouseDisplayProps {
-  cardData: KanbanCardMaster;
+  cardData?: KanbanCardMaster;
+  masterInfo?: MasterInfoType;
   borderWidth?: number; // mm
   borderColor?: string;
   borderStyle?: 'solid' | 'dashed' | 'none';
@@ -11,83 +13,131 @@ interface WarehouseDisplayProps {
   cornerRadius?: number; // mm
   padding?: number; // mm
   fontSizeScale?: number;
+  width?: number; // mm
+  height?: number; // mm
 }
 
+const getColourBg = (colour: string) => {
+  const norm = (colour || 'GREEN').toUpperCase().trim();
+  if (norm === 'RED') return '#ef4444';
+  if (norm === 'BLUE') return '#2563eb';
+  if (norm === 'GREEN') return '#10b981';
+  if (norm === 'YELLOW') return '#facc15';
+  if (norm === 'ORANGE') return '#f97316';
+  if (norm === 'PURPLE') return '#8b5cf6';
+  return '#4b5563';
+};
+
+const getColourText = (colour: string) => {
+  const norm = (colour || 'GREEN').toUpperCase().trim();
+  if (norm === 'YELLOW') return '#000000';
+  return '#ffffff';
+};
+
 /**
- * WarehouseDisplay displays shelf bin capacity values and a quick-scan QR code.
+ * WarehouseDisplay (Section 4) displaying Product Name at the top,
+ * Product Image in the middle, and Location Badge at the bottom (NO QR code!).
+ * Fully responsive and layout-guaranteed across all container heights and widths.
  */
 export const WarehouseDisplay: React.FC<WarehouseDisplayProps> = ({
   cardData,
+  masterInfo,
   borderWidth = 0.5,
   borderColor = '#000000',
   borderStyle = 'solid',
   backgroundColor = '#ffffff',
   cornerRadius = 2,
-  padding = 4,
-  fontSizeScale = 1.0
+  padding = 3,
+  fontSizeScale = 1.0,
+  width,
+  height
 }) => {
+  // Extract read-only properties directly from Master Information (single source of truth)
+  // fall back to cardData representation if masterInfo is not provided (e.g. for card print templates)
+  const pName = masterInfo ? masterInfo.productName : (cardData?.productDescription || '');
+  const pImage = masterInfo ? masterInfo.productImage : (cardData?.imageUrl || '');
+  const pLocation = masterInfo ? masterInfo.location : (`${cardData?.location?.letter || ''}${cardData?.location?.number || ''}`.trim() || '');
+  const pLocationColour = masterInfo ? masterInfo.locationColour : (cardData?.location?.colour || 'GREEN');
+
+  // Responsive scaling based on width & height (reference height is 35mm, width is 180mm)
+  const wScale = width ? (width / 180) : 1.0;
+  const hScale = height ? (height / 35) : 1.0;
+  const scale = Math.min(wScale, hScale) * (fontSizeScale || 1.0);
+
+  // Responsive bound font sizes to prevent overlapping
+  const titleFontSize = Math.max(6.5, Math.min(18, 10.5 * scale));
+  const subTitleFontSize = Math.max(5, Math.min(10, 6.5 * scale));
+  const badgeFontSize = Math.max(8, Math.min(18, 11 * scale));
+
+  // Cap dynamic padding so it doesn't take too much height in narrow boxes
+  const finalPadding = height ? Math.max(1, Math.min(padding, height * 0.12)) : padding;
+
   const containerStyle: React.CSSProperties = {
     border: borderStyle !== 'none' ? `${borderWidth}mm ${borderStyle} ${borderColor}` : 'none',
     backgroundColor: backgroundColor,
     borderRadius: `${cornerRadius}mm`,
-    padding: `${padding}mm`,
+    padding: `${finalPadding}mm`,
     width: '100%',
     height: '100%',
     boxSizing: 'border-box'
   };
 
-  const textStyle: React.CSSProperties = {
-    color: '#000000',
-    fontFamily: 'Inter, sans-serif'
-  };
-
   return (
     <div 
       style={containerStyle} 
-      className="grid grid-cols-[68%_32%] overflow-hidden text-black select-none font-sans gap-2"
+      className="flex flex-col h-full w-full justify-between overflow-hidden text-black select-none font-sans"
     >
-      {/* Left Column: Product Name & Capacity Metrics */}
-      <div className="flex flex-col justify-between py-1 h-full font-sans">
-        <div>
-          <span className="text-[8px] font-extrabold uppercase tracking-widest text-neutral-400 leading-none">BAY EDGE DISPLAY</span>
-          <h4 className="font-black text-neutral-900 leading-tight uppercase mt-1 truncate" style={{ ...textStyle, fontSize: `${12 * fontSizeScale}px` }}>
-            {cardData.productDescription}
-          </h4>
-        </div>
-
-        {/* Capacity / Bin count */}
-        <div className="bg-neutral-50 border border-neutral-200/60 p-2 rounded-xl mt-1.5 font-sans">
-          <span className="text-[7px] font-extrabold text-neutral-400 uppercase tracking-widest leading-none">STOCK CAPACITY</span>
-          <div className="flex items-baseline gap-1 mt-0.5 font-sans">
-            <span className="text-sm font-black text-purple-700 leading-none">
-              {cardData.binQuantity || '1 Bin'}
-            </span>
-            <span className="text-[8px] font-extrabold text-neutral-500 uppercase tracking-tight">
-              Standard Capacity
-            </span>
-          </div>
-        </div>
-
-        {/* Mock Stock barcode */}
-        <div className="flex flex-col items-start mt-1 font-sans">
-          <div className="w-full h-4 flex items-end gap-[1px]">
-            {[1, 3, 2, 1, 2, 4, 1, 3, 1, 2, 1, 3, 2, 4, 1].map((width, i) => (
-              <div key={i} className="bg-neutral-800 h-full" style={{ width: `${width}px` }} />
-            ))}
-          </div>
-          <span className="text-[7px] font-mono font-bold tracking-widest text-neutral-400 uppercase mt-0.5 leading-none">
-            {cardData.kanbanId}
-          </span>
+      {/* 1. At the very top: Display the Product Name (Read-only) */}
+      <div 
+        className="w-full flex flex-col border-b border-black/10 pb-0.5 shrink-0"
+        style={{ marginBottom: `${Math.max(1.5, 3.5 * scale)}px` }}
+      >
+        <span className="text-neutral-400 font-extrabold uppercase tracking-widest leading-none mb-0.5" style={{ fontSize: `${subTitleFontSize}px` }}>
+          PRODUCT NAME
+        </span>
+        <div 
+          className="font-extrabold text-neutral-900 uppercase leading-tight w-full break-words line-clamp-2"
+          style={{ 
+            fontSize: `${titleFontSize}px`,
+            fontFamily: 'Inter, sans-serif'
+          }}
+        >
+          {pName || 'NO PRODUCT NAME'}
         </div>
       </div>
 
-      {/* Right Column: Scan code */}
-      <div className="flex items-center justify-center h-full">
-        <QRCodeWidget 
-          kanbanId={cardData.kanbanId} 
-          size={55} 
-          className="border border-neutral-200 p-1 rounded-lg"
-        />
+      {/* 2. Middle area: Split Product Image (left) and empty space (right) */}
+      <div className="flex flex-row items-stretch justify-between w-full flex-1 min-h-0 gap-2 font-sans overflow-hidden py-1">
+        {/* Left side: Product Image */}
+        <div className="w-[35%] h-full flex items-center justify-center min-w-0 overflow-hidden">
+          <ProductImageWidget 
+            imageUrl={pImage} 
+            altText={pName}
+            className="max-h-full max-w-full object-contain bg-white border border-neutral-200 rounded"
+          />
+        </div>
+
+        {/* Right side: (empty for now) */}
+        <div className="w-[60%] h-full flex flex-col justify-center items-center min-w-0 overflow-hidden" />
+      </div>
+
+      {/* 3. Bottom of Section: Location display with the selected Location Colour (Read-only) */}
+      <div 
+        className="w-full text-center font-black text-white tracking-widest uppercase transition-all shrink-0"
+        style={{ 
+          backgroundColor: getColourBg(pLocationColour),
+          color: getColourText(pLocationColour),
+          fontSize: `${badgeFontSize}px`,
+          paddingTop: `${Math.max(2, 4.5 * scale)}px`,
+          paddingBottom: `${Math.max(2, 4.5 * scale)}px`,
+          paddingLeft: `${Math.max(4, 10 * scale)}px`,
+          paddingRight: `${Math.max(4, 10 * scale)}px`,
+          borderRadius: `${Math.max(2, 6 * scale)}px`,
+          lineHeight: '1.1',
+          marginTop: `${Math.max(1.5, 3.5 * scale)}px`
+        }}
+      >
+        {pLocation || 'NO LOCATION'}
       </div>
     </div>
   );

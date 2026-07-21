@@ -1,5 +1,4 @@
 import { db, APP_ID_PATH } from './firebase';
-import { getKanbanQRCodeImageUrl } from './qrService';
 
 export type KanbanStatus = 'ACTIVE' | 'INACTIVE' | 'DISCONTINUED';
 
@@ -79,14 +78,101 @@ export async function getKanbanCard(id: string): Promise<KanbanCardMaster | null
 }
 
 /**
+ * Generates the raw mailto link as requested.
+ */
+export function getKanbanMailtoLink(info: {
+  internalProductNumber: string;
+  productName: string;
+  supplierPartNumber: string;
+  supplier: string;
+  orderQuantity: string;
+  binQuantity: string;
+  location: string;
+  deliveryTime: string;
+}): string {
+  const email = 'janah@tsjoinery.co.za';
+  const subject = 'KANBAN STOCK REQUEST';
+  const body = `Hello Janah,
+
+Please order the following stock.
+
+-------------------------------------
+
+Template ID:
+${info.internalProductNumber || ''}
+
+Product:
+${info.productName || ''}
+
+Supplier Number:
+${info.supplierPartNumber || ''}
+
+Supplier:
+${info.supplier || ''}
+
+Recommended Order:
+${info.orderQuantity || ''}
+
+Bin Quantity:
+${info.binQuantity || ''}
+
+Location:
+${info.location || ''}
+
+Delivery:
+${info.deliveryTime || ''}
+
+-------------------------------------
+
+Requested By:
+
+____________________
+
+Comments:
+
+____________________
+
+Thank you.`;
+
+  return `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
+
+/**
+ * Generates the QR Code URL containing the mailto link as requested.
+ */
+export function getKanbanMailtoQRCodeUrl(info: {
+  internalProductNumber: string;
+  productName: string;
+  supplierPartNumber: string;
+  supplier: string;
+  orderQuantity: string;
+  binQuantity: string;
+  location: string;
+  deliveryTime: string;
+}, size = 150): string {
+  return getKanbanMailtoLink(info);
+}
+
+/**
  * Saves (creates or updates) a Kanban card.
  * Integrates perfectly with legacy fields as a wrapper.
  */
 export async function saveKanbanCard(card: KanbanCardMaster): Promise<string> {
   const id = card.id;
+  const locStr = `${card.location?.letter || ''}${card.location?.number || ''}`.trim();
   
-  // Fill missing QR Code URL if empty
-  const qrCodeUrl = card.qrCodeUrl || getKanbanQRCodeImageUrl(card.kanbanId);
+  // Fill missing QR Code URL or regenerate based on mailto specs
+  const qrCodeUrl = getKanbanMailtoQRCodeUrl({
+    internalProductNumber: card.kanbanId || '',
+    productName: card.productDescription || '',
+    supplierPartNumber: card.supplierPartNumber || '',
+    supplier: card.supplierName || '',
+    orderQuantity: card.orderQuantity || '',
+    binQuantity: card.binQuantity || '1 Bin',
+    location: locStr,
+    deliveryTime: card.deliveryTime || 'N/A'
+  });
+
   const cardWithQR = { ...card, qrCodeUrl };
 
   // For compatibility with the legacy structure (which wraps fields in cardData and templateId directly)
@@ -163,6 +249,18 @@ export function mapToKanbanCardMaster(id: string, data: any): KanbanCardMaster {
   }
 
   const kanbanId = cardData.kanbanId || data.id || id;
+  const locStr = `${location.letter || ''}${location.number || ''}`.trim();
+
+  const qrCodeUrl = getKanbanMailtoQRCodeUrl({
+    internalProductNumber: kanbanId,
+    productName: cardData.productDescription || cardData.partDescription || 'No description',
+    supplierPartNumber: cardData.supplierPartNumber || cardData.partNumber || '',
+    supplier: cardData.supplierName || cardData.supplier || '',
+    orderQuantity: cardData.orderQuantity || '',
+    binQuantity: cardData.binQuantity || '1 Bin',
+    location: locStr,
+    deliveryTime: cardData.deliveryTime || 'N/A'
+  });
 
   return {
     id,
@@ -175,7 +273,7 @@ export function mapToKanbanCardMaster(id: string, data: any): KanbanCardMaster {
     binQuantity: cardData.binQuantity || '1 Bin',
     deliveryTime: cardData.deliveryTime || 'N/A',
     location,
-    qrCodeUrl: cardData.qrCodeUrl || getKanbanQRCodeImageUrl(kanbanId),
+    qrCodeUrl: qrCodeUrl,
     activeTemplateId: data.templateId || cardData.activeTemplate || '',
     createdDate: cardData.dateCreated || data.createdAt || new Date().toISOString(),
     createdBy: cardData.createdBy || 'unknown',
@@ -184,3 +282,45 @@ export function mapToKanbanCardMaster(id: string, data: any): KanbanCardMaster {
     status: (cardData.status as KanbanStatus) || 'ACTIVE'
   };
 }
+
+import { MasterInformation } from '../types';
+
+/**
+ * Maps a KanbanCardMaster and its template parameters to a MasterInformation object.
+ * This guarantees Sections 1 to 4 reference the identical, single source of truth.
+ */
+export function mapCardToMasterInfo(
+  card: KanbanCardMaster,
+  templateName = '',
+  templateType = ''
+): MasterInformation {
+  const locStr = `${card.location?.letter || ''}${card.location?.number || ''}`.trim();
+  
+  const qrCodeUrl = getKanbanMailtoQRCodeUrl({
+    internalProductNumber: card.kanbanId || '',
+    productName: card.productDescription || '',
+    supplierPartNumber: card.supplierPartNumber || '',
+    supplier: card.supplierName || '',
+    orderQuantity: card.orderQuantity || '',
+    binQuantity: card.binQuantity || '1 Bin',
+    location: locStr,
+    deliveryTime: card.deliveryTime || 'N/A'
+  });
+
+  return {
+    productName: card.productDescription || '',
+    supplier: card.supplierName || '',
+    supplierPartNumber: card.supplierPartNumber || '',
+    orderQuantity: card.orderQuantity || '',
+    deliveryTime: card.deliveryTime || '',
+    location: locStr,
+    locationColour: card.location?.colour || '',
+    internalProductNumber: card.kanbanId || '',
+    productImage: card.imageUrl || '',
+    qrCode: qrCodeUrl,
+    templateName: templateName,
+    templateType: templateType,
+    binQuantity: card.binQuantity || ''
+  };
+}
+

@@ -1,8 +1,13 @@
 import React from 'react';
 import { KanbanCardMaster } from '../services/kanbanService';
+import { MasterInformation as MasterInfoType } from '../types';
+import { ProductImageWidget } from './ProductImageWidget';
 
 interface KanbanPulledProps {
-  cardData: KanbanCardMaster;
+  cardData?: KanbanCardMaster;
+  masterInfo?: MasterInfoType;
+  binQuantity?: string;
+  onBinQuantityChange?: (val: string) => void;
   borderWidth?: number; // mm
   borderColor?: string;
   borderStyle?: 'solid' | 'dashed' | 'none';
@@ -10,27 +15,93 @@ interface KanbanPulledProps {
   cornerRadius?: number; // mm
   padding?: number; // mm
   fontSizeScale?: number;
+  width?: number; // mm
+  height?: number; // mm
 }
 
+const getColourBg = (colour: string) => {
+  const norm = (colour || 'GREEN').toUpperCase().trim();
+  if (norm === 'RED') return '#ef4444';
+  if (norm === 'BLUE') return '#2563eb';
+  if (norm === 'GREEN') return '#10b981';
+  if (norm === 'YELLOW') return '#facc15';
+  if (norm === 'ORANGE') return '#f97316';
+  if (norm === 'PURPLE') return '#8b5cf6';
+  return '#4b5563';
+};
+
+const getColourText = (colour: string) => {
+  const norm = (colour || 'GREEN').toUpperCase().trim();
+  if (norm === 'YELLOW') return '#000000';
+  return '#ffffff';
+};
+
 /**
- * KanbanPulled section displaying high-visibility stock replenishment trigger warnings.
- * Designed to capture warehouse attention on visual cards.
+ * KanbanPulled section displaying product warnings and editable bin quantities.
+ * Fully responsive and layout-guaranteed across all container heights and widths.
  */
 export const KanbanPulled: React.FC<KanbanPulledProps> = ({
   cardData,
+  masterInfo,
+  binQuantity,
+  onBinQuantityChange,
   borderWidth = 0.5,
   borderColor = '#000000',
   borderStyle = 'solid',
-  backgroundColor = '#ef4444', // Default red alert background
+  backgroundColor = '#ffffff',
   cornerRadius = 2,
   padding = 3,
-  fontSizeScale = 1.0
+  fontSizeScale = 1.0,
+  width,
+  height
 }) => {
+  // Extract read-only properties directly from Master Information (single source of truth)
+  // fall back to cardData representation if masterInfo is not provided (e.g. for card print templates)
+  const pName = masterInfo ? masterInfo.productName : (cardData?.productDescription || '');
+  const pImage = masterInfo ? masterInfo.productImage : (cardData?.imageUrl || '');
+  const pLocation = masterInfo ? masterInfo.location : (`${cardData?.location?.letter || ''}${cardData?.location?.number || ''}`.trim() || '');
+  const pLocationColour = masterInfo ? masterInfo.locationColour : (cardData?.location?.colour || 'GREEN');
+
+  // Bin quantity is specific to Section 2 and is editable.
+  const currentBinQty = binQuantity !== undefined 
+    ? binQuantity 
+    : (masterInfo?.binQuantity !== undefined ? masterInfo.binQuantity : (cardData?.binQuantity || ''));
+
+  // The Section 2 background must NEVER become red.
+  // The background colour is controlled ONLY by the Background Colour property.
+  // We sanitize the background color: if it is default red '#ef4444' or similar bright red,
+  // we fallback/override it to white '#ffffff' so it NEVER starts or becomes red by default.
+  const isRed = (color?: string) => {
+    if (!color) return false;
+    const c = color.toLowerCase().trim();
+    if (c === 'red' || c === 'crimson' || c === '#ef4444' || c === '#dc2626' || c === '#f87171' || c === '#ff0000' || c === '#b91c1c' || c === '#991b1b') {
+      return true;
+    }
+    return false;
+  };
+  const finalBgColor = isRed(backgroundColor) ? '#ffffff' : (backgroundColor || '#ffffff');
+
+  // Responsive scaling based on width & height (reference height is 35mm, width is 180mm)
+  const wScale = width ? (width / 180) : 1.0;
+  const hScale = height ? (height / 35) : 1.0;
+  // A balanced, capped scale factor for font size, padding, and spacing
+  const scale = Math.min(wScale, hScale) * (fontSizeScale || 1.0);
+
+  // Responsive bound font sizes to prevent overlapping
+  const titleFontSize = Math.max(6, Math.min(18, 10.5 * scale));
+  const warningFontSize = Math.max(8, Math.min(26, 14.5 * scale));
+  const binLabelFontSize = Math.max(5, Math.min(10, 7.5 * scale));
+  const binValFontSize = Math.max(7.5, Math.min(14, 9.5 * scale));
+  const badgeFontSize = Math.max(8, Math.min(18, 11 * scale));
+
+  // Cap dynamic padding so it doesn't take too much height in narrow boxes
+  const finalPadding = height ? Math.max(1, Math.min(padding, height * 0.12)) : padding;
+
   const containerStyle: React.CSSProperties = {
     border: borderStyle !== 'none' ? `${borderWidth}mm ${borderStyle} ${borderColor}` : 'none',
-    backgroundColor: backgroundColor,
+    backgroundColor: finalBgColor,
     borderRadius: `${cornerRadius}mm`,
-    padding: `${padding}mm`,
+    padding: `${finalPadding}mm`,
     width: '100%',
     height: '100%',
     boxSizing: 'border-box'
@@ -39,17 +110,102 @@ export const KanbanPulled: React.FC<KanbanPulledProps> = ({
   return (
     <div 
       style={containerStyle} 
-      className="flex flex-col items-center justify-center text-white text-center font-sans select-none overflow-hidden"
+      className="flex flex-col h-full w-full justify-between overflow-hidden text-black select-none font-sans"
     >
-      <span 
-        className="font-black tracking-widest text-white leading-none uppercase drop-shadow-[0_1px_2px_rgba(0,0,0,0.5)]"
-        style={{ fontSize: `${20 * fontSizeScale}px` }}
+      {/* 1. At the very top: Display the Product Name (Read-only) */}
+      <div 
+        className="w-full text-center font-extrabold uppercase line-clamp-1 border-b border-black/10 pb-1 shrink-0"
+        style={{ 
+          fontSize: `${titleFontSize}px`,
+          color: '#000000',
+          fontFamily: 'Inter, sans-serif',
+          lineHeight: '1.2',
+          marginBottom: `${Math.max(1.5, 3.5 * scale)}px`
+        }}
       >
-        KANBAN PULLED
-      </span>
-      <div className="flex items-center gap-1.5 mt-1.5 bg-black/30 border border-white/10 px-2.5 py-0.5 rounded text-[8px] font-mono tracking-wide">
-        <span className="font-extrabold uppercase text-white/80">ID:</span>
-        <span className="font-black text-yellow-300">{cardData.kanbanId}</span>
+        {pName || 'NO PRODUCT NAME'}
+      </div>
+
+      {/* 2. Middle area: Split Product Image (left) and warned KANBAN PULLED / Bin Quantity (right) */}
+      <div className="flex flex-row items-center justify-between w-full flex-1 min-h-0 gap-2 font-sans overflow-hidden">
+        {/* Left column: Product Image */}
+        <div className="w-[35%] h-full flex items-center justify-center min-w-0 overflow-hidden">
+          <ProductImageWidget 
+            imageUrl={pImage} 
+            altText={pName}
+            className="max-h-full max-w-full object-contain bg-white border border-neutral-200 rounded"
+          />
+        </div>
+
+        {/* Right column: Details and Input */}
+        <div className="w-[60%] h-full flex flex-col justify-center items-center text-center min-w-0 overflow-hidden gap-1">
+          {/* KANBAN PULLED (Centered, Bold, Uppercase, Red, No background) */}
+          <span 
+            className="font-black tracking-wider uppercase text-red-600 leading-none block shrink-0"
+            style={{ fontSize: `${warningFontSize}px` }}
+          >
+            KANBAN PULLED
+          </span>
+
+          {/* Bin Quantity Field (Editable inside Section 2 only) */}
+          <div className="flex flex-col items-center justify-center shrink-0 min-h-0">
+            <span 
+              className="text-neutral-500 font-extrabold uppercase tracking-tight leading-none mb-0.5"
+              style={{ fontSize: `${binLabelFontSize}px` }}
+            >
+              Bin Quantity
+            </span>
+            {onBinQuantityChange ? (
+              <input
+                id="section2-bin-quantity"
+                type="text"
+                value={currentBinQty}
+                onChange={(e) => onBinQuantityChange(e.target.value)}
+                placeholder="Qty"
+                className="w-full max-w-[120px] text-center bg-white border border-neutral-300 rounded-md text-black font-extrabold focus:outline-none focus:ring-1 focus:ring-purple-500 font-sans leading-none"
+                style={{ 
+                  fontSize: `${binValFontSize}px`,
+                  paddingTop: `${Math.max(1.5, 3 * scale)}px`,
+                  paddingBottom: `${Math.max(1.5, 3 * scale)}px`,
+                  paddingLeft: `${Math.max(3, 6 * scale)}px`,
+                  paddingRight: `${Math.max(3, 6 * scale)}px`,
+                }}
+              />
+            ) : (
+              <span 
+                className="font-black text-neutral-900 border border-neutral-200 bg-neutral-50 rounded-md leading-none"
+                style={{ 
+                  fontSize: `${binValFontSize}px`,
+                  paddingTop: `${Math.max(1.5, 3 * scale)}px`,
+                  paddingBottom: `${Math.max(1.5, 3 * scale)}px`,
+                  paddingLeft: `${Math.max(4, 8 * scale)}px`,
+                  paddingRight: `${Math.max(4, 8 * scale)}px`,
+                }}
+              >
+                {currentBinQty || 'N/A'}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* 3. Bottom of Section: Location display with the selected Location Colour (Read-only) */}
+      <div 
+        className="w-full text-center font-black text-white tracking-widest uppercase transition-all shrink-0"
+        style={{ 
+          backgroundColor: getColourBg(pLocationColour),
+          color: getColourText(pLocationColour),
+          fontSize: `${badgeFontSize}px`,
+          paddingTop: `${Math.max(2, 4.5 * scale)}px`,
+          paddingBottom: `${Math.max(2, 4.5 * scale)}px`,
+          paddingLeft: `${Math.max(4, 10 * scale)}px`,
+          paddingRight: `${Math.max(4, 10 * scale)}px`,
+          borderRadius: `${Math.max(2, 6 * scale)}px`,
+          lineHeight: '1.1',
+          marginTop: `${Math.max(1.5, 3.5 * scale)}px`
+        }}
+      >
+        {pLocation || 'NO LOCATION'}
       </div>
     </div>
   );

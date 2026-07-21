@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Rnd } from 'react-rnd';
 import { Icon } from '../components/Icon';
 import { 
@@ -9,11 +9,13 @@ import {
   deleteTemplate, 
   createDefaultTemplateBlueprint 
 } from '../services/templateService';
-import { KanbanCardMaster, getKanbanCards } from '../services/kanbanService';
+import { KanbanCardMaster, getKanbanCards, getKanbanMailtoQRCodeUrl } from '../services/kanbanService';
+import { MasterInformation as MasterInfoType } from '../types';
 import { MasterInformation } from '../components/MasterInformation';
 import { KanbanPulled } from '../components/KanbanPulled';
 import { WarehouseIdentification } from '../components/WarehouseIdentification';
 import { WarehouseDisplay } from '../components/WarehouseDisplay';
+import { QRCodeRenderer } from '../components/QRCodeRenderer';
 
 interface KanbanDesignerProps {
   currentUser: any;
@@ -74,6 +76,60 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
   const [loading, setLoading] = useState<boolean>(true);
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
 
+  // Unified Master Information single source of truth state
+  const [masterInfo, setMasterInfo] = useState<MasterInfoType>({
+    productName: '',
+    supplier: '',
+    supplierPartNumber: '',
+    orderQuantity: '',
+    deliveryTime: '',
+    location: '',
+    locationColour: 'GREEN',
+    internalProductNumber: '',
+    productImage: '',
+    qrCode: '',
+    templateName: '',
+    templateType: 'A4',
+    binQuantity: ''
+  });
+
+  // Right sidebar panel double tabs
+  const [rightActiveTab, setRightActiveTab] = useState<'master' | 'layout'>('master');
+
+  // Sliders-based image cropping and preview overlay state variables
+  const [isCropModalOpen, setIsCropModalOpen] = useState(false);
+  const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
+  const [cropImageSrc, setCropImageSrc] = useState<string>('');
+  const [cropZoom, setCropZoom] = useState(1);
+  const [cropPanX, setCropPanX] = useState(0);
+  const [cropPanY, setCropPanY] = useState(0);
+  const [cropRotation, setCropRotation] = useState(0);
+
+  // Save template dialog states
+  const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false);
+  const [saveTemplateName, setSaveTemplateName] = useState('');
+  const [saveProductName, setSaveProductName] = useState('');
+  const [saveCategory, setSaveCategory] = useState('');
+  const [saveDescription, setSaveDescription] = useState('');
+
+  // Search and Recent Searches states
+  const [searchTerm, setSearchTerm] = useState('');
+  const [recentSearches, setRecentSearches] = useState<{ templateId: string; templateName: string; query: string }[]>(() => {
+    try {
+      const stored = localStorage.getItem('recent_searches');
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // Collapsed folders state (default is expanded, so we store collapsed status)
+  const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
+
+  // Hidden references for the canvas crop generation
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const cropCanvasRef = React.useRef<HTMLCanvasElement>(null);
+
   // A4 layout dimensions & scaling factor calculations
   const canvasHeightPx = 680; // height inside editor
   const canvasWidthPx = Math.round(canvasHeightPx * (210 / 297)); // A4 Aspect ratio (~481px)
@@ -81,6 +137,255 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
 
   const mmToPx = (mm: number) => Math.round(mm * scaleFactor);
   const pxToMm = (px: number) => Math.round(px / scaleFactor);
+
+  // Zoom & Pan state variables
+  const ZOOM_LEVELS = [25, 50, 75, 100, 125, 150, 200, 300];
+  const [zoom, setZoom] = useState<number>(() => {
+    const saved = localStorage.getItem('kanban_designer_zoom');
+    return saved ? parseInt(saved, 10) : 100;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('kanban_designer_zoom', zoom.toString());
+  }, [zoom]);
+
+  const [isPanning, setIsPanning] = useState(false);
+  const panStartRef = useRef({ x: 0, y: 0, scrollLeft: 0, scrollTop: 0 });
+  const workspaceRef = useRef<HTMLDivElement | null>(null);
+
+  // Fit Page function
+  const handleFitPage = () => {
+    if (!workspaceRef.current) return;
+    const viewportWidth = workspaceRef.current.clientWidth - 64; // subtract padding
+    const viewportHeight = workspaceRef.current.clientHeight - 160; // subtract padding and header info
+    const scaleX = viewportWidth / canvasWidthPx;
+    const scaleY = viewportHeight / canvasHeightPx;
+    const fitScale = Math.min(scaleX, scaleY) * 100;
+    
+    // Find closest zoom level, or round to closest integer
+    setZoom(Math.max(25, Math.min(300, Math.round(fitScale))));
+  };
+
+  // Wheel zooming and middle-click panning listeners
+  useEffect(() => {
+    const el = workspaceRef.current;
+    if (!el) return;
+
+    const handleWheelNative = (e: WheelEvent) => {
+      if (e.ctrlKey) {
+        e.preventDefault();
+        setZoom(currentZoom => {
+          const idx = ZOOM_LEVELS.indexOf(currentZoom);
+          if (e.deltaY < 0) {
+            if (idx < ZOOM_LEVELS.length - 1) {
+              return ZOOM_LEVELS[idx + 1];
+            } else if (idx === -1) {
+              const next = ZOOM_LEVELS.find(z => z > currentZoom);
+              return next || currentZoom;
+            }
+          } else {
+            if (idx > 0) {
+              return ZOOM_LEVELS[idx - 1];
+            } else if (idx === -1) {
+              const prev = [...ZOOM_LEVELS].reverse().find(z => z < currentZoom);
+              return prev || currentZoom;
+            }
+          }
+          return currentZoom;
+        });
+      }
+    };
+
+    el.addEventListener('wheel', handleWheelNative, { passive: false });
+    return () => {
+      el.removeEventListener('wheel', handleWheelNative);
+    };
+  }, []);
+
+  const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.button === 1) { // Middle Mouse Button
+      e.preventDefault();
+      setIsPanning(true);
+      if (workspaceRef.current) {
+        panStartRef.current = {
+          x: e.clientX,
+          y: e.clientY,
+          scrollLeft: workspaceRef.current.scrollLeft,
+          scrollTop: workspaceRef.current.scrollTop
+        };
+      }
+    }
+  };
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isPanning || !workspaceRef.current) return;
+    e.preventDefault();
+    const dx = e.clientX - panStartRef.current.x;
+    const dy = e.clientY - panStartRef.current.y;
+    workspaceRef.current.scrollLeft = panStartRef.current.scrollLeft - dx;
+    workspaceRef.current.scrollTop = panStartRef.current.scrollTop - dy;
+  };
+
+  const handleMouseUp = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.button === 1) {
+      setIsPanning(false);
+    }
+  };
+
+  const handleMouseLeave = () => {
+    setIsPanning(false);
+  };
+
+  // Synchronize masterInfo from selectedCard and template layout modifications
+  useEffect(() => {
+    if (selectedCard) {
+      const locStr = `${selectedCard.location?.letter || ''}${selectedCard.location?.number || ''}`.trim();
+      const qrUrl = getKanbanMailtoQRCodeUrl({
+        internalProductNumber: selectedCard.kanbanId || '',
+        productName: selectedCard.productDescription || '',
+        supplierPartNumber: selectedCard.supplierPartNumber || '',
+        supplier: selectedCard.supplierName || '',
+        orderQuantity: selectedCard.orderQuantity || '',
+        binQuantity: selectedCard.binQuantity || '1 Bin',
+        location: locStr,
+        deliveryTime: selectedCard.deliveryTime || 'N/A'
+      });
+
+      setMasterInfo({
+        productName: selectedCard.productDescription || '',
+        supplier: selectedCard.supplierName || '',
+        supplierPartNumber: selectedCard.supplierPartNumber || '',
+        orderQuantity: selectedCard.orderQuantity || '',
+        deliveryTime: selectedCard.deliveryTime || '',
+        location: locStr,
+        locationColour: selectedCard.location?.colour || 'GREEN',
+        internalProductNumber: selectedCard.kanbanId || '',
+        productImage: selectedCard.imageUrl || '',
+        qrCode: qrUrl,
+        templateName: activeTemplate?.templateName || '',
+        templateType: activeTemplate?.paperSize || 'A4',
+        binQuantity: selectedCard.binQuantity || ''
+      });
+    }
+  }, [selectedCard, activeTemplate?.templateName, activeTemplate?.paperSize]);
+
+  // Master Information editor state updates with real-time propagation
+  const handleUpdateMasterInfo = (field: keyof MasterInfoType, value: any) => {
+    setMasterInfo(prev => {
+      const updated = { ...prev, [field]: value };
+
+      // Re-generate QR Code content and URL based on requirements
+      const locStr = updated.location || '';
+      const qrUrl = getKanbanMailtoQRCodeUrl({
+        internalProductNumber: updated.internalProductNumber || '',
+        productName: updated.productName || '',
+        supplierPartNumber: updated.supplierPartNumber || '',
+        supplier: updated.supplier || '',
+        orderQuantity: updated.orderQuantity || '',
+        binQuantity: updated.binQuantity || '1 Bin',
+        location: locStr,
+        deliveryTime: updated.deliveryTime || 'N/A'
+      });
+
+      updated.qrCode = qrUrl;
+
+      // Sync master information updates backward to selectedCard representation
+      setSelectedCard(card => {
+        let letter = '';
+        let number = '';
+        if (locStr) {
+          const match = locStr.match(/^([A-Za-z]+)?(\d+)?$/);
+          if (match) {
+            letter = match[1] || '';
+            number = match[2] || '';
+          } else {
+            letter = locStr.charAt(0);
+            number = locStr.substring(1);
+          }
+        }
+
+        return {
+          ...card,
+          productDescription: updated.productName,
+          supplierName: updated.supplier,
+          supplierPartNumber: updated.supplierPartNumber,
+          orderQuantity: updated.orderQuantity,
+          deliveryTime: updated.deliveryTime,
+          kanbanId: updated.internalProductNumber,
+          imageUrl: updated.productImage,
+          binQuantity: updated.binQuantity || '',
+          location: {
+            letter,
+            number,
+            colour: updated.locationColour
+          },
+          qrCodeUrl: updated.qrCode
+        };
+      });
+
+      // Synchronize changes to Template configuration variables
+      if (field === 'templateName' && activeTemplate) {
+        setActiveTemplate(tpl => tpl ? { ...tpl, templateName: value } : null);
+      }
+      if (field === 'templateType' && activeTemplate) {
+        setActiveTemplate(tpl => tpl ? { ...tpl, paperSize: value as any } : null);
+      }
+
+      return updated;
+    });
+  };
+
+  // Image upload handler to convert file into base64 url
+  const handleImageUpload = (file: File) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      handleUpdateMasterInfo('productImage', reader.result as string);
+      announce('Product image uploaded successfully.');
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Interactive Client-Side canvas cropping engine
+  const handleApplyCrop = () => {
+    const canvas = cropCanvasRef.current;
+    if (!canvas || !cropImageSrc) return;
+
+    const img = new Image();
+    img.src = cropImageSrc;
+    img.onload = () => {
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      // Reset the crop canvas context before drawing
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.save();
+
+      // Translate context origin to center of the crop bounds target frame
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.rotate((cropRotation * Math.PI) / 180);
+      ctx.scale(cropZoom, cropZoom);
+
+      // Draw the original image applying offsets adjusted to scale boundaries
+      const drawWidth = canvas.width;
+      const drawHeight = (img.height / img.width) * drawWidth;
+      
+      ctx.drawImage(
+        img,
+        -drawWidth / 2 + cropPanX,
+        -drawHeight / 2 + cropPanY,
+        drawWidth,
+        drawHeight
+      );
+
+      ctx.restore();
+
+      // Export cropped target frame image back as data URL
+      const croppedBase64 = canvas.toDataURL('image/jpeg', 0.9);
+      handleUpdateMasterInfo('productImage', croppedBase64);
+      setIsCropModalOpen(false);
+      announce('Product image cropped and updated.');
+    };
+  };
 
   // Load templates and product cards on component mount
   useEffect(() => {
@@ -112,6 +417,21 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
     }
   };
 
+  const recordRecentSearch = (templateId: string, templateName: string, queryText: string) => {
+    if (!templateId) return;
+    setRecentSearches(prev => {
+      const filtered = prev.filter(item => item.templateId !== templateId);
+      const newQuery = queryText.trim() || templateName;
+      const updated = [{ templateId, templateName, query: newQuery }, ...filtered].slice(0, 10);
+      try {
+        localStorage.setItem('recent_searches', JSON.stringify(updated));
+      } catch (err) {
+        console.error('Failed to write recent searches to localStorage:', err);
+      }
+      return updated;
+    });
+  };
+
   const handleSelectTemplate = (tpl: KanbanTemplateV2) => {
     setActiveTemplate(JSON.parse(JSON.stringify(tpl)));
     // Auto focus first section
@@ -119,6 +439,7 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
       setActiveSectionId(tpl.sections[0].id);
     }
     announce(`Loaded layout "${tpl.templateName}"`);
+    recordRecentSearch(tpl.id || '', tpl.templateName, searchTerm);
   };
 
   const handleCreateTemplate = (blueprintType: 'standard' | 'single_card' | 'warehouse_only' | 'custom') => {
@@ -133,40 +454,97 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
     announce('Initialized new template layout designer.');
   };
 
-  const handleSave = async () => {
+  const handleSave = () => {
     if (!activeTemplate) return;
+    setSaveTemplateName(activeTemplate.templateName || '');
+    setSaveProductName(activeTemplate.productName || masterInfo?.productName || '');
+    setSaveCategory(activeTemplate.category || '');
+    setSaveDescription(activeTemplate.description || '');
+    setIsSaveDialogOpen(true);
+  };
+
+  const handleConfirmSave = async () => {
+    if (!activeTemplate) return;
+    if (!saveTemplateName.trim()) {
+      announce('Template Name is required.');
+      return;
+    }
+    if (!saveProductName.trim()) {
+      announce('Product Name is required.');
+      return;
+    }
+    if (!saveCategory.trim()) {
+      announce('Category is required.');
+      return;
+    }
+
     try {
-      activeTemplate.meta.lastModifiedDate = new Date().toISOString();
-      activeTemplate.meta.lastModifiedBy = currentUser?.email || currentUser?.uid || 'elrico@tsjoinery.co.za';
-      const docId = await saveTemplate(activeTemplate);
-      announce(`Template "${activeTemplate.templateName}" saved successfully.`);
+      const updatedTemplate: KanbanTemplateV2 = {
+        ...activeTemplate,
+        templateName: saveTemplateName.trim().toUpperCase(),
+        productName: saveProductName.trim(),
+        category: saveCategory.trim(),
+        description: saveDescription.trim(),
+        supplier: masterInfo?.supplier || '',
+        supplierPartNumber: masterInfo?.supplierPartNumber || '',
+        meta: {
+          ...activeTemplate.meta,
+          lastModifiedDate: new Date().toISOString(),
+          lastModifiedBy: currentUser?.email || currentUser?.uid || 'elrico@tsjoinery.co.za'
+        }
+      };
+
+      const docId = await saveTemplate(updatedTemplate);
+      announce(`Template "${updatedTemplate.templateName}" saved successfully.`);
+      setIsSaveDialogOpen(false);
+
       // Refresh list
       const refreshedTemplates = await getTemplates();
       setTemplates(refreshedTemplates);
-      // Update selected with id
-      setActiveTemplate(prev => prev ? { ...prev, id: docId } : null);
+
+      // Update active template
+      setActiveTemplate({ ...updatedTemplate, id: docId });
     } catch (e) {
       console.error(e);
       announce('Failed to save template layout configuration.');
     }
   };
 
-  const handleDuplicate = async () => {
+  const [isDuplicateDialogOpen, setIsDuplicateDialogOpen] = useState(false);
+  const [duplicateProductName, setDuplicateProductName] = useState('');
+
+  const handleDuplicate = () => {
     if (!activeTemplate) return;
+    setDuplicateProductName(`${activeTemplate.productName || activeTemplate.templateName} (COPY)`);
+    setIsDuplicateDialogOpen(true);
+  };
+
+  const handleConfirmDuplicate = async () => {
+    if (!activeTemplate) return;
+    if (!duplicateProductName.trim()) {
+      announce('Product name is required.');
+      return;
+    }
+
     try {
+      const newTemplateName = `${duplicateProductName.trim().toUpperCase()} TEMPLATE`;
       const duplicate: KanbanTemplateV2 = {
         ...JSON.parse(JSON.stringify(activeTemplate)),
-        templateName: `${activeTemplate.templateName} (COPY)`,
+        templateName: newTemplateName,
+        productName: duplicateProductName.trim(),
         meta: {
-          createdBy: currentUser?.email || 'unknown',
+          createdBy: currentUser?.email || 'elrico@tsjoinery.co.za',
           createdDate: new Date().toISOString(),
-          lastModifiedBy: currentUser?.email || 'unknown',
+          lastModifiedBy: currentUser?.email || 'elrico@tsjoinery.co.za',
           lastModifiedDate: new Date().toISOString()
         }
       };
       delete duplicate.id;
+      
       const docId = await saveTemplate(duplicate);
-      announce(`Duplicated template into "${duplicate.templateName}"`);
+      announce(`Duplicated template as "${duplicate.templateName}"`);
+      setIsDuplicateDialogOpen(false);
+
       const refreshedTemplates = await getTemplates();
       setTemplates(refreshedTemplates);
       setActiveTemplate({ ...duplicate, id: docId });
@@ -176,13 +554,19 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
     }
   };
 
-  const handleDelete = async () => {
-    if (!activeTemplate || !activeTemplate.id) return;
-    if (!window.confirm(`Are you sure you want to permanently delete "${activeTemplate.templateName}"?`)) return;
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
 
+  const handleDelete = () => {
+    if (!activeTemplate || !activeTemplate.id) return;
+    setIsDeleteConfirmOpen(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!activeTemplate || !activeTemplate.id) return;
     try {
       await deleteTemplate(activeTemplate.id);
       announce('Template layout deleted.');
+      setIsDeleteConfirmOpen(false);
       const refreshedTemplates = await getTemplates();
       setTemplates(refreshedTemplates);
       setActiveTemplate(null);
@@ -225,49 +609,66 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
       case 'master_info':
         return (
           <MasterInformation
-            cardData={selectedCard}
-            borderWidth={0}
-            borderStyle="none"
-            backgroundColor="transparent"
-            cornerRadius={0}
+            masterInfo={masterInfo}
+            borderWidth={sec.borderWidth}
+            borderStyle={sec.borderStyle}
+            borderColor={sec.borderColor}
+            backgroundColor={sec.backgroundColor}
+            cornerRadius={sec.cornerRadius}
             padding={sec.padding}
             fontSizeScale={scaleFactorFont}
+            width={sec.width}
+            height={sec.height}
           />
         );
       case 'kanban_pulled':
         return (
           <KanbanPulled
+            masterInfo={masterInfo}
             cardData={selectedCard}
-            borderWidth={0}
-            borderStyle="none"
-            backgroundColor="transparent"
-            cornerRadius={0}
+            binQuantity={selectedCard?.binQuantity}
+            onBinQuantityChange={(val) => {
+              setSelectedCard(prev => prev ? { ...prev, binQuantity: val } : null);
+            }}
+            borderWidth={sec.borderWidth}
+            borderStyle={sec.borderStyle}
+            borderColor={sec.borderColor}
+            backgroundColor={sec.backgroundColor}
+            cornerRadius={sec.cornerRadius}
             padding={sec.padding}
             fontSizeScale={scaleFactorFont}
+            width={sec.width}
+            height={sec.height}
           />
         );
       case 'warehouse_id':
         return (
           <WarehouseIdentification
-            cardData={selectedCard}
-            borderWidth={0}
-            borderStyle="none"
-            backgroundColor="transparent"
-            cornerRadius={0}
+            masterInfo={masterInfo}
+            borderWidth={sec.borderWidth}
+            borderStyle={sec.borderStyle}
+            borderColor={sec.borderColor}
+            backgroundColor={sec.backgroundColor}
+            cornerRadius={sec.cornerRadius}
             padding={sec.padding}
             fontSizeScale={scaleFactorFont}
+            width={sec.width}
+            height={sec.height}
           />
         );
       case 'warehouse_display':
         return (
           <WarehouseDisplay
-            cardData={selectedCard}
-            borderWidth={0}
-            borderStyle="none"
-            backgroundColor="transparent"
-            cornerRadius={0}
+            masterInfo={masterInfo}
+            borderWidth={sec.borderWidth}
+            borderStyle={sec.borderStyle}
+            borderColor={sec.borderColor}
+            backgroundColor={sec.backgroundColor}
+            cornerRadius={sec.cornerRadius}
             padding={sec.padding}
             fontSizeScale={scaleFactorFont}
+            width={sec.width}
+            height={sec.height}
           />
         );
       default:
@@ -328,8 +729,70 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
           </div>
         </div>
 
-        {/* Templates list view */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-2.5">
+        {/* Search & Recent Searches Panel */}
+        <div className="p-4 border-b border-white/5 space-y-3 bg-black/20 shrink-0">
+          <div className="relative">
+            <span className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-500">
+              <Icon name="search" size={14} />
+            </span>
+            <input
+              type="text"
+              placeholder="Search product, supplier, part #, tag..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-9 pr-8 py-2 bg-neutral-900/90 border border-white/10 rounded-xl text-xs text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all font-medium"
+            />
+            {searchTerm && (
+              <button
+                onClick={() => setSearchTerm('')}
+                className="absolute inset-y-0 right-0 flex items-center pr-2.5 text-gray-500 hover:text-white transition-colors"
+              >
+                <Icon name="x" size={14} />
+              </button>
+            )}
+          </div>
+
+          {/* Recent Searches row */}
+          {recentSearches.length > 0 && (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-[9px] font-black uppercase tracking-wider text-gray-500">
+                <span className="flex items-center gap-1"><Icon name="history" size={10} /> RECENT SEARCHES</span>
+                <button
+                  onClick={() => {
+                    setRecentSearches([]);
+                    try {
+                      localStorage.removeItem('recent_searches');
+                    } catch {}
+                  }}
+                  className="text-[8px] text-red-400 hover:text-red-300 transition-colors uppercase font-bold"
+                >
+                  Clear
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-1.5 max-h-14 overflow-y-auto custom-scrollbar py-0.5">
+                {recentSearches.map((item, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => {
+                      setSearchTerm(item.query);
+                      const found = templates.find(t => t.id === item.templateId);
+                      if (found) {
+                        handleSelectTemplate(found);
+                      }
+                    }}
+                    className="px-2 py-0.5 bg-white/5 hover:bg-purple-600/25 border border-white/5 hover:border-purple-500/40 rounded-lg text-[9px] font-bold text-gray-300 hover:text-white transition-all max-w-[140px] truncate uppercase leading-tight"
+                    title={`Query: "${item.query}" | Template: ${item.templateName}`}
+                  >
+                    {item.query}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Templates list view grouped in collapsible folders A-Z */}
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-3">
           {loading ? (
             <div className="text-center py-20 text-xs text-gray-500">
               <Icon name="loader" size={24} className="animate-spin mx-auto mb-2 text-purple-500" />
@@ -342,34 +805,111 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
               <p className="text-[9px] mt-1 max-w-[180px] mx-auto text-gray-600">Choose a default blueprint option from the menu above to build your very first layout.</p>
             </div>
           ) : (
-            templates.map(t => (
-              <div
-                key={t.id}
-                onClick={() => handleSelectTemplate(t)}
-                className={`p-3.5 rounded-2xl border transition-all cursor-pointer ${
-                  activeTemplate?.id === t.id
-                    ? 'bg-purple-600/10 border-purple-500'
-                    : 'bg-black/35 border-white/5 hover:border-white/15'
-                }`}
-              >
-                <div className="flex items-start justify-between">
-                  <h3 className="font-extrabold text-white text-xs leading-tight tracking-tight uppercase truncate max-w-[180px]">
-                    {t.templateName}
-                  </h3>
-                  <span className="text-[8px] font-mono font-bold bg-white/5 text-gray-400 px-1.5 py-0.5 rounded uppercase">
-                    {t.paperSize}
-                  </span>
-                </div>
-                <div className="flex items-center gap-3 mt-2 text-[10px] text-gray-500">
-                  <span className="flex items-center gap-1">
-                    <Icon name="layout" size={10} /> {t.sections.filter(s => s.visible).length} visible
-                  </span>
-                  <span className="flex items-center gap-1 font-mono uppercase">
-                    {t.orientation}
-                  </span>
-                </div>
-              </div>
-            ))
+            (() => {
+              const query = searchTerm.toLowerCase().trim();
+              const filtered = templates.filter(t => {
+                if (!query) return true;
+                const nameMatch = (t.templateName || '').toLowerCase().includes(query);
+                const prodMatch = (t.productName || '').toLowerCase().includes(query);
+                const suppMatch = (t.supplier || '').toLowerCase().includes(query);
+                const partMatch = (t.supplierPartNumber || '').toLowerCase().includes(query);
+                const catMatch = (t.category || '').toLowerCase().includes(query);
+                return nameMatch || prodMatch || suppMatch || partMatch || catMatch;
+              });
+
+              if (filtered.length === 0) {
+                return (
+                  <div className="text-center py-10 text-gray-500">
+                    <p className="text-[10px] font-black uppercase">No match found</p>
+                    <p className="text-[8px] mt-0.5 text-gray-600">Try adjusting your query fields</p>
+                  </div>
+                );
+              }
+
+              // Group templates by first letter of Product Name
+              const groups: Record<string, KanbanTemplateV2[]> = {};
+              filtered.forEach(t => {
+                const nameToUse = (t.productName || t.templateName || 'Unnamed').trim();
+                const firstChar = nameToUse.charAt(0).toUpperCase();
+                const letter = (firstChar >= 'A' && firstChar <= 'Z') ? firstChar : '#';
+                if (!groups[letter]) {
+                  groups[letter] = [];
+                }
+                groups[letter].push(t);
+              });
+
+              // Sort folders alphabetically, with '#' folder at the end
+              const sortedLetters = Object.keys(groups).sort((a, b) => {
+                if (a === '#') return 1;
+                if (b === '#') return -1;
+                return a.localeCompare(b);
+              });
+
+              return sortedLetters.map(letter => {
+                const isCollapsed = collapsedFolders[letter] || false;
+                const groupTemplates = groups[letter];
+                return (
+                  <div key={letter} className="border-b border-white/5 pb-2.5">
+                    <button
+                      onClick={() => setCollapsedFolders(prev => ({ ...prev, [letter]: !prev[letter] }))}
+                      className="w-full flex items-center justify-between py-1.5 text-gray-400 hover:text-white transition-colors"
+                    >
+                      <span className="flex items-center gap-2 text-[11px] font-black uppercase tracking-widest text-orange-400">
+                        <Icon name={isCollapsed ? "folder" : "folder-open"} size={13} className="text-purple-400 shrink-0" />
+                        Folder {letter}
+                        <span className="text-[9px] text-gray-600 font-mono font-bold">({groupTemplates.length})</span>
+                      </span>
+                      <Icon name={isCollapsed ? "chevron-right" : "chevron-down"} size={12} className="text-gray-600 shrink-0" />
+                    </button>
+
+                    {!isCollapsed && (
+                      <div className="space-y-2 mt-1.5 pl-3.5 border-l border-white/5">
+                        {groupTemplates.map(t => (
+                          <div
+                            key={t.id}
+                            onClick={() => handleSelectTemplate(t)}
+                            className={`p-3 rounded-2xl border transition-all cursor-pointer ${
+                              activeTemplate?.id === t.id
+                                ? 'bg-purple-600/10 border-purple-500'
+                                : 'bg-black/35 border-white/5 hover:border-white/15'
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-1.5">
+                              <div className="min-w-0 flex-1">
+                                <h4 className="font-extrabold text-white text-[11px] leading-tight tracking-tight uppercase truncate">
+                                  {t.templateName}
+                                </h4>
+                                {t.productName && (
+                                  <p className="text-[9px] text-gray-400 font-semibold truncate uppercase tracking-tight mt-1">
+                                    📦 {t.productName}
+                                  </p>
+                                )}
+                                {t.category && (
+                                  <span className="inline-block text-[8px] text-[#ff8c00] font-black uppercase tracking-widest mt-0.5 bg-orange-500/5 px-1 py-0.5 rounded border border-orange-500/10">
+                                    🏷️ {t.category}
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-[8px] font-mono font-bold bg-white/5 text-gray-400 px-1.5 py-0.5 rounded uppercase shrink-0">
+                                {t.paperSize}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-3 mt-2 text-[9px] text-gray-500">
+                              <span className="flex items-center gap-1">
+                                <Icon name="layout" size={10} /> {t.sections.filter(s => s.visible).length} visible
+                              </span>
+                              <span className="flex items-center gap-1 font-mono uppercase text-[8px]">
+                                {t.orientation}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              });
+            })()
           )}
         </div>
       </aside>
@@ -459,8 +999,16 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
         {/* Interactive Workspace Area */}
         <div className="flex-1 flex overflow-hidden">
           {activeTemplate ? (
-            <div className="flex-1 flex flex-col items-center justify-center p-8 overflow-y-auto select-none relative custom-scrollbar bg-[#0f0f0f]">
-              <div className="mb-4 text-center">
+            <div 
+              ref={workspaceRef}
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseLeave}
+              className="flex-1 flex flex-col items-center justify-start p-8 overflow-auto select-none relative custom-scrollbar bg-[#0f0f0f]"
+              style={{ cursor: isPanning ? 'grabbing' : 'default' }}
+            >
+              <div className="mb-4 text-center shrink-0">
                 <span className="px-3 py-1 bg-purple-500/15 text-purple-400 border border-purple-500/20 rounded-full text-[10px] font-black uppercase tracking-widest">
                   📐 {activeTemplate.paperSize} Portrait Design Workspace (210mm × 297mm)
                 </span>
@@ -469,94 +1017,164 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
                 </p>
               </div>
 
-              {/* A4 Canvas Representation Sheet */}
+              {/* Zoom Toolbar */}
+              <div className="mb-6 flex items-center justify-center gap-2 bg-neutral-900 border border-white/10 px-4 py-2 rounded-2xl shadow-xl shrink-0">
+                <button
+                  onClick={() => {
+                    const idx = ZOOM_LEVELS.indexOf(zoom);
+                    if (idx > 0) setZoom(ZOOM_LEVELS[idx - 1]);
+                  }}
+                  disabled={zoom <= 25}
+                  className="w-8 h-8 flex items-center justify-center bg-black hover:bg-white/10 text-white rounded-lg disabled:opacity-40 transition-colors text-sm font-bold"
+                  title="Zoom Out"
+                >
+                  -
+                </button>
+                <span className="text-xs font-mono font-bold text-white min-w-[50px] text-center">
+                  {zoom}%
+                </span>
+                <button
+                  onClick={() => {
+                    const idx = ZOOM_LEVELS.indexOf(zoom);
+                    if (idx < ZOOM_LEVELS.length - 1) {
+                      setZoom(ZOOM_LEVELS[idx + 1]);
+                    } else if (idx === -1) {
+                      const next = ZOOM_LEVELS.find(z => z > zoom);
+                      if (next) setZoom(next);
+                    }
+                  }}
+                  disabled={zoom >= 300}
+                  className="w-8 h-8 flex items-center justify-center bg-black hover:bg-white/10 text-white rounded-lg disabled:opacity-40 transition-colors text-sm font-bold"
+                  title="Zoom In"
+                >
+                  +
+                </button>
+
+                <div className="w-px h-5 bg-white/10 mx-1" />
+
+                <button
+                  onClick={handleFitPage}
+                  className="px-3 py-1.5 bg-black hover:bg-white/10 text-white rounded-lg text-xs font-extrabold uppercase tracking-wider transition-colors"
+                  title="Fit Page in Workspace"
+                >
+                  Fit Page
+                </button>
+
+                <button
+                  onClick={() => setZoom(100)}
+                  className="px-3 py-1.5 bg-black hover:bg-white/10 text-white rounded-lg text-xs font-extrabold uppercase tracking-wider transition-colors"
+                  title="Actual Size"
+                >
+                  100%
+                </button>
+              </div>
+
+              {/* Zoom & Pan Wrapper */}
               <div
-                className="relative bg-white rounded-2xl shadow-[0_25px_60px_-15px_rgba(0,0,0,0.95)] border border-neutral-300 overflow-hidden"
                 style={{
-                  width: `${canvasWidthPx}px`,
-                  height: `${canvasHeightPx}px`
+                  width: `${canvasWidthPx * (zoom / 100)}px`,
+                  height: `${canvasHeightPx * (zoom / 100)}px`,
+                  position: 'relative',
+                  flexShrink: 0,
+                  marginTop: 'auto',
+                  marginBottom: 'auto'
                 }}
               >
-                {/* Visual guideline mesh background */}
-                <div className="absolute inset-0 opacity-[0.03] pointer-events-none" style={{
-                  backgroundImage: 'radial-gradient(circle, #000 1px, transparent 1px)',
-                  backgroundSize: '10px 10px'
-                }} />
-
-                {/* Margins Border Frame */}
-                <div 
-                  className="absolute border border-dashed border-neutral-300 pointer-events-none flex justify-between p-1"
+                {/* A4 Canvas Representation Sheet */}
+                <div
+                  className="absolute bg-white rounded-2xl shadow-[0_25px_60px_-15px_rgba(0,0,0,0.95)] border border-neutral-300 overflow-hidden"
                   style={{
-                    left: `${mmToPx(activeTemplate.margins)}px`,
-                    right: `${mmToPx(activeTemplate.margins)}px`,
-                    top: `${mmToPx(activeTemplate.margins)}px`,
-                    bottom: `${mmToPx(activeTemplate.margins)}px`
+                    width: `${canvasWidthPx}px`,
+                    height: `${canvasHeightPx}px`,
+                    transform: `scale(${zoom / 100})`,
+                    transformOrigin: 'top left',
+                    position: 'absolute',
+                    left: 0,
+                    top: 0
                   }}
                 >
-                  <span className="text-[6px] text-gray-400 font-mono tracking-wider">PRINTABLE MARGIN ({activeTemplate.margins}mm)</span>
-                  <span className="text-[6px] text-gray-400 font-mono tracking-wider">A4 Portrait Canvas</span>
-                </div>
+                  {/* Visual guideline mesh background */}
+                  <div className="absolute inset-0 opacity-[0.03] pointer-events-none" style={{
+                    backgroundImage: 'radial-gradient(circle, #000 1px, transparent 1px)',
+                    backgroundSize: '10px 10px'
+                  }} />
 
-                {/* Render sections as RND elements */}
-                {activeTemplate.sections.map(sec => {
-                  if (!sec.visible) return null;
+                  {/* Margins Border Frame */}
+                  <div 
+                    className="absolute border border-dashed border-neutral-300 pointer-events-none flex justify-between p-1"
+                    style={{
+                      left: `${mmToPx(activeTemplate.margins)}px`,
+                      right: `${mmToPx(activeTemplate.margins)}px`,
+                      top: `${mmToPx(activeTemplate.margins)}px`,
+                      bottom: `${mmToPx(activeTemplate.margins)}px`
+                    }}
+                  >
+                    <span className="text-[6px] text-gray-400 font-mono tracking-wider">PRINTABLE MARGIN ({activeTemplate.margins}mm)</span>
+                    <span className="text-[6px] text-gray-400 font-mono tracking-wider">A4 Portrait Canvas</span>
+                  </div>
 
-                  const isSelected = activeSectionId === sec.id;
-                  const borderStyleClass = sec.borderStyle !== 'none' 
-                    ? `border-${sec.borderWidth} ${sec.borderStyle}` 
-                    : 'border-none';
+                  {/* Render sections as RND elements */}
+                  {activeTemplate.sections.map(sec => {
+                    if (!sec.visible) return null;
 
-                  return (
-                    <Rnd
-                      key={sec.id}
-                      size={{
-                        width: mmToPx(sec.width),
-                        height: mmToPx(sec.height)
-                      }}
-                      position={{
-                        x: mmToPx(sec.x),
-                        y: mmToPx(sec.y)
-                      }}
-                      bounds="parent"
-                      onDragStop={(e, d) => handleSectionDragStop(sec.id, d.x, d.y)}
-                      onResizeStop={(e, direction, ref, delta, position) => {
-                        handleSectionResizeStop(
-                          sec.id,
-                          parseInt(ref.style.width, 10),
-                          parseInt(ref.style.height, 10),
-                          position.x,
-                          position.y
-                        );
-                      }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setActiveSectionId(sec.id);
-                      }}
-                      className={`transition-all duration-150 backdrop-blur-[1px] flex flex-col justify-between overflow-hidden cursor-grab active:cursor-grabbing ${
-                        isSelected
-                          ? 'ring-4 ring-offset-2 ring-purple-600 shadow-2xl z-40 scale-[1.005]'
-                          : 'z-20 hover:scale-[1.002] border border-transparent hover:border-purple-400/50'
-                      }`}
-                      style={{
-                        borderRadius: `${sec.cornerRadius}mm`,
-                        zIndex: sec.zIndex,
-                        transform: `rotate(${sec.rotation || 0}deg)`
-                      }}
-                    >
-                      {/* Interactive Card Section Outer Component wrapper */}
-                      <div className="w-full h-full relative group">
-                        {renderSectionContent(sec)}
+                    const isSelected = activeSectionId === sec.id;
+                    const borderStyleClass = sec.borderStyle !== 'none' 
+                      ? `border-${sec.borderWidth} ${sec.borderStyle}` 
+                      : 'border-none';
 
-                        {/* Interactive overlay layer to indicate section label and bounds inside designer */}
-                        <div className={`absolute inset-0 bg-black/5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none flex items-start p-1.5`}>
-                          <span className="text-[8px] font-black uppercase tracking-wider text-black bg-white/90 border border-neutral-300 px-2 py-0.5 rounded shadow">
-                            {sec.name} ({sec.width}x{sec.height}mm)
-                          </span>
+                    return (
+                      <Rnd
+                        key={sec.id}
+                        scale={zoom / 100}
+                        size={{
+                          width: mmToPx(sec.width),
+                          height: mmToPx(sec.height)
+                        }}
+                        position={{
+                          x: mmToPx(sec.x),
+                          y: mmToPx(sec.y)
+                        }}
+                        bounds="parent"
+                        onDragStop={(e, d) => handleSectionDragStop(sec.id, d.x, d.y)}
+                        onResizeStop={(e, direction, ref, delta, position) => {
+                          handleSectionResizeStop(
+                            sec.id,
+                            parseInt(ref.style.width, 10),
+                            parseInt(ref.style.height, 10),
+                            position.x,
+                            position.y
+                          );
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveSectionId(sec.id);
+                        }}
+                        className={`transition-all duration-150 backdrop-blur-[1px] flex flex-col justify-between overflow-hidden cursor-grab active:cursor-grabbing ${
+                          isSelected
+                            ? 'ring-4 ring-offset-2 ring-purple-600 shadow-2xl z-40 scale-[1.005]'
+                            : 'z-20 hover:scale-[1.002] border border-transparent hover:border-purple-400/50'
+                        }`}
+                        style={{
+                          borderRadius: `${sec.cornerRadius}mm`,
+                          zIndex: sec.zIndex,
+                          transform: `rotate(${sec.rotation || 0}deg)`
+                        }}
+                      >
+                        {/* Interactive Card Section Outer Component wrapper */}
+                        <div className="w-full h-full relative group">
+                          {renderSectionContent(sec)}
+
+                          {/* Interactive overlay layer to indicate section label and bounds inside designer */}
+                          <div className={`absolute inset-0 bg-black/5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none flex items-start p-1.5`}>
+                            <span className="text-[8px] font-black uppercase tracking-wider text-black bg-white/90 border border-neutral-300 px-2 py-0.5 rounded shadow">
+                              {sec.name} ({sec.width}x{sec.height}mm)
+                            </span>
+                          </div>
                         </div>
-                      </div>
-                    </Rnd>
-                  );
-                })}
+                      </Rnd>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           ) : (
@@ -577,262 +1195,926 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
 
           {/* 3. Right Sidebar Panel: Selected Section Layout and Styling properties */}
           {activeTemplate && activeSection && (
-            <aside className="w-80 bg-[#121212] border-l border-white/10 flex flex-col overflow-y-auto custom-scrollbar p-5 space-y-6">
+            <aside className="w-80 bg-[#121212] border-l border-white/10 flex flex-col overflow-y-auto custom-scrollbar p-5 space-y-5">
               
-              {/* Template Global Options */}
-              <div className="space-y-4 pb-4 border-b border-white/5">
-                <h3 className="text-[10px] font-black uppercase tracking-widest text-orange-400 flex items-center gap-1.5">
-                  <Icon name="sliders" size={12} /> Paper Layout
-                </h3>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] text-gray-400 font-bold uppercase">Paper Size</label>
-                    <select
-                      value={activeTemplate.paperSize}
-                      onChange={(e) => setActiveTemplate({ ...activeTemplate, paperSize: e.target.value as any })}
-                      className="w-full bg-black text-white text-xs px-2.5 py-1.5 border border-white/10 rounded-xl focus:outline-none"
-                    >
-                      <option value="A4">A4 Portrait</option>
-                      <option value="A5">A5</option>
-                      <option value="A6">A6</option>
-                      <option value="Custom">Custom</option>
-                    </select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] text-gray-400 font-bold uppercase">Orientation</label>
-                    <select
-                      value={activeTemplate.orientation}
-                      onChange={(e) => setActiveTemplate({ ...activeTemplate, orientation: e.target.value as any })}
-                      className="w-full bg-black text-white text-xs px-2.5 py-1.5 border border-white/10 rounded-xl focus:outline-none"
-                    >
-                      <option value="Portrait">Portrait</option>
-                      <option value="Landscape">Landscape</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-[10px] text-gray-400 font-bold uppercase flex justify-between">
-                    <span>Print Margins (mm)</span>
-                    <span className="font-mono text-purple-400 font-bold">{activeTemplate.margins}mm</span>
-                  </label>
-                  <input
-                    type="range"
-                    min="0"
-                    max="30"
-                    step="1"
-                    value={activeTemplate.margins}
-                    onChange={(e) => setActiveTemplate({ ...activeTemplate, margins: parseInt(e.target.value, 10) })}
-                    className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
-                  />
-                </div>
+              {/* Double-Tab Panel Headings */}
+              <div className="grid grid-cols-2 gap-1.5 bg-black/60 p-1 rounded-2xl border border-white/5 shrink-0">
+                <button
+                  onClick={() => setRightActiveTab('master')}
+                  className={`py-2 text-[10px] font-black uppercase tracking-wider rounded-xl transition-all ${
+                    rightActiveTab === 'master'
+                      ? 'bg-[#ff8c00] text-white shadow-lg'
+                      : 'text-gray-400 hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  📝 Master Info
+                </button>
+                <button
+                  onClick={() => setRightActiveTab('layout')}
+                  className={`py-2 text-[10px] font-black uppercase tracking-wider rounded-xl transition-all ${
+                    rightActiveTab === 'layout'
+                      ? 'bg-purple-600 text-white shadow-lg'
+                      : 'text-gray-400 hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  📐 Section Layout
+                </button>
               </div>
 
-              {/* Specific Section Layout properties */}
-              <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <h3 className="text-[10px] font-black uppercase tracking-widest text-purple-400 flex items-center gap-1.5">
-                    <Icon name="layers" size={12} /> Section Settings
-                  </h3>
-                  <div className="flex items-center gap-1.5">
-                    <input
-                      type="checkbox"
-                      id="section-visible"
-                      checked={activeSection.visible}
-                      onChange={(e) => updateSectionProperty(activeSectionId, 'visible', e.target.checked)}
-                      className="w-3.5 h-3.5 accent-purple-600 rounded bg-black border border-white/10"
-                    />
-                    <label htmlFor="section-visible" className="text-[10px] text-gray-400 uppercase font-black cursor-pointer">Visible</label>
+              {/* TAB 1: MASTER INFORMATION EDITOR */}
+              {rightActiveTab === 'master' && (
+                <div className="space-y-4 animate-in fade-in duration-150">
+                  <div className="pb-3 border-b border-white/5">
+                    <h3 className="text-[10px] font-black uppercase tracking-widest text-[#ff8c00] flex items-center gap-1.5">
+                      <Icon name="sliders" size={12} /> Master Product Entry
+                    </h3>
+                    <p className="text-[9px] text-gray-500 mt-1 font-sans">
+                      This is the single master database record source. Changes here immediately synchronize across all Sections.
+                    </p>
                   </div>
-                </div>
 
-                {/* Section selection tabs */}
-                <div className="grid grid-cols-4 gap-1 bg-black/40 p-1 rounded-xl">
-                  {activeTemplate.sections.map(s => (
-                    <button
-                      key={s.id}
-                      onClick={() => setActiveSectionId(s.id)}
-                      className={`py-1 text-[8px] font-black uppercase tracking-tighter rounded-lg transition-all ${
-                        activeSectionId === s.id
-                          ? 'bg-purple-600 text-white shadow'
-                          : 'text-gray-500 hover:text-white'
-                      }`}
-                      title={s.name}
-                    >
-                      {s.id === 'master_info' ? 'Master' : s.id === 'kanban_pulled' ? 'Pulled' : s.id === 'warehouse_id' ? 'ID' : 'Edge'}
-                    </button>
-                  ))}
-                </div>
+                  {/* Hidden image input */}
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleImageUpload(file);
+                    }}
+                  />
 
-                <div className="bg-black/20 p-4 border border-white/5 rounded-2xl space-y-4 text-xs">
-                  {/* Position coordinates inputs */}
-                  <div className="grid grid-cols-2 gap-3">
+                  {/* Template Global Identity Parameters */}
+                  <div className="space-y-3 bg-black/20 p-4 border border-white/5 rounded-2xl">
+                    <span className="text-[9px] font-black uppercase tracking-wider text-gray-400 block">Template Properties</span>
+                    
                     <div className="space-y-1.5">
-                      <label className="text-[10px] text-gray-500 font-extrabold uppercase">Width (mm)</label>
+                      <label className="text-[9px] text-gray-500 font-extrabold uppercase">Template Name</label>
                       <input
-                        type="number"
-                        min="10"
-                        max="297"
-                        value={activeSection.width}
-                        onChange={(e) => updateSectionProperty(activeSectionId, 'width', parseInt(e.target.value, 10) || 10)}
-                        className="w-full bg-black border border-white/10 px-2.5 py-1.5 rounded-xl text-white font-mono text-center focus:outline-none focus:border-purple-500"
+                        type="text"
+                        value={masterInfo.templateName}
+                        onChange={(e) => handleUpdateMasterInfo('templateName', e.target.value.toUpperCase())}
+                        placeholder="ENTER TEMPLATE NAME..."
+                        className="w-full bg-black border border-white/10 px-3 py-2 rounded-xl text-white text-xs focus:outline-none focus:border-purple-500 uppercase"
                       />
                     </div>
+
                     <div className="space-y-1.5">
-                      <label className="text-[10px] text-gray-500 font-extrabold uppercase">Height (mm)</label>
-                      <input
-                        type="number"
-                        min="10"
-                        max="297"
-                        value={activeSection.height}
-                        onChange={(e) => updateSectionProperty(activeSectionId, 'height', parseInt(e.target.value, 10) || 10)}
-                        className="w-full bg-black border border-white/10 px-2.5 py-1.5 rounded-xl text-white font-mono text-center focus:outline-none focus:border-purple-500"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] text-gray-500 font-extrabold uppercase">Position X (mm)</label>
-                      <input
-                        type="number"
-                        min="0"
-                        max="210"
-                        value={activeSection.x}
-                        onChange={(e) => updateSectionProperty(activeSectionId, 'x', parseInt(e.target.value, 10) || 0)}
-                        className="w-full bg-black border border-white/10 px-2.5 py-1.5 rounded-xl text-white font-mono text-center focus:outline-none focus:border-purple-500"
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] text-gray-500 font-extrabold uppercase">Position Y (mm)</label>
-                      <input
-                        type="number"
-                        min="0"
-                        max="297"
-                        value={activeSection.y}
-                        onChange={(e) => updateSectionProperty(activeSectionId, 'y', parseInt(e.target.value, 10) || 0)}
-                        className="w-full bg-black border border-white/10 px-2.5 py-1.5 rounded-xl text-white font-mono text-center focus:outline-none focus:border-purple-500"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Aesthetic and spacing options */}
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] text-gray-500 font-extrabold uppercase flex justify-between">
-                      <span>Inner Padding (mm)</span>
-                      <span className="font-mono text-purple-400 font-bold">{activeSection.padding}mm</span>
-                    </label>
-                    <input
-                      type="range"
-                      min="0"
-                      max="15"
-                      step="1"
-                      value={activeSection.padding}
-                      onChange={(e) => updateSectionProperty(activeSectionId, 'padding', parseInt(e.target.value, 10))}
-                      className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
-                    />
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] text-gray-500 font-extrabold uppercase flex justify-between">
-                      <span>Corner Radius (mm)</span>
-                      <span className="font-mono text-purple-400 font-bold">{activeSection.cornerRadius}mm</span>
-                    </label>
-                    <input
-                      type="range"
-                      min="0"
-                      max="10"
-                      step="0.5"
-                      value={activeSection.cornerRadius}
-                      onChange={(e) => updateSectionProperty(activeSectionId, 'cornerRadius', parseFloat(e.target.value))}
-                      className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
-                    />
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] text-gray-500 font-extrabold uppercase flex justify-between">
-                      <span>Border Width (mm)</span>
-                      <span className="font-mono text-purple-400 font-bold">{activeSection.borderWidth}mm</span>
-                    </label>
-                    <input
-                      type="range"
-                      min="0"
-                      max="5"
-                      step="0.25"
-                      value={activeSection.borderWidth}
-                      onChange={(e) => updateSectionProperty(activeSectionId, 'borderWidth', parseFloat(e.target.value))}
-                      className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] text-gray-500 font-extrabold uppercase">Border Style</label>
+                      <label className="text-[9px] text-gray-500 font-extrabold uppercase">Template Type</label>
                       <select
-                        value={activeSection.borderStyle}
-                        onChange={(e) => updateSectionProperty(activeSectionId, 'borderStyle', e.target.value)}
-                        className="w-full bg-black text-white text-xs px-2.5 py-1.5 border border-white/10 rounded-xl focus:outline-none"
+                        value={masterInfo.templateType}
+                        onChange={(e) => handleUpdateMasterInfo('templateType', e.target.value)}
+                        className="w-full bg-black text-white text-xs px-3 py-2 border border-white/10 rounded-xl focus:outline-none"
                       >
-                        <option value="solid">Solid</option>
-                        <option value="dashed">Dashed</option>
-                        <option value="none">None</option>
+                        <option value="A4">A4 Portrait Design</option>
+                        <option value="A5">A5 Small Design</option>
+                        <option value="A6">A6 Pocket Design</option>
+                        <option value="Custom">Custom Blueprint</option>
                       </select>
                     </div>
+                  </div>
+
+                  {/* Core Product Specifications */}
+                  <div className="space-y-3 bg-black/20 p-4 border border-white/5 rounded-2xl">
+                    <span className="text-[9px] font-black uppercase tracking-wider text-gray-400 block">Product Identification</span>
+
                     <div className="space-y-1.5">
-                      <label className="text-[10px] text-gray-500 font-extrabold uppercase">Rotation (°)</label>
+                      <label className="text-[9px] text-gray-500 font-extrabold uppercase">Internal Product Number (Kanban ID)</label>
                       <input
-                        type="number"
-                        min="0"
-                        max="360"
-                        value={activeSection.rotation || 0}
-                        onChange={(e) => updateSectionProperty(activeSectionId, 'rotation', parseInt(e.target.value, 10) || 0)}
-                        className="w-full bg-black border border-white/10 px-2.5 py-1.5 rounded-xl text-white font-mono text-center focus:outline-none focus:border-purple-500"
+                        type="text"
+                        value={masterInfo.internalProductNumber}
+                        onChange={(e) => handleUpdateMasterInfo('internalProductNumber', e.target.value.toUpperCase())}
+                        placeholder="e.g. KAN-000001"
+                        className="w-full bg-black border border-white/10 px-3 py-2 rounded-xl text-white text-xs font-mono focus:outline-none focus:border-purple-500 uppercase"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[9px] text-gray-500 font-extrabold uppercase">Product Name</label>
+                      <input
+                        type="text"
+                        value={masterInfo.productName}
+                        onChange={(e) => handleUpdateMasterInfo('productName', e.target.value.toUpperCase())}
+                        placeholder="e.g. SOLID OAK MOLDING 3000MM"
+                        className="w-full bg-black border border-white/10 px-3 py-2 rounded-xl text-white text-xs focus:outline-none focus:border-purple-500 uppercase"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] text-gray-500 font-extrabold uppercase">Supplier</label>
+                        <input
+                          type="text"
+                          value={masterInfo.supplier}
+                          onChange={(e) => handleUpdateMasterInfo('supplier', e.target.value)}
+                          placeholder="Supplier Name"
+                          className="w-full bg-black border border-white/10 px-3 py-2 rounded-xl text-white text-xs focus:outline-none focus:border-purple-500"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] text-gray-500 font-extrabold uppercase">Supplier Part No</label>
+                        <input
+                          type="text"
+                          value={masterInfo.supplierPartNumber}
+                          onChange={(e) => handleUpdateMasterInfo('supplierPartNumber', e.target.value.toUpperCase())}
+                          placeholder="e.g. OAK-CORN"
+                          className="w-full bg-black border border-white/10 px-3 py-2 rounded-xl text-white text-xs font-mono focus:outline-none focus:border-purple-500 uppercase"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Logistics and Coordinates */}
+                  <div className="space-y-3 bg-black/20 p-4 border border-white/5 rounded-2xl">
+                    <span className="text-[9px] font-black uppercase tracking-wider text-gray-400 block">Warehouse Logistics</span>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] text-gray-500 font-extrabold uppercase">Order Quantity</label>
+                        <input
+                          type="text"
+                          value={masterInfo.orderQuantity}
+                          onChange={(e) => handleUpdateMasterInfo('orderQuantity', e.target.value)}
+                          placeholder="e.g. 50 PCS"
+                          className="w-full bg-black border border-white/10 px-3 py-2 rounded-xl text-white text-xs focus:outline-none focus:border-purple-500"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] text-gray-500 font-extrabold uppercase">Delivery Time</label>
+                        <input
+                          type="text"
+                          value={masterInfo.deliveryTime}
+                          onChange={(e) => handleUpdateMasterInfo('deliveryTime', e.target.value)}
+                          placeholder="e.g. 3 Days"
+                          className="w-full bg-black border border-white/10 px-3 py-2 rounded-xl text-white text-xs focus:outline-none focus:border-purple-500"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] text-gray-500 font-extrabold uppercase">Location</label>
+                        <input
+                          type="text"
+                          value={masterInfo.location}
+                          onChange={(e) => handleUpdateMasterInfo('location', e.target.value.toUpperCase())}
+                          placeholder="e.g. A12"
+                          className="w-full bg-black border border-white/10 px-3 py-2 rounded-xl text-white text-xs font-mono text-center focus:outline-none focus:border-purple-500 uppercase"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] text-gray-500 font-extrabold uppercase">Location Colour</label>
+                        <select
+                          value={masterInfo.locationColour}
+                          onChange={(e) => handleUpdateMasterInfo('locationColour', e.target.value.toUpperCase())}
+                          className="w-full bg-black text-white text-xs px-3 py-2 border border-white/10 rounded-xl focus:outline-none font-bold"
+                        >
+                          <option value="GREEN">GREEN</option>
+                          <option value="BLUE">BLUE</option>
+                          <option value="RED">RED</option>
+                          <option value="YELLOW">YELLOW</option>
+                          <option value="ORANGE">ORANGE</option>
+                          <option value="PURPLE">PURPLE</option>
+                          <option value="GRAY">GRAY</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[9px] text-gray-500 font-extrabold uppercase">Bin Quantity</label>
+                      <input
+                        type="text"
+                        value={masterInfo.binQuantity || ''}
+                        onChange={(e) => handleUpdateMasterInfo('binQuantity', e.target.value)}
+                        placeholder="e.g. 2 Bins (25/Bin)"
+                        className="w-full bg-black border border-white/10 px-3 py-2 rounded-xl text-white text-xs focus:outline-none focus:border-purple-500"
                       />
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] text-gray-500 font-extrabold uppercase">BG Color</label>
-                      <div className="flex gap-2">
-                        <input
-                          type="color"
-                          value={activeSection.backgroundColor}
-                          onChange={(e) => updateSectionProperty(activeSectionId, 'backgroundColor', e.target.value)}
-                          className="w-8 h-8 rounded-lg overflow-hidden bg-transparent cursor-pointer border border-white/15"
-                        />
-                        <input
-                          type="text"
-                          value={activeSection.backgroundColor}
-                          onChange={(e) => updateSectionProperty(activeSectionId, 'backgroundColor', e.target.value)}
-                          className="w-full bg-black text-white font-mono text-center text-xs border border-white/10 px-1 rounded-xl focus:outline-none"
+                  {/* Interactive Product Image Widget */}
+                  <div className="space-y-3 bg-black/20 p-4 border border-white/5 rounded-2xl">
+                    <span className="text-[9px] font-black uppercase tracking-wider text-gray-400 block">Product Image</span>
+                    
+                    {masterInfo.productImage ? (
+                      <div className="space-y-3">
+                        <div className="relative w-full h-32 bg-black rounded-xl border border-white/10 overflow-hidden flex items-center justify-center">
+                          <img
+                            src={masterInfo.productImage}
+                            alt="Master Product representation"
+                            className="max-h-full object-contain"
+                            referrerPolicy="no-referrer"
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => fileInputRef.current?.click()}
+                            className="py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[9px] font-black uppercase text-gray-300 transition-colors flex items-center justify-center gap-1"
+                          >
+                            <Icon name="refresh-cw" size={10} /> Replace
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateMasterInfo('productImage', '')}
+                            className="py-1.5 bg-red-600/10 hover:bg-red-600/20 border border-red-500/20 rounded-lg text-[9px] font-black uppercase text-red-400 transition-colors flex items-center justify-center gap-1"
+                          >
+                            <Icon name="trash" size={10} /> Delete
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setIsPreviewModalOpen(true)}
+                            className="py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[9px] font-black uppercase text-gray-300 transition-colors flex items-center justify-center gap-1"
+                          >
+                            <Icon name="eye" size={10} /> Preview
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCropImageSrc(masterInfo.productImage);
+                              setCropZoom(1);
+                              setCropPanX(0);
+                              setCropPanY(0);
+                              setCropRotation(0);
+                              setIsCropModalOpen(true);
+                            }}
+                            className="py-1.5 bg-purple-600/10 hover:bg-purple-600/20 border border-purple-500/20 rounded-lg text-[9px] font-black uppercase text-purple-400 transition-colors flex items-center justify-center gap-1"
+                          >
+                            <Icon name="crop" size={10} /> Crop
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div
+                        onDragOver={(e) => { e.preventDefault(); }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          const file = e.dataTransfer.files?.[0];
+                          if (file) handleImageUpload(file);
+                        }}
+                        onClick={() => fileInputRef.current?.click()}
+                        className="border-2 border-dashed border-white/10 hover:border-purple-500/40 bg-black/40 hover:bg-black/60 rounded-2xl p-5 text-center cursor-pointer transition-all flex flex-col items-center justify-center gap-2"
+                      >
+                        <Icon name="upload" size={24} className="text-gray-500" />
+                        <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">Upload Product Image</span>
+                        <span className="text-[8px] text-gray-600 uppercase">Drag-and-drop or click to choose file</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Auto-generated QR Code Widget */}
+                  <div className="space-y-3 bg-black/20 p-4 border border-white/5 rounded-2xl">
+                    <div className="flex justify-between items-center">
+                      <span className="text-[9px] font-black uppercase tracking-wider text-gray-400">Auto-Generated QR Code</span>
+                      <span className="text-[8px] font-mono text-purple-400 font-bold flex items-center gap-1"><Icon name="lock" size={8} /> READ-ONLY</span>
+                    </div>
+
+                    <div className="flex items-center gap-3 bg-black/40 p-2.5 rounded-xl border border-white/5">
+                      <div className="bg-white p-1 rounded-lg shrink-0 border border-white/10 flex items-center justify-center">
+                        <QRCodeRenderer
+                          text={masterInfo.qrCode || ''}
+                          size={48}
+                          className="w-12 h-12 flex items-center justify-center"
                         />
                       </div>
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] text-gray-500 font-extrabold uppercase">Border Color</label>
-                      <div className="flex gap-2">
-                        <input
-                          type="color"
-                          value={activeSection.borderColor}
-                          onChange={(e) => updateSectionProperty(activeSectionId, 'borderColor', e.target.value)}
-                          className="w-8 h-8 rounded-lg overflow-hidden bg-transparent cursor-pointer border border-white/15"
-                        />
-                        <input
-                          type="text"
-                          value={activeSection.borderColor}
-                          onChange={(e) => updateSectionProperty(activeSectionId, 'borderColor', e.target.value)}
-                          className="w-full bg-black text-white font-mono text-center text-xs border border-white/10 px-1 rounded-xl focus:outline-none"
-                        />
+                      <div className="space-y-0.5 min-w-0">
+                        <span className="text-[8px] font-black uppercase tracking-wider text-gray-500 block">Encoded Schema Data</span>
+                        <p className="text-[8px] font-mono text-gray-400 truncate uppercase">ID: {masterInfo.internalProductNumber || 'N/A'}</p>
+                        <p className="text-[8px] font-mono text-gray-400 truncate uppercase">LOC: {masterInfo.location || 'N/A'}</p>
                       </div>
                     </div>
                   </div>
                 </div>
-              </div>
+              )}
+
+              {/* TAB 2: SPECIFIC SECTION LAYOUT AND STYLE PROPERTIES */}
+              {rightActiveTab === 'layout' && (
+                <div className="space-y-5 animate-in fade-in duration-150">
+                  {/* Global Paper Configuration options */}
+                  <div className="space-y-4 pb-4 border-b border-white/5">
+                    <h3 className="text-[10px] font-black uppercase tracking-widest text-orange-400 flex items-center gap-1.5">
+                      <Icon name="sliders" size={12} /> Paper Layout
+                    </h3>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] text-gray-400 font-bold uppercase">Paper Size</label>
+                        <select
+                          value={activeTemplate.paperSize}
+                          onChange={(e) => setActiveTemplate({ ...activeTemplate, paperSize: e.target.value as any })}
+                          className="w-full bg-black text-white text-xs px-2.5 py-1.5 border border-white/10 rounded-xl focus:outline-none"
+                        >
+                          <option value="A4">A4 Portrait</option>
+                          <option value="A5">A5</option>
+                          <option value="A6">A6</option>
+                          <option value="Custom">Custom</option>
+                        </select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] text-gray-400 font-bold uppercase">Orientation</label>
+                        <select
+                          value={activeTemplate.orientation}
+                          onChange={(e) => setActiveTemplate({ ...activeTemplate, orientation: e.target.value as any })}
+                          className="w-full bg-black text-white text-xs px-2.5 py-1.5 border border-white/10 rounded-xl focus:outline-none"
+                        >
+                          <option value="Portrait">Portrait</option>
+                          <option value="Landscape">Landscape</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] text-gray-400 font-bold uppercase flex justify-between">
+                        <span>Print Margins (mm)</span>
+                        <span className="font-mono text-purple-400 font-bold">{activeTemplate.margins}mm</span>
+                      </label>
+                      <input
+                        type="range"
+                        min="0"
+                        max="30"
+                        step="1"
+                        value={activeTemplate.margins}
+                        onChange={(e) => setActiveTemplate({ ...activeTemplate, margins: parseInt(e.target.value, 10) })}
+                        className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Section Properties List */}
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-center">
+                      <h3 className="text-[10px] font-black uppercase tracking-widest text-purple-400 flex items-center gap-1.5">
+                        <Icon name="layers" size={12} /> Section Settings
+                      </h3>
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="checkbox"
+                          id="section-visible"
+                          checked={activeSection.visible}
+                          onChange={(e) => updateSectionProperty(activeSectionId, 'visible', e.target.checked)}
+                          className="w-3.5 h-3.5 accent-purple-600 rounded bg-black border border-white/10"
+                        />
+                        <label htmlFor="section-visible" className="text-[10px] text-gray-400 uppercase font-black cursor-pointer">Visible</label>
+                      </div>
+                    </div>
+
+                    {/* Quick section switcher buttons */}
+                    <div className="grid grid-cols-4 gap-1 bg-black/40 p-1 rounded-xl">
+                      {activeTemplate.sections.map(s => (
+                        <button
+                          key={s.id}
+                          onClick={() => setActiveSectionId(s.id)}
+                          className={`py-1 text-[8px] font-black uppercase tracking-tighter rounded-lg transition-all ${
+                            activeSectionId === s.id
+                              ? 'bg-purple-600 text-white shadow'
+                              : 'text-gray-500 hover:text-white'
+                          }`}
+                          title={s.name}
+                        >
+                          {s.id === 'master_info' ? 'Master' : s.id === 'kanban_pulled' ? 'Pulled' : s.id === 'warehouse_id' ? 'ID' : 'Edge'}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="bg-black/20 p-4 border border-white/5 rounded-2xl space-y-4 text-xs font-sans">
+                      {/* Section coordinates inputs */}
+                      <div className="grid grid-cols-2 gap-3 font-sans">
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] text-gray-500 font-extrabold uppercase">Width (mm)</label>
+                          <input
+                            type="number"
+                            min="10"
+                            max="297"
+                            value={activeSection.width}
+                            onChange={(e) => updateSectionProperty(activeSectionId, 'width', parseInt(e.target.value, 10) || 10)}
+                            className="w-full bg-black border border-white/10 px-2.5 py-1.5 rounded-xl text-white font-mono text-center focus:outline-none focus:border-purple-500"
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] text-gray-500 font-extrabold uppercase">Height (mm)</label>
+                          <input
+                            type="number"
+                            min="10"
+                            max="297"
+                            value={activeSection.height}
+                            onChange={(e) => updateSectionProperty(activeSectionId, 'height', parseInt(e.target.value, 10) || 10)}
+                            className="w-full bg-black border border-white/10 px-2.5 py-1.5 rounded-xl text-white font-mono text-center focus:outline-none focus:border-purple-500"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3 font-sans">
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] text-gray-500 font-extrabold uppercase">Position X (mm)</label>
+                          <input
+                            type="number"
+                            min="0"
+                            max="210"
+                            value={activeSection.x}
+                            onChange={(e) => updateSectionProperty(activeSectionId, 'x', parseInt(e.target.value, 10) || 0)}
+                            className="w-full bg-black border border-white/10 px-2.5 py-1.5 rounded-xl text-white font-mono text-center focus:outline-none focus:border-purple-500"
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] text-gray-500 font-extrabold uppercase">Position Y (mm)</label>
+                          <input
+                            type="number"
+                            min="0"
+                            max="297"
+                            value={activeSection.y}
+                            onChange={(e) => updateSectionProperty(activeSectionId, 'y', parseInt(e.target.value, 10) || 0)}
+                            className="w-full bg-black border border-white/10 px-2.5 py-1.5 rounded-xl text-white font-mono text-center focus:outline-none focus:border-purple-500"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Spacings sliders */}
+                      <div className="space-y-1.5 font-sans">
+                        <label className="text-[10px] text-gray-500 font-extrabold uppercase flex justify-between">
+                          <span>Inner Padding (mm)</span>
+                          <span className="font-mono text-purple-400 font-bold">{activeSection.padding}mm</span>
+                        </label>
+                        <input
+                          type="range"
+                          min="0"
+                          max="15"
+                          step="1"
+                          value={activeSection.padding}
+                          onChange={(e) => updateSectionProperty(activeSectionId, 'padding', parseInt(e.target.value, 10))}
+                          className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5 font-sans">
+                        <label className="text-[10px] text-gray-500 font-extrabold uppercase flex justify-between">
+                          <span>Corner Radius (mm)</span>
+                          <span className="font-mono text-purple-400 font-bold">{activeSection.cornerRadius}mm</span>
+                        </label>
+                        <input
+                          type="range"
+                          min="0"
+                          max="10"
+                          step="0.5"
+                          value={activeSection.cornerRadius}
+                          onChange={(e) => updateSectionProperty(activeSectionId, 'cornerRadius', parseFloat(e.target.value))}
+                          className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5 font-sans">
+                        <label className="text-[10px] text-gray-500 font-extrabold uppercase flex justify-between">
+                          <span>Border Width (mm)</span>
+                          <span className="font-mono text-purple-400 font-bold">{activeSection.borderWidth}mm</span>
+                        </label>
+                        <input
+                          type="range"
+                          min="0"
+                          max="5"
+                          step="0.25"
+                          value={activeSection.borderWidth}
+                          onChange={(e) => updateSectionProperty(activeSectionId, 'borderWidth', parseFloat(e.target.value))}
+                          className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3 font-sans">
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] text-gray-500 font-extrabold uppercase">Border Style</label>
+                          <select
+                            value={activeSection.borderStyle}
+                            onChange={(e) => updateSectionProperty(activeSectionId, 'borderStyle', e.target.value)}
+                            className="w-full bg-black text-white text-xs px-2.5 py-1.5 border border-white/10 rounded-xl focus:outline-none"
+                          >
+                            <option value="solid">Solid</option>
+                            <option value="dashed">Dashed</option>
+                            <option value="none">None</option>
+                          </select>
+                        </div>
+                        <div className="space-y-1.5 font-sans">
+                          <label className="text-[10px] text-gray-500 font-extrabold uppercase">Rotation (°)</label>
+                          <input
+                            type="number"
+                            min="0"
+                            max="360"
+                            value={activeSection.rotation || 0}
+                            onChange={(e) => updateSectionProperty(activeSectionId, 'rotation', parseInt(e.target.value, 10) || 0)}
+                            className="w-full bg-black border border-white/10 px-2.5 py-1.5 rounded-xl text-white font-mono text-center focus:outline-none focus:border-purple-500"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Aesthetics coloring */}
+                      <div className="grid grid-cols-2 gap-3 font-sans">
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] text-gray-500 font-extrabold uppercase">BG Color</label>
+                          <div className="flex gap-2 font-sans">
+                            <input
+                              type="color"
+                              value={activeSection.backgroundColor}
+                              onChange={(e) => updateSectionProperty(activeSectionId, 'backgroundColor', e.target.value)}
+                              className="w-8 h-8 rounded-lg overflow-hidden bg-transparent cursor-pointer border border-white/15"
+                            />
+                            <input
+                              type="text"
+                              value={activeSection.backgroundColor}
+                              onChange={(e) => updateSectionProperty(activeSectionId, 'backgroundColor', e.target.value)}
+                              className="w-full bg-black text-white font-mono text-center text-xs border border-white/10 px-1 rounded-xl focus:outline-none"
+                            />
+                          </div>
+                        </div>
+                        <div className="space-y-1.5 font-sans">
+                          <label className="text-[10px] text-gray-500 font-extrabold uppercase">Border Color</label>
+                          <div className="flex gap-2 font-sans">
+                            <input
+                              type="color"
+                              value={activeSection.borderColor}
+                              onChange={(e) => updateSectionProperty(activeSectionId, 'borderColor', e.target.value)}
+                              className="w-8 h-8 rounded-lg overflow-hidden bg-transparent cursor-pointer border border-white/15"
+                            />
+                            <input
+                              type="text"
+                              value={activeSection.borderColor}
+                              onChange={(e) => updateSectionProperty(activeSectionId, 'borderColor', e.target.value)}
+                              className="w-full bg-black text-white font-mono text-center text-xs border border-white/10 px-1 rounded-xl focus:outline-none"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </aside>
           )}
         </div>
       </div>
+
+      {/* 4. MODAL: FULL RESOLUTION IMAGE PREVIEW OVERLAY */}
+      {isPreviewModalOpen && masterInfo.productImage && (
+        <div className="fixed inset-0 z-[1500] bg-black/95 flex items-center justify-center p-6 animate-in fade-in">
+          <div className="relative bg-[#121212] border border-white/10 rounded-[2.5rem] p-6 max-w-2xl w-full flex flex-col items-center gap-6 font-sans">
+            <button
+              onClick={() => setIsPreviewModalOpen(false)}
+              className="absolute top-6 right-6 p-3 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white rounded-full transition-colors"
+            >
+              <Icon name="x" size={20} />
+            </button>
+            <h3 className="text-sm font-black uppercase tracking-widest text-white mt-2">
+              🔍 Product Image Preview
+            </h3>
+            <img
+              src={masterInfo.productImage}
+              alt="High Resolution Product representation"
+              className="max-h-[400px] object-contain rounded-2xl border border-white/5 bg-black"
+              referrerPolicy="no-referrer"
+            />
+            <p className="text-[10px] text-gray-400 uppercase font-bold text-center">
+              {masterInfo.productName || 'No Product Name Specified'}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* 5. MODAL: FINE-TUNED SLIDERS-BASED IMAGE CROPPING ENGINE */}
+      {isCropModalOpen && cropImageSrc && (
+        <div className="fixed inset-0 z-[1500] bg-black/95 flex items-center justify-center p-6 animate-in fade-in">
+          <div className="bg-[#121212] border border-white/10 rounded-[3rem] p-8 max-w-3xl w-full flex flex-col md:grid md:grid-cols-[1fr_280px] gap-8 shadow-2xl relative font-sans">
+            <button
+              onClick={() => setIsCropModalOpen(false)}
+              className="absolute top-6 right-6 p-3 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white rounded-full transition-colors"
+            >
+              <Icon name="x" size={20} />
+            </button>
+
+            {/* Left Frame: Image Canvas Zoom/Pan Crop Boundary Box */}
+            <div className="flex flex-col items-center justify-center gap-4">
+              <h3 className="text-sm font-black uppercase tracking-widest text-white self-start flex items-center gap-2">
+                ✂️ Crop Product Image
+              </h3>
+              
+              <div className="relative w-64 h-64 border border-white/15 rounded-2xl bg-neutral-950 overflow-hidden shadow-inner flex items-center justify-center">
+                {/* Visual crop border target mask */}
+                <div className="absolute inset-0 border-4 border-black/60 pointer-events-none z-10">
+                  <div className="w-full h-full border-2 border-dashed border-[#ff8c00] opacity-80" />
+                </div>
+                
+                {/* Live Visual transform representation of cropped section */}
+                <img
+                  src={cropImageSrc}
+                  alt="Cropping target"
+                  style={{
+                    transform: `translate(${cropPanX}px, ${cropPanY}px) scale(${cropZoom}) rotate(${cropRotation}deg)`,
+                    maxWidth: '100%',
+                    maxHeight: '100%',
+                    transition: 'none'
+                  }}
+                  className="object-contain pointer-events-none select-none"
+                  referrerPolicy="no-referrer"
+                />
+              </div>
+
+              <span className="text-[9px] text-gray-500 uppercase font-black tracking-widest text-center max-w-[240px]">
+                Preview bounds show the cropped area. Sliders calibrate positioning parameters.
+              </span>
+            </div>
+
+            {/* Right Frame: Slider calibration knobs */}
+            <div className="flex flex-col justify-between space-y-6 pt-4 border-t md:border-t-0 md:border-l border-white/5 md:pl-6">
+              <div className="space-y-4">
+                <span className="text-[10px] font-black uppercase tracking-wider text-[#ff8c00] block">Calibration Knobs</span>
+
+                {/* Zoom Knob */}
+                <div className="space-y-1.5">
+                  <div className="flex justify-between text-[10px] font-bold text-gray-400">
+                    <span>ZOOM</span>
+                    <span className="font-mono text-purple-400">{cropZoom.toFixed(2)}x</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="1"
+                    max="4"
+                    step="0.05"
+                    value={cropZoom}
+                    onChange={(e) => setCropZoom(parseFloat(e.target.value))}
+                    className="w-full h-1 bg-neutral-800 rounded appearance-none cursor-pointer accent-purple-500"
+                  />
+                </div>
+
+                {/* Pan X Knob */}
+                <div className="space-y-1.5">
+                  <div className="flex justify-between text-[10px] font-bold text-gray-400">
+                    <span>POSITION X</span>
+                    <span className="font-mono text-purple-400">{cropPanX}px</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="-150"
+                    max="150"
+                    step="1"
+                    value={cropPanX}
+                    onChange={(e) => setCropPanX(parseInt(e.target.value, 10))}
+                    className="w-full h-1 bg-neutral-800 rounded appearance-none cursor-pointer accent-purple-500"
+                  />
+                </div>
+
+                {/* Pan Y Knob */}
+                <div className="space-y-1.5">
+                  <div className="flex justify-between text-[10px] font-bold text-gray-400">
+                    <span>POSITION Y</span>
+                    <span className="font-mono text-purple-400">{cropPanY}px</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="-150"
+                    max="150"
+                    step="1"
+                    value={cropPanY}
+                    onChange={(e) => setCropPanY(parseInt(e.target.value, 10))}
+                    className="w-full h-1 bg-neutral-800 rounded appearance-none cursor-pointer accent-purple-500"
+                  />
+                </div>
+
+                {/* Rotation Knob */}
+                <div className="space-y-1.5">
+                  <div className="flex justify-between text-[10px] font-bold text-gray-400">
+                    <span>ROTATION</span>
+                    <span className="font-mono text-purple-400">{cropRotation}°</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="360"
+                    step="1"
+                    value={cropRotation}
+                    onChange={(e) => setCropRotation(parseInt(e.target.value, 10))}
+                    className="w-full h-1 bg-neutral-800 rounded appearance-none cursor-pointer accent-purple-500"
+                  />
+                </div>
+              </div>
+
+              {/* Action buttons */}
+              <div className="space-y-2">
+                <button
+                  onClick={handleApplyCrop}
+                  className="w-full py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-colors flex items-center justify-center gap-1.5"
+                >
+                  <Icon name="check" size={13} /> Save Crop Area
+                </button>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => {
+                      setCropZoom(1);
+                      setCropPanX(0);
+                      setCropPanY(0);
+                      setCropRotation(0);
+                    }}
+                    className="py-2 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white rounded-xl text-[9px] font-black uppercase tracking-wider transition-colors"
+                  >
+                    Reset Keys
+                  </button>
+                  <button
+                    onClick={() => setIsCropModalOpen(false)}
+                    className="py-2 bg-red-600/10 hover:bg-red-600/20 text-red-500 rounded-xl text-[9px] font-black uppercase tracking-wider transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+            
+            {/* Hidden canvas used to compile cropping modifications */}
+            <canvas
+              ref={cropCanvasRef}
+              width={400}
+              height={400}
+              className="hidden"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* 6. MODAL: SAVE LAYOUT METADATA DIALOG */}
+      {isSaveDialogOpen && (
+        <div className="fixed inset-0 z-[1600] bg-black/85 flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-[#121212] border border-white/10 rounded-3xl p-6 max-w-md w-full shadow-2xl relative space-y-4 font-sans">
+            <button
+              onClick={() => setIsSaveDialogOpen(false)}
+              className="absolute top-4 right-4 p-2 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white rounded-full transition-colors"
+            >
+              <Icon name="x" size={16} />
+            </button>
+            
+            <div className="space-y-1">
+              <h3 className="text-sm font-black uppercase tracking-widest text-[#ff8c00] flex items-center gap-1.5">
+                <Icon name="save" size={15} /> Save Template Layout
+              </h3>
+              <p className="text-[10px] text-gray-500 uppercase tracking-wide">
+                Provide specifications for automatic categorization & search
+              </p>
+            </div>
+
+            <div className="space-y-3.5">
+              {/* Template Name */}
+              <div className="space-y-1">
+                <label className="text-[9px] font-black uppercase tracking-widest text-gray-400 block">Template Name *</label>
+                <input
+                  type="text"
+                  placeholder="E.G. TSJ SINGLE CARD DESIGN"
+                  value={saveTemplateName}
+                  onChange={(e) => setSaveTemplateName(e.target.value.toUpperCase())}
+                  className="w-full px-3 py-2 bg-neutral-900 border border-white/10 rounded-xl text-xs text-white placeholder-gray-600 focus:outline-none focus:border-purple-500 transition-all font-bold"
+                />
+              </div>
+
+              {/* Product Name */}
+              <div className="space-y-1">
+                <label className="text-[9px] font-black uppercase tracking-widest text-gray-400 block">Product Name *</label>
+                <input
+                  type="text"
+                  placeholder="E.G. Birch Ply"
+                  value={saveProductName}
+                  onChange={(e) => setSaveProductName(e.target.value)}
+                  className="w-full px-3 py-2 bg-neutral-900 border border-white/10 rounded-xl text-xs text-white placeholder-gray-600 focus:outline-none focus:border-purple-500 transition-all font-semibold"
+                />
+                <span className="text-[8px] text-gray-500 uppercase font-mono tracking-tight block">
+                  Used for folder organisation (First letter A-Z)
+                </span>
+              </div>
+
+              {/* Category */}
+              <div className="space-y-1">
+                <label className="text-[9px] font-black uppercase tracking-widest text-gray-400 block">Category *</label>
+                <input
+                  type="text"
+                  placeholder="E.G. Boards, Screws, Hinges..."
+                  value={saveCategory}
+                  onChange={(e) => setSaveCategory(e.target.value)}
+                  className="w-full px-3 py-2 bg-neutral-900 border border-white/10 rounded-xl text-xs text-white placeholder-gray-600 focus:outline-none focus:border-purple-500 transition-all font-medium"
+                />
+              </div>
+
+              {/* Description */}
+              <div className="space-y-1">
+                <label className="text-[9px] font-black uppercase tracking-widest text-gray-400 block">Description (Optional)</label>
+                <textarea
+                  placeholder="Enter a brief summary or purpose for this template design..."
+                  value={saveDescription}
+                  onChange={(e) => setSaveDescription(e.target.value)}
+                  rows={2}
+                  className="w-full px-3 py-2 bg-neutral-900 border border-white/10 rounded-xl text-xs text-white placeholder-gray-600 focus:outline-none focus:border-purple-500 transition-all resize-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-2.5 pt-2">
+              <button
+                onClick={() => setIsSaveDialogOpen(false)}
+                className="flex-1 py-2 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmSave}
+                className="flex-1 py-2 bg-[#ff8c00] hover:bg-[#e07b00] text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-colors"
+              >
+                Save Design
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 7. MODAL: DUPLICATE TEMPLATE DIALOG */}
+      {isDuplicateDialogOpen && (
+        <div className="fixed inset-0 z-[1600] bg-black/85 flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-[#121212] border border-white/10 rounded-3xl p-6 max-w-md w-full shadow-2xl relative space-y-4 font-sans">
+            <button
+              onClick={() => setIsDuplicateDialogOpen(false)}
+              className="absolute top-4 right-4 p-2 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white rounded-full transition-colors"
+            >
+              <Icon name="x" size={16} />
+            </button>
+
+            <div className="space-y-1">
+              <h3 className="text-sm font-black uppercase tracking-widest text-purple-400 flex items-center gap-1.5">
+                <Icon name="copy" size={15} /> Duplicate Template
+              </h3>
+              <p className="text-[10px] text-gray-500 uppercase tracking-wide">
+                Clones all settings into a new template design file
+              </p>
+            </div>
+
+            <div className="space-y-3.5">
+              <div className="space-y-1">
+                <label className="text-[9px] font-black uppercase tracking-widest text-gray-400 block">New Product Name *</label>
+                <input
+                  type="text"
+                  placeholder="E.G. Red Oak Cornice"
+                  value={duplicateProductName}
+                  onChange={(e) => setDuplicateProductName(e.target.value)}
+                  className="w-full px-3 py-2 bg-neutral-900 border border-white/10 rounded-xl text-xs text-white placeholder-gray-600 focus:outline-none focus:border-purple-500 transition-all font-semibold"
+                />
+                <span className="text-[8px] text-gray-500 uppercase font-mono tracking-tight block">
+                  The copy will automatically group under the corresponding folder (A-Z)
+                </span>
+              </div>
+            </div>
+
+            <div className="flex gap-2.5 pt-2">
+              <button
+                onClick={() => setIsDuplicateDialogOpen(false)}
+                className="flex-1 py-2 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmDuplicate}
+                className="flex-1 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-colors"
+              >
+                Duplicate
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 8. MODAL: DELETE CONFIRMATION DIALOG */}
+      {isDeleteConfirmOpen && (
+        <div className="fixed inset-0 z-[1600] bg-black/85 flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-[#121212] border border-red-500/20 rounded-3xl p-6 max-w-sm w-full shadow-2xl relative space-y-4 font-sans text-center">
+            <div className="mx-auto w-12 h-12 bg-red-500/10 rounded-full flex items-center justify-center border border-red-500/20">
+              <Icon name="trash" className="text-red-500" size={20} />
+            </div>
+
+            <div className="space-y-2">
+              <h3 className="text-sm font-black uppercase tracking-widest text-red-500">
+                Confirm Deletion
+              </h3>
+              <p className="text-xs text-gray-400">
+                Are you sure you want to permanently delete <span className="font-extrabold text-white uppercase">"{activeTemplate?.templateName}"</span>?
+              </p>
+              <p className="text-[9px] text-gray-500 uppercase font-mono leading-tight">
+                This action is irreversible and will remove this layout design immediately.
+              </p>
+            </div>
+
+            <div className="flex gap-2.5 pt-2">
+              <button
+                onClick={() => setIsDeleteConfirmOpen(false)}
+                className="flex-1 py-2 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmDelete}
+                className="flex-1 py-2 bg-red-600 hover:bg-red-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-colors"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -49,6 +49,8 @@ export const WarehouseTemplate: React.FC<WarehouseTemplateProps> = ({
             cornerRadius={warehouseIdSec.cornerRadius}
             padding={warehouseIdSec.padding}
             fontSizeScale={1.2}
+            width={warehouseIdSec.width}
+            height={warehouseIdSec.height}
           />
         </div>
       )}
@@ -74,6 +76,8 @@ export const WarehouseTemplate: React.FC<WarehouseTemplateProps> = ({
             cornerRadius={warehouseDisplaySec.cornerRadius}
             padding={warehouseDisplaySec.padding}
             fontSizeScale={1.1}
+            width={warehouseDisplaySec.width}
+            height={warehouseDisplaySec.height}
           />
         </div>
       )}

@@ -21,7 +21,7 @@ export const ProductImageWidget: React.FC<ProductImageWidgetProps> = ({
         <img
           src={imageUrl}
           alt={altText}
-          className="w-full h-full object-contain max-h-[140px]"
+          className="w-full h-full object-contain max-h-full"
           referrerPolicy="no-referrer"
         />
       ) : (

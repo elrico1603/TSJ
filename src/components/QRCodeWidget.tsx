@@ -1,5 +1,6 @@
 import React from 'react';
-import { getKanbanQRCodeImageUrl } from '../services/qrService';
+import { getKanbanTargetUrl } from '../services/qrService';
+import { QRCodeRenderer } from './QRCodeRenderer';
 
 interface QRCodeWidgetProps {
   kanbanId: string;
@@ -15,16 +16,14 @@ export const QRCodeWidget: React.FC<QRCodeWidgetProps> = ({
   size = 120,
   className = ''
 }) => {
-  const qrUrl = getKanbanQRCodeImageUrl(kanbanId, size);
+  const qrUrl = getKanbanTargetUrl(kanbanId);
 
   return (
     <div className={`flex flex-col items-center justify-center bg-white p-2 border border-black/10 rounded-xl shadow-sm ${className}`}>
-      <img
-        src={qrUrl}
-        alt={`Kanban QR Code ${kanbanId}`}
-        style={{ width: `${size}px`, height: `${size}px` }}
+      <QRCodeRenderer
+        text={qrUrl}
+        size={size}
         className="object-contain"
-        referrerPolicy="no-referrer"
       />
       <span className="text-[9px] font-mono font-bold tracking-widest text-neutral-800 mt-1 uppercase">
         {kanbanId || 'KAN-000000'}

@@ -53,6 +53,8 @@ export const StandardTemplate: React.FC<StandardTemplateProps> = ({
             backgroundColor={masterInfoSec.backgroundColor}
             cornerRadius={masterInfoSec.cornerRadius}
             padding={masterInfoSec.padding}
+            width={masterInfoSec.width}
+            height={masterInfoSec.height}
           />
         </div>
       )}
@@ -77,6 +79,8 @@ export const StandardTemplate: React.FC<StandardTemplateProps> = ({
             backgroundColor={kanbanPulledSec.backgroundColor}
             cornerRadius={kanbanPulledSec.cornerRadius}
             padding={kanbanPulledSec.padding}
+            width={kanbanPulledSec.width}
+            height={kanbanPulledSec.height}
           />
         </div>
       )}
@@ -101,6 +105,8 @@ export const StandardTemplate: React.FC<StandardTemplateProps> = ({
             backgroundColor={warehouseIdSec.backgroundColor}
             cornerRadius={warehouseIdSec.cornerRadius}
             padding={warehouseIdSec.padding}
+            width={warehouseIdSec.width}
+            height={warehouseIdSec.height}
           />
         </div>
       )}
@@ -125,6 +131,8 @@ export const StandardTemplate: React.FC<StandardTemplateProps> = ({
             backgroundColor={warehouseDisplaySec.backgroundColor}
             cornerRadius={warehouseDisplaySec.cornerRadius}
             padding={warehouseDisplaySec.padding}
+            width={warehouseDisplaySec.width}
+            height={warehouseDisplaySec.height}
           />
         </div>
       )}

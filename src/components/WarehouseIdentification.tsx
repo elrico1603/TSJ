@@ -1,8 +1,11 @@
 import React from 'react';
 import { KanbanCardMaster } from '../services/kanbanService';
+import { ProductImageWidget } from './ProductImageWidget';
+import { MasterInformation as MasterInfoType } from '../types';
 
 interface WarehouseIdentificationProps {
-  cardData: KanbanCardMaster;
+  cardData?: KanbanCardMaster;
+  masterInfo?: MasterInfoType;
   borderWidth?: number; // mm
   borderColor?: string;
   borderStyle?: 'solid' | 'dashed' | 'none';
@@ -10,90 +13,131 @@ interface WarehouseIdentificationProps {
   cornerRadius?: number; // mm
   padding?: number; // mm
   fontSizeScale?: number;
+  width?: number; // mm
+  height?: number; // mm
 }
 
+const getColourBg = (colour: string) => {
+  const norm = (colour || 'GREEN').toUpperCase().trim();
+  if (norm === 'RED') return '#ef4444';
+  if (norm === 'BLUE') return '#2563eb';
+  if (norm === 'GREEN') return '#10b981';
+  if (norm === 'YELLOW') return '#facc15';
+  if (norm === 'ORANGE') return '#f97316';
+  if (norm === 'PURPLE') return '#8b5cf6';
+  return '#4b5563';
+};
+
+const getColourText = (colour: string) => {
+  const norm = (colour || 'GREEN').toUpperCase().trim();
+  if (norm === 'YELLOW') return '#000000';
+  return '#ffffff';
+};
+
 /**
- * WarehouseIdentification displays warehouse coordinate maps and location indicators
- * in ultra-high resolution display style.
+ * WarehouseIdentification (Section 3) displaying Product Name at the top,
+ * Product Image in the middle, and Location Badge at the bottom.
+ * Fully responsive and layout-guaranteed across all container heights and widths.
  */
 export const WarehouseIdentification: React.FC<WarehouseIdentificationProps> = ({
   cardData,
+  masterInfo,
   borderWidth = 0.5,
   borderColor = '#000000',
   borderStyle = 'solid',
-  backgroundColor = '#f8fafc',
+  backgroundColor = '#ffffff',
   cornerRadius = 2,
-  padding = 4,
-  fontSizeScale = 1.0
+  padding = 3,
+  fontSizeScale = 1.0,
+  width,
+  height
 }) => {
+  // Extract read-only properties directly from Master Information (single source of truth)
+  // fall back to cardData representation if masterInfo is not provided (e.g. for card print templates)
+  const pName = masterInfo ? masterInfo.productName : (cardData?.productDescription || '');
+  const pImage = masterInfo ? masterInfo.productImage : (cardData?.imageUrl || '');
+  const pLocation = masterInfo ? masterInfo.location : (`${cardData?.location?.letter || ''}${cardData?.location?.number || ''}`.trim() || '');
+  const pLocationColour = masterInfo ? masterInfo.locationColour : (cardData?.location?.colour || 'GREEN');
+
+  // Responsive scaling based on width & height (reference height is 35mm, width is 180mm)
+  const wScale = width ? (width / 180) : 1.0;
+  const hScale = height ? (height / 35) : 1.0;
+  const scale = Math.min(wScale, hScale) * (fontSizeScale || 1.0);
+
+  // Responsive bound font sizes to prevent overlapping
+  const titleFontSize = Math.max(6.5, Math.min(18, 10.5 * scale));
+  const subTitleFontSize = Math.max(5, Math.min(10, 6.5 * scale));
+  const badgeFontSize = Math.max(8, Math.min(18, 11 * scale));
+
+  // Cap dynamic padding so it doesn't take too much height in narrow boxes
+  const finalPadding = height ? Math.max(1, Math.min(padding, height * 0.12)) : padding;
+
   const containerStyle: React.CSSProperties = {
     border: borderStyle !== 'none' ? `${borderWidth}mm ${borderStyle} ${borderColor}` : 'none',
     backgroundColor: backgroundColor,
     borderRadius: `${cornerRadius}mm`,
-    padding: `${padding}mm`,
+    padding: `${finalPadding}mm`,
     width: '100%',
     height: '100%',
     boxSizing: 'border-box'
   };
 
-  const loc = cardData.location || { letter: '', number: '', colour: '' };
-  const coordinate = `${loc.letter || ''}${loc.number || ''}`.trim() || 'N/A';
-  const colour = loc.colour?.trim() || 'N/A';
-
-  const getColourBg = () => {
-    const norm = colour.toLowerCase();
-    if (norm === 'red') return '#ef4444';
-    if (norm === 'blue') return '#2563eb';
-    if (norm === 'green') return '#10b981';
-    if (norm === 'yellow') return '#facc15';
-    if (norm === 'orange') return '#f97316';
-    if (norm === 'purple') return '#8b5cf6';
-    return '#4b5563';
-  };
-
-  const getColourText = () => {
-    const norm = colour.toLowerCase();
-    if (norm === 'yellow') return '#000000';
-    return '#ffffff';
-  };
-
   return (
     <div 
       style={containerStyle} 
-      className="grid grid-rows-[25%_75%] overflow-hidden text-black select-none font-sans"
+      className="flex flex-col h-full w-full justify-between overflow-hidden text-black select-none font-sans"
     >
-      {/* Title */}
-      <div className="flex items-center justify-between border-b border-black/10 pb-1 mb-1 font-sans">
-        <span className="text-[8px] font-extrabold uppercase tracking-widest text-neutral-400 leading-none">WAREHOUSE LOCATION MAP</span>
-        <span className="text-[8px] font-extrabold uppercase tracking-widest text-neutral-400 leading-none">TS JOINERY STORES</span>
+      {/* 1. At the very top: Display the Product Name (Read-only) */}
+      <div 
+        className="w-full flex flex-col border-b border-black/10 pb-0.5 shrink-0"
+        style={{ marginBottom: `${Math.max(1.5, 3.5 * scale)}px` }}
+      >
+        <span className="text-neutral-400 font-extrabold uppercase tracking-widest leading-none mb-0.5" style={{ fontSize: `${subTitleFontSize}px` }}>
+          PRODUCT NAME
+        </span>
+        <div 
+          className="font-extrabold text-neutral-900 uppercase leading-tight w-full break-words line-clamp-2"
+          style={{ 
+            fontSize: `${titleFontSize}px`,
+            fontFamily: 'Inter, sans-serif'
+          }}
+        >
+          {pName || 'NO PRODUCT NAME'}
+        </div>
       </div>
 
-      {/* HUGE COORDINATE DISPLAY */}
-      <div className="flex items-center justify-between h-full py-1 font-sans">
-        <div className="flex flex-col justify-center font-sans">
-          <span className="text-[8px] font-extrabold uppercase tracking-widest text-neutral-400 leading-none">AISLE COORDINATE</span>
-          <span 
-            className="font-black text-neutral-900 tracking-tighter leading-none mt-1 font-sans uppercase"
-            style={{ fontSize: `${32 * fontSizeScale}px` }}
-          >
-            {coordinate}
-          </span>
+      {/* 2. Middle area: Split Product Image (left) and empty space (right) */}
+      <div className="flex flex-row items-stretch justify-between w-full flex-1 min-h-0 gap-2 font-sans overflow-hidden py-1">
+        {/* Left side: Product Image */}
+        <div className="w-[35%] h-full flex items-center justify-center min-w-0 overflow-hidden">
+          <ProductImageWidget 
+            imageUrl={pImage} 
+            altText={pName}
+            className="max-h-full max-w-full object-contain bg-white border border-neutral-200 rounded"
+          />
         </div>
 
-        <div className="flex flex-col items-end justify-center font-sans">
-          <span className="text-[8px] font-extrabold uppercase tracking-widest text-neutral-400 leading-none mb-1">BIN COLOUR</span>
-          <span 
-            className="font-black border px-4 py-2 rounded-2xl shadow-sm text-center uppercase tracking-wide leading-none"
-            style={{ 
-              fontSize: `${14 * fontSizeScale}px`,
-              backgroundColor: getColourBg(),
-              color: getColourText(),
-              borderColor: 'rgba(0, 0, 0, 0.15)'
-            }}
-          >
-            {colour}
-          </span>
-        </div>
+        {/* Right side: (empty for now) */}
+        <div className="w-[60%] h-full flex flex-col justify-center items-center min-w-0 overflow-hidden" />
+      </div>
+
+      {/* 3. Bottom of Section: Location display with the selected Location Colour (Read-only) */}
+      <div 
+        className="w-full text-center font-black text-white tracking-widest uppercase transition-all shrink-0"
+        style={{ 
+          backgroundColor: getColourBg(pLocationColour),
+          color: getColourText(pLocationColour),
+          fontSize: `${badgeFontSize}px`,
+          paddingTop: `${Math.max(2, 4.5 * scale)}px`,
+          paddingBottom: `${Math.max(2, 4.5 * scale)}px`,
+          paddingLeft: `${Math.max(4, 10 * scale)}px`,
+          paddingRight: `${Math.max(4, 10 * scale)}px`,
+          borderRadius: `${Math.max(2, 6 * scale)}px`,
+          lineHeight: '1.1',
+          marginTop: `${Math.max(1.5, 3.5 * scale)}px`
+        }}
+      >
+        {pLocation || 'NO LOCATION'}
       </div>
     </div>
   );

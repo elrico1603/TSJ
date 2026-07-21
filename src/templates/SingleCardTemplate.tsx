@@ -62,6 +62,8 @@ export const SingleCardTemplate: React.FC<SingleCardTemplateProps> = ({
             cornerRadius={masterInfoSec.cornerRadius}
             padding={masterInfoSec.padding}
             fontSizeScale={1.3} // upscale fonts slightly for large tags
+            width={masterInfoSec.width}
+            height={masterInfoSec.height}
           />
         </div>
       )}

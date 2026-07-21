@@ -28,6 +28,7 @@ import { PrintLayout } from './components/PrintLayout';
 import { KanbanTemplateManagerPage, DEFAULT_SAMPLE_TEMPLATE } from './components/KanbanTemplateManagerPage';
 import { KanbanDesigner } from './pages/KanbanDesigner';
 import { KanbanPreview } from './pages/KanbanPreview';
+import { QRCodeRenderer } from './components/QRCodeRenderer';
 
 const { SUPER_USER_PIN } = SECURITY;
 
@@ -1678,7 +1679,7 @@ TS Joinery Kanban System`
                       <h2 className="text-3xl font-black uppercase tracking-tight text-white mb-2 font-sans-serif">Mobile companion</h2>
                       <p className="text-xs text-gray-500 uppercase tracking-widest mb-10">Scan the QR code to use the mobile portal.</p>
                       <div className="bg-white p-6 rounded-[2.5rem] inline-block mx-auto border-4 border-white/5">
-                        <img src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(APP_MOBILE_LINK)}`} alt="Mobile app link" />
+                        <QRCodeRenderer text={APP_MOBILE_LINK} size={250} className="mx-auto" />
                       </div>
                       <p className="text-xs text-gray-600 mt-6 font-mono break-all">{APP_MOBILE_LINK}</p>
                     </div>
@@ -2667,10 +2668,10 @@ TS Joinery Kanban System`
                 {/* Secure Target QR Code Scan Info */}
                 <div className="bg-black/20 border border-white/5 rounded-3xl p-5 flex items-center gap-5">
                   <div className="bg-white p-2.5 rounded-2xl w-24 h-24 flex items-center justify-center shadow-md">
-                    <img 
-                      src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(`${window.location.origin}/kanban/${scannedKanbanCard.cardData?.kanbanId || 'KAN-000001'}`)}`} 
-                      className="w-full h-full object-contain" 
-                      alt="Kanban QR" 
+                    <QRCodeRenderer 
+                      text={`${window.location.origin}/kanban/${scannedKanbanCard.cardData?.kanbanId || 'KAN-000001'}`} 
+                      size={72} 
+                      className="w-full h-full object-contain"
                     />
                   </div>
                   <div className="flex-1">

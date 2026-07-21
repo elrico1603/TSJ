@@ -165,6 +165,22 @@ export interface OrderItem {
   createdAt: string;
 }
 
+export interface MasterInformation {
+  productName: string;
+  supplier: string;
+  supplierPartNumber: string;
+  orderQuantity: string;
+  deliveryTime: string;
+  location: string;
+  locationColour: string;
+  internalProductNumber: string;
+  productImage: string;
+  qrCode: string; // Base64 data-url or static qr-code URL from service
+  templateName: string;
+  templateType: string;
+  binQuantity?: string;
+}
+
 export const getLocalDateString = (date: Date | string | number): string => {
   const d = new Date(date);
   return d.toISOString().split('T')[0];

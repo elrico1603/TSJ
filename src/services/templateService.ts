@@ -25,6 +25,11 @@ export interface KanbanTemplateV2 {
   orientation: 'Portrait' | 'Landscape';
   margins: number; // in mm
   sections: KanbanSectionConfig[];
+  productName?: string;
+  category?: string;
+  description?: string;
+  supplier?: string;
+  supplierPartNumber?: string;
   meta: {
     createdBy: string;
     createdDate: string;
@@ -95,6 +100,11 @@ export function mapToTemplateV2(id: string, data: any): KanbanTemplateV2 {
       orientation: data.orientation || 'Portrait',
       margins: typeof data.margins === 'number' ? data.margins : 10,
       sections: data.sections,
+      productName: data.productName || '',
+      category: data.category || '',
+      description: data.description || '',
+      supplier: data.supplier || '',
+      supplierPartNumber: data.supplierPartNumber || '',
       meta: {
         createdBy: data.meta?.createdBy || 'system',
         createdDate: data.meta?.createdDate || new Date().toISOString(),
@@ -134,7 +144,7 @@ export function mapToTemplateV2(id: string, data: any): KanbanTemplateV2 {
       borderWidth: 1,
       borderColor: '#000000',
       borderStyle: 'solid',
-      backgroundColor: '#ef4444',
+      backgroundColor: '#ffffff',
       cornerRadius: 4,
       padding: 5,
       rotation: 0,
@@ -228,7 +238,7 @@ export function createDefaultTemplateBlueprint(name: string, type: 'standard' | 
         borderWidth: 0.5,
         borderColor: '#000000',
         borderStyle: 'solid',
-        backgroundColor: '#ef4444',
+        backgroundColor: '#ffffff',
         cornerRadius: 2,
         padding: 3,
         rotation: 0,
