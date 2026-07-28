@@ -55,6 +55,7 @@ export const StandardTemplate: React.FC<StandardTemplateProps> = ({
             padding={masterInfoSec.padding}
             width={masterInfoSec.width}
             height={masterInfoSec.height}
+            textSettings={masterInfoSec.textSettings}
           />
         </div>
       )}
@@ -65,7 +66,8 @@ export const StandardTemplate: React.FC<StandardTemplateProps> = ({
           className="absolute"
           style={{
             width: `${mmToPx(kanbanPulledSec.width)}px`,
-            height: `${mmToPx(kanbanPulledSec.height)}px`,
+            minHeight: `${mmToPx(kanbanPulledSec.height)}px`,
+            height: 'auto',
             left: `${mmToPx(kanbanPulledSec.x)}px`,
             top: `${mmToPx(kanbanPulledSec.y)}px`,
             zIndex: kanbanPulledSec.zIndex || 2
@@ -81,6 +83,7 @@ export const StandardTemplate: React.FC<StandardTemplateProps> = ({
             padding={kanbanPulledSec.padding}
             width={kanbanPulledSec.width}
             height={kanbanPulledSec.height}
+            textSettings={kanbanPulledSec.textSettings}
           />
         </div>
       )}
@@ -107,6 +110,7 @@ export const StandardTemplate: React.FC<StandardTemplateProps> = ({
             padding={warehouseIdSec.padding}
             width={warehouseIdSec.width}
             height={warehouseIdSec.height}
+            textSettings={warehouseIdSec.textSettings}
           />
         </div>
       )}
@@ -133,6 +137,7 @@ export const StandardTemplate: React.FC<StandardTemplateProps> = ({
             padding={warehouseDisplaySec.padding}
             width={warehouseDisplaySec.width}
             height={warehouseDisplaySec.height}
+            textSettings={warehouseDisplaySec.textSettings}
           />
         </div>
       )}

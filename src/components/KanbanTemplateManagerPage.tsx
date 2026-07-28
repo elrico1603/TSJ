@@ -17,34 +17,48 @@ export const DEFAULT_SAMPLE_TEMPLATE: KanbanTemplate = {
         { id: "f1", type: "productImage", x: 5, y: 5, width: 40, height: 80, visible: true }, 
         { id: "f2", type: "partDescription", x: 50, y: 10, width: 45, height: 20, visible: true, fontSize: 14, fontWeight: "bold" }, 
         { id: "f3", type: "partNumber", x: 50, y: 40, width: 45, height: 15, visible: true, fontSize: 10 } 
-      ] 
+      ],
+      picture: { x: 15, y: 15, width: 110, height: 110 },
+      qr: { x: 210, y: 15, width: 110, height: 110 }
     },
     section2: { 
       width: 46, 
       height: 46.2, 
       fields: [ 
         { id: "f4", type: "qrCode", sourceField: "partNumber", x: 20, y: 10, width: 60, height: 60, visible: true } 
-      ] 
+      ],
+      picture: { x: 15, y: 15, width: 110, height: 110 },
+      qr: { x: 210, y: 15, width: 110, height: 110 }
     },
     section3: { 
       width: 46, 
       height: 46.2, 
-      fields: [] 
+      fields: [],
+      picture: { x: 15, y: 15, width: 110, height: 110 },
+      qr: { x: 210, y: 15, width: 110, height: 110 }
     },
     section4: { 
       width: 46, 
       height: 46.2, 
-      style: { text: "KANBAN PULLED", fontSize: 18, fontColor: "#FFFFFF", backgroundColor: "#EF4444", borderWidth: 0 }, 
-      fields: [] 
+      style: { text: "KANBAN PULLED", fontColor: "#FFFFFF", backgroundColor: "#EF4444", borderWidth: 0 }, 
+      fields: [],
+      picture: { x: 15, y: 15, width: 110, height: 110 },
+      qr: { x: 210, y: 15, width: 110, height: 110 }
     },
     section5: { 
       width: 95, 
       height: 39.6, 
       fields: [ 
         { id: "f5", type: "customText", value: "Summary Section", x: 5, y: 25, width: 90, height: 50, visible: true, fontSize: 12 } 
-      ] 
-    }
+      ],
+      picture: { x: 15, y: 15, width: 110, height: 110 },
+      qr: { x: 210, y: 15, width: 110, height: 110 }
+    },
+    picture: { x: 15, y: 15, width: 110, height: 110 },
+    qr: { x: 210, y: 15, width: 110, height: 110 }
   },
+  picture: { x: 15, y: 15, width: 110, height: 110 },
+  qr: { x: 210, y: 15, width: 110, height: 110 },
   meta: { createdBy: "system", createdDate: "2024-01-01T00:00:00.000Z" }
 };
 

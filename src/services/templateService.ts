@@ -1,5 +1,31 @@
 import { db, APP_ID_PATH } from './firebase';
 
+export interface TextCustomizationSettings {
+  fontSize?: number; // in px
+  fontFamily?: string;
+  fontWeight?: string;
+  fontStyle?: 'normal' | 'italic';
+  letterSpacing?: string;
+  lineHeight?: string;
+  color?: string;
+  textAlign?: 'left' | 'center' | 'right' | 'justify';
+  textTransform?: 'normal' | 'uppercase' | 'lowercase' | 'capitalize';
+  shadowEnabled?: boolean;
+  shadowColor?: string;
+  shadowBlur?: number;
+  shadowOffsetX?: number;
+  shadowOffsetY?: number;
+  strokeEnabled?: boolean;
+  strokeWidth?: number;
+  strokeColor?: string;
+  marginTop?: number; // in px
+  marginBottom?: number; // in px
+  padding?: number; // in px
+  rotation?: number; // degrees
+  horizontalPosition?: number; // px offset
+  verticalPosition?: number; // px offset
+}
+
 export interface KanbanSectionConfig {
   id: string; // e.g. 'master_info' | 'kanban_pulled' | 'warehouse_id' | 'warehouse_display'
   name: string; // display name
@@ -16,6 +42,19 @@ export interface KanbanSectionConfig {
   padding: number; // mm
   rotation: number; // degrees
   zIndex: number;
+  picture?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  qr?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  textSettings?: Record<string, TextCustomizationSettings>;
 }
 
 export interface KanbanTemplateV2 {
@@ -30,6 +69,18 @@ export interface KanbanTemplateV2 {
   description?: string;
   supplier?: string;
   supplierPartNumber?: string;
+  picture?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  qr?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
   meta: {
     createdBy: string;
     createdDate: string;
@@ -99,12 +150,18 @@ export function mapToTemplateV2(id: string, data: any): KanbanTemplateV2 {
       paperSize: data.paperSize || 'A4',
       orientation: data.orientation || 'Portrait',
       margins: typeof data.margins === 'number' ? data.margins : 10,
-      sections: data.sections,
+      sections: data.sections.map((sec: any) => ({
+        ...sec,
+        picture: sec.picture || { x: 15, y: 15, width: 110, height: 110 },
+        qr: sec.qr || { x: 210, y: 15, width: 110, height: 110 }
+      })),
       productName: data.productName || '',
       category: data.category || '',
       description: data.description || '',
       supplier: data.supplier || '',
       supplierPartNumber: data.supplierPartNumber || '',
+      picture: data.picture || { x: 15, y: 15, width: 110, height: 110 },
+      qr: data.qr || { x: 210, y: 15, width: 110, height: 110 },
       meta: {
         createdBy: data.meta?.createdBy || 'system',
         createdDate: data.meta?.createdDate || new Date().toISOString(),
@@ -131,7 +188,9 @@ export function mapToTemplateV2(id: string, data: any): KanbanTemplateV2 {
       cornerRadius: 4,
       padding: 5,
       rotation: 0,
-      zIndex: 1
+      zIndex: 1,
+      picture: { x: 15, y: 15, width: 110, height: 110 },
+      qr: { x: 210, y: 15, width: 110, height: 110 }
     },
     {
       id: 'kanban_pulled',
@@ -148,7 +207,9 @@ export function mapToTemplateV2(id: string, data: any): KanbanTemplateV2 {
       cornerRadius: 4,
       padding: 5,
       rotation: 0,
-      zIndex: 2
+      zIndex: 2,
+      picture: { x: 15, y: 15, width: 110, height: 110 },
+      qr: { x: 210, y: 15, width: 110, height: 110 }
     },
     {
       id: 'warehouse_id',
@@ -165,7 +226,9 @@ export function mapToTemplateV2(id: string, data: any): KanbanTemplateV2 {
       cornerRadius: 4,
       padding: 5,
       rotation: 0,
-      zIndex: 3
+      zIndex: 3,
+      picture: { x: 15, y: 15, width: 110, height: 110 },
+      qr: { x: 210, y: 15, width: 110, height: 110 }
     },
     {
       id: 'warehouse_display',
@@ -182,7 +245,9 @@ export function mapToTemplateV2(id: string, data: any): KanbanTemplateV2 {
       cornerRadius: 4,
       padding: 5,
       rotation: 0,
-      zIndex: 4
+      zIndex: 4,
+      picture: { x: 15, y: 15, width: 110, height: 110 },
+      qr: { x: 210, y: 15, width: 110, height: 110 }
     }
   ];
 
@@ -193,6 +258,8 @@ export function mapToTemplateV2(id: string, data: any): KanbanTemplateV2 {
     orientation: 'Portrait',
     margins: 15,
     sections: defaultSections,
+    picture: { x: 15, y: 15, width: 110, height: 110 },
+    qr: { x: 210, y: 15, width: 110, height: 110 },
     meta: {
       createdBy: data.meta?.createdBy || 'system',
       createdDate: data.meta?.createdDate || new Date().toISOString(),
@@ -225,7 +292,9 @@ export function createDefaultTemplateBlueprint(name: string, type: 'standard' | 
         cornerRadius: 2,
         padding: 4,
         rotation: 0,
-        zIndex: 1
+        zIndex: 1,
+        picture: { x: 15, y: 15, width: 110, height: 110 },
+        qr: { x: 210, y: 15, width: 110, height: 110 }
       },
       {
         id: 'kanban_pulled',
@@ -242,7 +311,9 @@ export function createDefaultTemplateBlueprint(name: string, type: 'standard' | 
         cornerRadius: 2,
         padding: 3,
         rotation: 0,
-        zIndex: 2
+        zIndex: 2,
+        picture: { x: 15, y: 15, width: 110, height: 110 },
+        qr: { x: 210, y: 15, width: 110, height: 110 }
       },
       {
         id: 'warehouse_id',
@@ -259,7 +330,9 @@ export function createDefaultTemplateBlueprint(name: string, type: 'standard' | 
         cornerRadius: 2,
         padding: 4,
         rotation: 0,
-        zIndex: 3
+        zIndex: 3,
+        picture: { x: 15, y: 15, width: 110, height: 110 },
+        qr: { x: 210, y: 15, width: 110, height: 110 }
       },
       {
         id: 'warehouse_display',
@@ -276,7 +349,9 @@ export function createDefaultTemplateBlueprint(name: string, type: 'standard' | 
         cornerRadius: 2,
         padding: 4,
         rotation: 0,
-        zIndex: 4
+        zIndex: 4,
+        picture: { x: 15, y: 15, width: 110, height: 110 },
+        qr: { x: 210, y: 15, width: 110, height: 110 }
       }
     );
   } else if (type === 'single_card') {
@@ -295,7 +370,9 @@ export function createDefaultTemplateBlueprint(name: string, type: 'standard' | 
       cornerRadius: 4,
       padding: 6,
       rotation: 0,
-      zIndex: 1
+      zIndex: 1,
+      picture: { x: 15, y: 15, width: 110, height: 110 },
+      qr: { x: 210, y: 15, width: 110, height: 110 }
     });
   } else if (type === 'warehouse_only') {
     sections.push(
@@ -314,7 +391,9 @@ export function createDefaultTemplateBlueprint(name: string, type: 'standard' | 
         cornerRadius: 4,
         padding: 6,
         rotation: 0,
-        zIndex: 1
+        zIndex: 1,
+        picture: { x: 15, y: 15, width: 110, height: 110 },
+        qr: { x: 210, y: 15, width: 110, height: 110 }
       },
       {
         id: 'warehouse_display',
@@ -331,7 +410,9 @@ export function createDefaultTemplateBlueprint(name: string, type: 'standard' | 
         cornerRadius: 4,
         padding: 6,
         rotation: 0,
-        zIndex: 2
+        zIndex: 2,
+        picture: { x: 15, y: 15, width: 110, height: 110 },
+        qr: { x: 210, y: 15, width: 110, height: 110 }
       }
     );
   }
@@ -342,6 +423,8 @@ export function createDefaultTemplateBlueprint(name: string, type: 'standard' | 
     orientation: 'Portrait',
     margins: 15,
     sections,
+    picture: { x: 15, y: 15, width: 110, height: 110 },
+    qr: { x: 210, y: 15, width: 110, height: 110 },
     meta: {
       createdBy: 'system',
       createdDate: new Date().toISOString(),

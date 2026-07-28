@@ -8,9 +8,15 @@ import { QRCodeRenderer } from './QRCodeRenderer';
 interface StructuredSection1LayoutProps {
   cardData: KanbanCardData;
   sampleImage?: string | null;
+  section?: {
+    width?: number;
+    height?: number;
+    picture?: { x: number; y: number; width: number; height: number };
+    qr?: { x: number; y: number; width: number; height: number };
+  };
 }
 
-export const StructuredSection1Layout: React.FC<StructuredSection1LayoutProps> = ({ cardData, sampleImage }) => {
+export const StructuredSection1Layout: React.FC<StructuredSection1LayoutProps> = ({ cardData, sampleImage, section: propSection }) => {
   const productDesc = cardData?.productDescription || cardData?.partDescription || 'EXAMPLE KANBAN CARD';
   const imgUrl = sampleImage || cardData?.imageUrl || cardData?.productImage;
   const supPartNo = cardData?.supplierPartNumber || cardData?.partNumber || 'N/A';
@@ -34,51 +40,147 @@ export const StructuredSection1Layout: React.FC<StructuredSection1LayoutProps> =
   const tableCellStyle: React.CSSProperties = { ...textStyle, backgroundColor: '#F5F2DC' };
   const tableLabelStyle: React.CSSProperties = { ...tableCellStyle, borderRight: '1px solid black' };
 
+  // Clamp width to maximum 210mm
+  const currentWidth = Math.min(210, propSection?.width ?? 200);
+  const currentHeight = propSection?.height ?? 80;
+
+  // Independent picture and QR layout from section.picture and section.qr
+  const rightMargin = propSection?.qr?.rightMargin ?? (cardData as any)?.section?.qr?.rightMargin ?? cardData?.qr?.rightMargin ?? cardData?.qrRightMargin ?? 4;
+  const rawQrWidth = propSection?.qr?.width ?? (cardData as any)?.section?.qr?.width ?? cardData?.qr?.width ?? cardData?.qrWidth ?? cardData?.qrCodeWidth ?? 50;
+  const rawQrX = currentWidth - rightMargin - rawQrWidth;
+
+  const section = {
+    picture: {
+      x: propSection?.picture?.x ?? (cardData as any)?.section?.picture?.x ?? cardData?.picture?.x ?? 15,
+      y: propSection?.picture?.y ?? (cardData as any)?.section?.picture?.y ?? cardData?.picture?.y ?? 15,
+      width: propSection?.picture?.width ?? (cardData as any)?.section?.picture?.width ?? cardData?.picture?.width ?? cardData?.pictureWidth ?? cardData?.productImageWidth ?? 90,
+      height: propSection?.picture?.height ?? (cardData as any)?.section?.picture?.height ?? cardData?.picture?.height ?? cardData?.pictureHeight ?? cardData?.productImageHeight ?? 90,
+    },
+    qr: {
+      x: rawQrX,
+      y: propSection?.qr?.y ?? (cardData as any)?.section?.qr?.y ?? cardData?.qr?.y ?? 15,
+      width: rawQrWidth,
+      height: propSection?.qr?.height ?? (cardData as any)?.section?.qr?.height ?? cardData?.qr?.height ?? cardData?.qrHeight ?? cardData?.qrCodeHeight ?? 50,
+    }
+  };
+
+  const qrCodeUrl = getKanbanMailtoQRCodeUrl({
+    internalProductNumber: kId,
+    productName: productDesc,
+    supplierPartNumber: supPartNo,
+    supplier: supName,
+    orderQuantity: ordQty,
+    binQuantity: binQty,
+    location: locStr,
+    deliveryTime: delTime,
+  });
+
   return (
-    <div className="w-full h-full grid grid-rows-[15%_65%_20%] text-black bg-white overflow-hidden" style={{ border: '1px solid black' }}>
+    <div className="relative w-full h-full grid grid-rows-[15%_65%_20%] text-black bg-white overflow-hidden box-border" style={{ border: '1px solid black' }}>
       {/* Row 1: Header */}
-      <div className="flex items-center justify-between font-bold uppercase px-3 py-1" style={headerStyle}>
+      <div className="flex items-center justify-between font-bold uppercase px-2 py-0.5 min-w-0" style={headerStyle}>
         <span className="text-[10px] truncate" style={textStyle}>{productDesc}</span>
-        <span className="text-[10px] font-mono font-black text-purple-700 bg-purple-50 px-2 py-0.5 border border-purple-200 rounded">{kId}</span>
+        <span className="text-[10px] font-mono font-black text-purple-700 bg-purple-50 px-1.5 py-0.5 border border-purple-200 rounded shrink-0 ml-1">{kId}</span>
       </div>
 
-      {/* Row 2: Content */}
-      <div className="grid grid-cols-[38%_62%]" style={{ borderBottom: '1px solid black' }}>
-        {/* Image Area */}
-        <div className="flex items-center justify-center p-1" style={{ borderRight: '1px solid black' }}>
-          {imgUrl ? <img src={imgUrl} alt="Product" className="w-full h-full object-contain" /> : <Icon name="camera" size={32} className="text-gray-400" />}
+      {/* Row 2: Content (Picture + Supplier Table ONLY) */}
+      <div 
+        className="flex items-center justify-start w-full h-full overflow-hidden bg-white min-w-0 pl-1 pr-1 py-0.5 box-border" 
+        style={{ borderBottom: '1px solid black' }}
+      >
+        {/* Picture Container */}
+        <div 
+          className="p-0.5 flex items-center justify-center h-full min-w-0 overflow-hidden shrink-0"
+          style={{
+            flexBasis: '28%',
+            maxWidth: '28%',
+            maxHeight: '100%',
+            flexShrink: 1,
+            flexGrow: 0,
+            minWidth: 0,
+            aspectRatio: '1 / 1',
+          }}
+        >
+          <div 
+            className="w-full h-full flex items-center justify-center bg-white border border-gray-300 rounded-md shadow-sm p-1 box-border"
+          >
+            {imgUrl ? (
+              <img 
+                src={imgUrl} 
+                alt="Product" 
+                className="w-full h-full object-contain" 
+              />
+            ) : (
+              <Icon 
+                name="camera" 
+                className="text-gray-300" 
+                size={24} 
+              />
+            )}
+          </div>
         </div>
-        {/* Info Table */}
-        <div className="grid grid-rows-4 text-xs">
-          <div className="grid grid-cols-[40%_60%] border-b border-black">
-            <div className="font-bold p-1 flex items-center" style={tableLabelStyle}><span style={textStyle}>SUPPLIER P/NO.</span></div>
-            <div className="p-1 flex items-center" style={tableCellStyle}><span style={textStyle}>{supPartNo}</span></div>
-          </div>
-          <div className="grid grid-cols-[40%_60%] border-b border-black">
-            <div className="font-bold p-1 flex items-center" style={tableLabelStyle}><span style={textStyle}>SUPPLIER</span></div>
-            <div className="p-1 flex items-center" style={tableCellStyle}><span style={textStyle}>{supName}</span></div>
-          </div>
-          <div className="grid grid-cols-[40%_60%] border-b border-black">
-            <div className="font-bold p-1 flex items-center" style={tableLabelStyle}><span style={textStyle}>ORD / BIN QTY</span></div>
-            <div className="p-1 flex items-center font-bold" style={tableCellStyle}><span style={textStyle}>{ordQty} (Bin: {binQty})</span></div>
-          </div>
-          <div className="grid grid-cols-[40%_60%]">
-            <div className="font-bold p-1 flex items-center" style={tableLabelStyle}><span style={textStyle}>DELIVERY TIME</span></div>
-            <div className="p-1 flex items-center" style={tableCellStyle}><span style={textStyle}>{delTime}</span></div>
+
+        {/* Supplier Container */}
+        <div 
+          className="flex-1 min-w-0 overflow-hidden border-l border-r border-black h-full mx-1"
+          style={{
+            flexShrink: 1,
+            flexGrow: 1,
+            minWidth: 0,
+            marginRight: `${Math.max(0, ((210 - section.qr.x) / 210) * 100)}%`,
+          }}
+        >
+          <div className="min-w-0 grid grid-rows-4 text-[8px] sm:text-[10px] h-full leading-tight overflow-hidden">
+            <div className="grid grid-cols-[45%_55%] min-w-0 border-b border-black h-full items-center overflow-hidden">
+              <div className="font-bold p-1 h-full flex items-center min-w-0 overflow-hidden" style={tableLabelStyle}><span style={textStyle} className="truncate">SUPPLIER P/NO.</span></div>
+              <div className="p-1 h-full flex items-center font-mono min-w-0 overflow-hidden" style={tableCellStyle}><span style={textStyle} className="truncate">{supPartNo}</span></div>
+            </div>
+            <div className="grid grid-cols-[45%_55%] min-w-0 border-b border-black h-full items-center overflow-hidden">
+              <div className="font-bold p-1 h-full flex items-center min-w-0 overflow-hidden" style={tableLabelStyle}><span style={textStyle} className="truncate">SUPPLIER</span></div>
+              <div className="p-1 h-full flex items-center min-w-0 overflow-hidden" style={tableCellStyle}><span style={textStyle} className="truncate">{supName}</span></div>
+            </div>
+            <div className="grid grid-cols-[45%_55%] min-w-0 border-b border-black h-full items-center overflow-hidden">
+              <div className="font-bold p-1 h-full flex items-center min-w-0 overflow-hidden" style={tableLabelStyle}><span style={textStyle} className="truncate">ORD / BIN QTY</span></div>
+              <div className="p-1 h-full flex items-center font-bold min-w-0 overflow-hidden" style={tableCellStyle}><span style={textStyle} className="truncate">{ordQty} ({binQty})</span></div>
+            </div>
+            <div className="grid grid-cols-[45%_55%] min-w-0 h-full items-center overflow-hidden">
+              <div className="font-bold p-1 h-full flex items-center min-w-0 overflow-hidden" style={tableLabelStyle}><span style={textStyle} className="truncate">DELIVERY</span></div>
+              <div className="p-1 h-full flex items-center font-bold min-w-0 overflow-hidden" style={tableCellStyle}><span style={textStyle} className="truncate">{delTime}</span></div>
+            </div>
           </div>
         </div>
       </div>
 
       {/* Row 3: Footer */}
-      <div className="grid grid-cols-3 text-[10px]">
-        <div className="font-bold p-1 flex items-center" style={{ borderRight: '1px solid black' }}>
-          <span style={textStyle}>LOCATION : {locStr}</span>
+      <div className="grid grid-cols-3 text-[10px] min-w-0">
+        <div className="font-bold p-1 flex items-center min-w-0 overflow-hidden" style={{ borderRight: '1px solid black' }}>
+          <span style={textStyle} className="truncate">LOCATION : {locStr}</span>
         </div>
-        <div className="font-bold p-1 flex items-center" style={{ borderRight: '1px solid black' }}>
-          <span style={textStyle}>DELIVERY TIME</span>
+        <div className="font-bold p-1 flex items-center min-w-0 overflow-hidden" style={{ borderRight: '1px solid black' }}>
+          <span style={textStyle} className="truncate">DELIVERY TIME</span>
         </div>
-        <div className="p-1 flex items-center">
-          <span style={textStyle}>{delTime}</span>
+        <div className="p-1 flex items-center min-w-0 overflow-hidden">
+          <span style={textStyle} className="truncate">{delTime}</span>
+        </div>
+      </div>
+
+      {/* ABSOLUTE QR OBJECT - Independent canvas object inside <Card> */}
+      <div 
+        className="absolute p-0.5 flex items-center justify-center overflow-hidden shrink-0 z-20 pointer-events-none"
+        style={{
+          left: `${(section.qr.x / 210) * 100}%`,
+          top: `${(section.qr.y / 80) * 100}%`,
+          width: `${(section.qr.width / 210) * 100}%`,
+          height: `${(section.qr.height / 80) * 100}%`,
+        }}
+      >
+        <div 
+          className="w-full h-full flex items-center justify-center bg-white border border-gray-300 rounded-md shadow-sm p-1 box-border pointer-events-auto"
+        >
+          <QRCodeRenderer
+            text={qrCodeUrl}
+            className="w-full h-full"
+          />
         </div>
       </div>
     </div>
@@ -143,9 +245,13 @@ export const InventoryDetailsSectionLayout: React.FC<InventoryDetailsSectionLayo
 
 interface QRBarcodeSectionLayoutProps {
   cardData: KanbanCardData;
+  section?: {
+    picture?: { x: number; y: number; width: number; height: number };
+    qr?: { x: number; y: number; width: number; height: number };
+  };
 }
 
-export const QRBarcodeSectionLayout: React.FC<QRBarcodeSectionLayoutProps> = ({ cardData }) => {
+export const QRBarcodeSectionLayout: React.FC<QRBarcodeSectionLayoutProps> = ({ cardData, section: propSection }) => {
   const productDesc = cardData?.productDescription || cardData?.partDescription || 'LAMINATING POUCH';
   const kId = cardData?.kanbanId || 'KAN-000001';
 
@@ -174,15 +280,38 @@ export const QRBarcodeSectionLayout: React.FC<QRBarcodeSectionLayoutProps> = ({ 
     deliveryTime: delTime,
   });
 
+  const section = {
+    picture: {
+      x: propSection?.picture?.x ?? (cardData as any)?.section?.picture?.x ?? cardData?.picture?.x ?? 15,
+      y: propSection?.picture?.y ?? (cardData as any)?.section?.picture?.y ?? cardData?.picture?.y ?? 15,
+      width: propSection?.picture?.width ?? (cardData as any)?.section?.picture?.width ?? cardData?.picture?.width ?? cardData?.pictureWidth ?? cardData?.productImageWidth ?? 100,
+      height: propSection?.picture?.height ?? (cardData as any)?.section?.picture?.height ?? cardData?.picture?.height ?? cardData?.pictureHeight ?? cardData?.productImageHeight ?? 100,
+    },
+    qr: {
+      x: propSection?.qr?.x ?? (cardData as any)?.section?.qr?.x ?? cardData?.qr?.x ?? 210,
+      y: propSection?.qr?.y ?? (cardData as any)?.section?.qr?.y ?? cardData?.qr?.y ?? 15,
+      width: propSection?.qr?.width ?? (cardData as any)?.section?.qr?.width ?? cardData?.qr?.width ?? cardData?.qrWidth ?? cardData?.qrCodeWidth ?? 100,
+      height: propSection?.qr?.height ?? (cardData as any)?.section?.qr?.height ?? cardData?.qr?.height ?? cardData?.qrHeight ?? cardData?.qrCodeHeight ?? 100,
+    }
+  };
+
   return (
     <div className="w-full h-full grid grid-cols-[35%_65%] text-black bg-white overflow-hidden" style={{ border: '1px solid black' }}>
       {/* Left side: QR Code containing mailto link */}
-      <div className="flex flex-col items-center justify-center p-1.5 bg-white border-r border-black font-sans">
-        <QRCodeRenderer
-          text={qrCodeUrl}
-          size={48}
-          className="flex items-center justify-center animate-fade-in"
-        />
+      <div className="flex flex-col items-center justify-center p-1.5 bg-white border-r border-black font-sans w-full h-full">
+        <div 
+          style={{ 
+            width: `${section.qr.width}px`, 
+            height: `${section.qr.height}px`,
+            transform: section.qr.y !== 0 ? `translateY(${section.qr.y}px)` : undefined
+          }}
+          className="flex items-center justify-center bg-white border border-gray-100 rounded-md overflow-hidden shadow-sm p-1"
+        >
+          <QRCodeRenderer
+            text={qrCodeUrl}
+            className="w-full h-full flex items-center justify-center"
+          />
+        </div>
         <span className="text-[6px] font-mono mt-1 tracking-wider leading-none text-center truncate w-full">{kId}</span>
       </div>
       {/* Right side: Barcode & Quick Info */}
@@ -328,8 +457,13 @@ export const CardPreview: React.FC<CardPreviewProps> = ({
   const updateSectionLayout = (sectionKey: string, updates: { x?: number; y?: number; width?: number; height?: number }) => {
     setTemplate((prev: any) => {
       if (!prev) return null;
+      const maxPrintableWidth = prev.dimensions?.width || 210;
+      const clampedUpdates = { ...updates };
+      if (clampedUpdates.width !== undefined) {
+        clampedUpdates.width = Math.min(clampedUpdates.width, maxPrintableWidth);
+      }
       const newLayout = JSON.parse(JSON.stringify(prev.layout));
-      newLayout[sectionKey] = { ...newLayout[sectionKey], ...updates };
+      newLayout[sectionKey] = { ...newLayout[sectionKey], ...clampedUpdates };
       return { ...prev, layout: newLayout };
     });
   };
@@ -386,7 +520,8 @@ export const CardPreview: React.FC<CardPreviewProps> = ({
           const meta = sectionMeta[key];
           const isSelected = activeTab === key;
 
-          const widthMm = section.width || 0;
+          const maxPrintableWidth = template.dimensions?.width || 210;
+          const widthMm = Math.min(section.width || 0, maxPrintableWidth);
           const heightMm = section.height || 0;
           const xMm = section.x ?? 0;
           const yMm = section.y ?? 0;

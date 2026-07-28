@@ -51,6 +51,7 @@ export const WarehouseTemplate: React.FC<WarehouseTemplateProps> = ({
             fontSizeScale={1.2}
             width={warehouseIdSec.width}
             height={warehouseIdSec.height}
+            textSettings={warehouseIdSec.textSettings}
           />
         </div>
       )}
@@ -78,6 +79,7 @@ export const WarehouseTemplate: React.FC<WarehouseTemplateProps> = ({
             fontSizeScale={1.1}
             width={warehouseDisplaySec.width}
             height={warehouseDisplaySec.height}
+            textSettings={warehouseDisplaySec.textSettings}
           />
         </div>
       )}

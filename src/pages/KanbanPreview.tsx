@@ -27,31 +27,48 @@ export const KanbanPreview: React.FC<KanbanPreviewProps> = ({
 
   // Formulate custom CSS for the print-media page sizes dynamically
   const getPrintStyles = () => {
-    const isLandscape = template.orientation === 'Landscape';
     return `
       @media print {
-        body {
+        @page {
+          size: A4 portrait;
+          margin: 0 !important;
+        }
+        html, body {
           background-color: #ffffff !important;
           color: #000000 !important;
           margin: 0 !important;
           padding: 0 !important;
           -webkit-print-color-adjust: exact !important;
           print-color-adjust: exact !important;
+          width: 100% !important;
+          height: 100% !important;
+          overflow: visible !important;
+        }
+        body {
+          visibility: hidden !important;
+        }
+        #printCanvas, #printCanvas * {
+          visibility: visible !important;
+        }
+        #printCanvas {
+          display: block !important;
+          position: fixed !important;
+          left: 0 !important;
+          top: 0 !important;
+          width: 210mm !important;
+          height: 297mm !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          border: none !important;
+          box-shadow: none !important;
+          background: white !important;
+          border-radius: 0 !important;
+          z-index: 9999999 !important;
+          page-break-after: avoid !important;
         }
         .no-print {
           display: none !important;
-        }
-        .print-canvas {
-          box-shadow: none !important;
-          border: none !important;
-          margin: 0 !important;
-          width: 210mm !important;
-          height: 297mm !important;
-          page-break-after: always !important;
-        }
-        @page {
-          size: A4 ${isLandscape ? 'landscape' : 'portrait'};
-          margin: 0 !important;
+          visibility: hidden !important;
         }
       }
     `;
@@ -138,6 +155,7 @@ export const KanbanPreview: React.FC<KanbanPreviewProps> = ({
         {/* Scaled Print Page container (Print engine maps to exact millimeters inside media stylesheets) */}
         <div 
           ref={printAreaRef}
+          id="printCanvas"
           className="print-canvas relative bg-white shadow-2xl overflow-hidden rounded-md border border-neutral-300"
           style={{
             width: isLandscape ? '1000px' : '707px', // A4 aspect-ratio (210/297) mapped visually

@@ -12,6 +12,7 @@ export interface KanbanCardMaster {
   id?: string;
   kanbanId: string; // Unique human-readable code like KAN-000001
   productDescription: string;
+  productName?: string;
   imageUrl: string; // Stored in Firebase storage, Firestore has URL
   supplierPartNumber: string;
   supplierName: string;
@@ -26,6 +27,19 @@ export interface KanbanCardMaster {
   lastModifiedDate: string;
   lastModifiedBy: string;
   status: KanbanStatus;
+  cardColour?: string;
+  picture?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  qr?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
 }
 
 /**
@@ -138,20 +152,32 @@ Thank you.`;
 }
 
 /**
- * Generates the QR Code URL containing the mailto link as requested.
+ * Generates the QR Code content containing ONLY the unique, permanent Template ID.
+ * 
+ * ARCHITECTURAL DESIGN FOR FUTURE EXTENSIBILITY:
+ * The physical QR code printed on the Kanban cards represents *only* the permanent human-readable
+ * Template ID (e.g. "KAN-000001" or "K-101"). 
+ * By encoding only this static primary key on the physical printout, the physical cards are
+ * completely decoupled from the software workflows.
+ * 
+ * Today, scanning this ID triggers a digital Kanban checkout basket that generates email/mailto requests.
+ * In the future, the same physical card scans can be integrated seamlessly with other enterprise engines:
+ *  - Purchase Orders: Generating official PO drafts automatically in an ERP system.
+ *  - Inventory Management: Tracking real-time stock levels, check-ins, and checkout audits.
+ *  - Supplier Portals: Relaying replenishment signals directly to suppliers without email proxy.
+ *  - Warehouse Picking: Displaying location routing checklists for warehouse picking staff.
+ * 
+ * All of this will be possible WITHOUT changing or re-printing any physical QR Codes.
  */
-export function getKanbanMailtoQRCodeUrl(info: {
+export function getKanbanPermanentTemplateIdQRCodeUrl(info: {
   internalProductNumber: string;
-  productName: string;
-  supplierPartNumber: string;
-  supplier: string;
-  orderQuantity: string;
-  binQuantity: string;
-  location: string;
-  deliveryTime: string;
-}, size = 150): string {
-  return getKanbanMailtoLink(info);
+  [key: string]: any; // Allow other properties for backward compatibility
+}): string {
+  return info.internalProductNumber || '';
 }
+
+// Keep the legacy name as an alias so existing components don't break
+export const getKanbanMailtoQRCodeUrl = getKanbanPermanentTemplateIdQRCodeUrl;
 
 /**
  * Saves (creates or updates) a Kanban card.
@@ -266,6 +292,7 @@ export function mapToKanbanCardMaster(id: string, data: any): KanbanCardMaster {
     id,
     kanbanId: kanbanId,
     productDescription: cardData.productDescription || cardData.partDescription || 'No description',
+    productName: cardData.productName || cardData.productDescription || cardData.partDescription || 'No description',
     imageUrl: cardData.imageUrl || cardData.productImage || '',
     supplierPartNumber: cardData.supplierPartNumber || cardData.partNumber || '',
     supplierName: cardData.supplierName || cardData.supplier || '',
@@ -279,7 +306,8 @@ export function mapToKanbanCardMaster(id: string, data: any): KanbanCardMaster {
     createdBy: cardData.createdBy || 'unknown',
     lastModifiedDate: cardData.lastModified || new Date().toISOString(),
     lastModifiedBy: cardData.lastModifiedBy || 'unknown',
-    status: (cardData.status as KanbanStatus) || 'ACTIVE'
+    status: (cardData.status as KanbanStatus) || 'ACTIVE',
+    cardColour: cardData.cardColour || '#ffffff'
   };
 }
 
@@ -308,7 +336,7 @@ export function mapCardToMasterInfo(
   });
 
   return {
-    productName: card.productDescription || '',
+    productName: card.productName || card.productDescription || '',
     supplier: card.supplierName || '',
     supplierPartNumber: card.supplierPartNumber || '',
     orderQuantity: card.orderQuantity || '',
@@ -320,7 +348,9 @@ export function mapCardToMasterInfo(
     qrCode: qrCodeUrl,
     templateName: templateName,
     templateType: templateType,
-    binQuantity: card.binQuantity || ''
+    binQuantity: card.binQuantity || '',
+    cardColour: card.cardColour || '#ffffff',
+    status: card.status || 'ACTIVE'
   };
 }
 

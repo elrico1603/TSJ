@@ -2,6 +2,8 @@ import React from 'react';
 import { KanbanCardMaster } from '../services/kanbanService';
 import { ProductImageWidget } from './ProductImageWidget';
 import { MasterInformation as MasterInfoType } from '../types';
+import { TextCustomizationSettings } from '../services/templateService';
+import { applyTextSettings } from '../utils/textStyleHelper';
 
 interface WarehouseIdentificationProps {
   cardData?: KanbanCardMaster;
@@ -15,6 +17,7 @@ interface WarehouseIdentificationProps {
   fontSizeScale?: number;
   width?: number; // mm
   height?: number; // mm
+  textSettings?: Record<string, TextCustomizationSettings>;
 }
 
 const getColourBg = (colour: string) => {
@@ -50,7 +53,8 @@ export const WarehouseIdentification: React.FC<WarehouseIdentificationProps> = (
   padding = 3,
   fontSizeScale = 1.0,
   width,
-  height
+  height,
+  textSettings
 }) => {
   // Extract read-only properties directly from Master Information (single source of truth)
   // fall back to cardData representation if masterInfo is not provided (e.g. for card print templates)
@@ -92,15 +96,18 @@ export const WarehouseIdentification: React.FC<WarehouseIdentificationProps> = (
         className="w-full flex flex-col border-b border-black/10 pb-0.5 shrink-0"
         style={{ marginBottom: `${Math.max(1.5, 3.5 * scale)}px` }}
       >
-        <span className="text-neutral-400 font-extrabold uppercase tracking-widest leading-none mb-0.5" style={{ fontSize: `${subTitleFontSize}px` }}>
+        <span 
+          className="text-neutral-400 font-extrabold uppercase tracking-widest leading-none mb-0.5" 
+          style={applyTextSettings(textSettings?.headerEyebrow, { fontSize: `${subTitleFontSize}px` })}
+        >
           PRODUCT NAME
         </span>
         <div 
           className="font-extrabold text-neutral-900 uppercase leading-tight w-full break-words line-clamp-2"
-          style={{ 
+          style={applyTextSettings(textSettings?.productName, { 
             fontSize: `${titleFontSize}px`,
             fontFamily: 'Inter, sans-serif'
-          }}
+          })}
         >
           {pName || 'NO PRODUCT NAME'}
         </div>
@@ -124,7 +131,7 @@ export const WarehouseIdentification: React.FC<WarehouseIdentificationProps> = (
       {/* 3. Bottom of Section: Location display with the selected Location Colour (Read-only) */}
       <div 
         className="w-full text-center font-black text-white tracking-widest uppercase transition-all shrink-0"
-        style={{ 
+        style={applyTextSettings(textSettings?.locationBadge, { 
           backgroundColor: getColourBg(pLocationColour),
           color: getColourText(pLocationColour),
           fontSize: `${badgeFontSize}px`,
@@ -135,7 +142,7 @@ export const WarehouseIdentification: React.FC<WarehouseIdentificationProps> = (
           borderRadius: `${Math.max(2, 6 * scale)}px`,
           lineHeight: '1.1',
           marginTop: `${Math.max(1.5, 3.5 * scale)}px`
-        }}
+        })}
       >
         {pLocation || 'NO LOCATION'}
       </div>

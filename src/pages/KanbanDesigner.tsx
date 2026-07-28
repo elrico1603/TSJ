@@ -7,8 +7,10 @@ import {
   getTemplates, 
   saveTemplate, 
   deleteTemplate, 
-  createDefaultTemplateBlueprint 
+  createDefaultTemplateBlueprint,
+  TextCustomizationSettings
 } from '../services/templateService';
+import { applyTextSettings, AVAILABLE_FONTS, SECTION_TEXT_ELEMENTS } from '../utils/textStyleHelper';
 import { KanbanCardMaster, getKanbanCards, getKanbanMailtoQRCodeUrl } from '../services/kanbanService';
 import { MasterInformation as MasterInfoType } from '../types';
 import { MasterInformation } from '../components/MasterInformation';
@@ -94,7 +96,8 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
   });
 
   // Right sidebar panel double tabs
-  const [rightActiveTab, setRightActiveTab] = useState<'master' | 'layout'>('master');
+  const [rightActiveTab, setRightActiveTab] = useState<'master' | 'layout' | 'typography'>('master');
+  const [selectedTextElementId, setSelectedTextElementId] = useState<string>('');
 
   // Sliders-based image cropping and preview overlay state variables
   const [isCropModalOpen, setIsCropModalOpen] = useState(false);
@@ -252,7 +255,7 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
       });
 
       setMasterInfo({
-        productName: selectedCard.productDescription || '',
+        productName: selectedCard.productName || selectedCard.productDescription || '',
         supplier: selectedCard.supplierName || '',
         supplierPartNumber: selectedCard.supplierPartNumber || '',
         orderQuantity: selectedCard.orderQuantity || '',
@@ -264,7 +267,9 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
         qrCode: qrUrl,
         templateName: activeTemplate?.templateName || '',
         templateType: activeTemplate?.paperSize || 'A4',
-        binQuantity: selectedCard.binQuantity || ''
+        binQuantity: selectedCard.binQuantity || '',
+        cardColour: selectedCard.cardColour || '#ffffff',
+        status: selectedCard.status || 'ACTIVE'
       });
     }
   }, [selectedCard, activeTemplate?.templateName, activeTemplate?.paperSize]);
@@ -576,15 +581,65 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
     }
   };
 
+  const calculateMaxQrWidth = (cardWidthMm: number, pictureWidthPx: number): number => {
+    const scaleFactor = 720 / 297;
+    const availableCardWidthPx = Math.round(cardWidthMm * scaleFactor);
+    const pictureColWidthPx = pictureWidthPx + 8;
+    const supplierMinPx = 124;
+    const paddingPx = 16;
+    return Math.max(0, Math.floor(availableCardWidthPx - pictureColWidthPx - supplierMinPx - paddingPx));
+  };
+
   const updateSectionProperty = (sectionId: string, propertyKey: keyof KanbanSectionConfig, value: any) => {
     if (!activeTemplate) return;
     setActiveTemplate(prev => {
       if (!prev) return null;
+      const maxPrintableWidth = 210; // A4 portrait printable width (210mm)
+      let val = value;
+      if (propertyKey === 'width' && typeof val === 'number') {
+        val = Math.min(val, maxPrintableWidth);
+      }
       const updatedSections = prev.sections.map(sec => {
         if (sec.id === sectionId) {
-          return { ...sec, [propertyKey]: value };
+          let updatedSec = { ...sec, [propertyKey]: val };
+          const cardWidthMm = updatedSec.width || 95;
+          const picWidth = updatedSec.picture?.width ?? 110;
+          const maxQr = calculateMaxQrWidth(cardWidthMm, picWidth);
+
+          if (propertyKey === 'qr' && val) {
+            updatedSec.qr = val;
+          }
+          return updatedSec;
         }
         return sec;
+      });
+      return { ...prev, sections: updatedSections };
+    });
+  };
+
+  const updateTextSettingProperty = (
+    sectionId: string,
+    elementId: string,
+    propertyKey: keyof TextCustomizationSettings,
+    value: any
+  ) => {
+    if (!activeTemplate) return;
+    setActiveTemplate(prev => {
+      if (!prev) return null;
+      const updatedSections = prev.sections.map(sec => {
+        if (sec.id !== sectionId) return sec;
+        const currentTextSettings = sec.textSettings || {};
+        const elementSettings = currentTextSettings[elementId] || {};
+        return {
+          ...sec,
+          textSettings: {
+            ...currentTextSettings,
+            [elementId]: {
+              ...elementSettings,
+              [propertyKey]: value
+            }
+          }
+        };
       });
       return { ...prev, sections: updatedSections };
     });
@@ -619,6 +674,7 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
             fontSizeScale={scaleFactorFont}
             width={sec.width}
             height={sec.height}
+            textSettings={sec.textSettings}
           />
         );
       case 'kanban_pulled':
@@ -639,6 +695,7 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
             fontSizeScale={scaleFactorFont}
             width={sec.width}
             height={sec.height}
+            textSettings={sec.textSettings}
           />
         );
       case 'warehouse_id':
@@ -654,6 +711,7 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
             fontSizeScale={scaleFactorFont}
             width={sec.width}
             height={sec.height}
+            textSettings={sec.textSettings}
           />
         );
       case 'warehouse_display':
@@ -669,6 +727,7 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
             fontSizeScale={scaleFactorFont}
             width={sec.width}
             height={sec.height}
+            textSettings={sec.textSettings}
           />
         );
       default:
@@ -1149,7 +1208,7 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
                           e.stopPropagation();
                           setActiveSectionId(sec.id);
                         }}
-                        className={`transition-all duration-150 backdrop-blur-[1px] flex flex-col justify-between overflow-hidden cursor-grab active:cursor-grabbing ${
+                        className={`transition-all duration-150 backdrop-blur-[1px] flex flex-col justify-between ${sec.id === 'kanban_pulled' ? 'overflow-visible' : 'overflow-hidden'} cursor-grab active:cursor-grabbing ${
                           isSelected
                             ? 'ring-4 ring-offset-2 ring-purple-600 shadow-2xl z-40 scale-[1.005]'
                             : 'z-20 hover:scale-[1.002] border border-transparent hover:border-purple-400/50'
@@ -1161,7 +1220,7 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
                         }}
                       >
                         {/* Interactive Card Section Outer Component wrapper */}
-                        <div className="w-full h-full relative group">
+                        <div className={`w-full ${sec.id === 'kanban_pulled' ? 'min-h-full h-auto' : 'h-full'} relative group`}>
                           {renderSectionContent(sec)}
 
                           {/* Interactive overlay layer to indicate section label and bounds inside designer */}
@@ -1194,30 +1253,47 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
           )}
 
           {/* 3. Right Sidebar Panel: Selected Section Layout and Styling properties */}
-          {activeTemplate && activeSection && (
-            <aside className="w-80 bg-[#121212] border-l border-white/10 flex flex-col overflow-y-auto custom-scrollbar p-5 space-y-5">
+          {activeTemplate && activeSection && (() => {
+            const sectionTextElements = SECTION_TEXT_ELEMENTS[activeSection.id] || [];
+            const currentElementId = selectedTextElementId || sectionTextElements[0]?.id || '';
+
+            return (
+              <aside className="w-80 bg-[#121212] border-l border-white/10 flex flex-col overflow-y-auto custom-scrollbar p-5 space-y-5">
               
-              {/* Double-Tab Panel Headings */}
-              <div className="grid grid-cols-2 gap-1.5 bg-black/60 p-1 rounded-2xl border border-white/5 shrink-0">
+              {/* Triple-Tab Panel Headings */}
+              <div className="grid grid-cols-3 gap-1 bg-black/60 p-1 rounded-2xl border border-white/5 shrink-0">
                 <button
+                  type="button"
                   onClick={() => setRightActiveTab('master')}
-                  className={`py-2 text-[10px] font-black uppercase tracking-wider rounded-xl transition-all ${
+                  className={`py-2 text-[9px] font-black uppercase tracking-wider rounded-xl transition-all ${
                     rightActiveTab === 'master'
                       ? 'bg-[#ff8c00] text-white shadow-lg'
                       : 'text-gray-400 hover:text-white hover:bg-white/5'
                   }`}
                 >
-                  📝 Master Info
+                  📝 Master
                 </button>
                 <button
+                  type="button"
                   onClick={() => setRightActiveTab('layout')}
-                  className={`py-2 text-[10px] font-black uppercase tracking-wider rounded-xl transition-all ${
+                  className={`py-2 text-[9px] font-black uppercase tracking-wider rounded-xl transition-all ${
                     rightActiveTab === 'layout'
                       ? 'bg-purple-600 text-white shadow-lg'
                       : 'text-gray-400 hover:text-white hover:bg-white/5'
                   }`}
                 >
-                  📐 Section Layout
+                  📐 Layout
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRightActiveTab('typography')}
+                  className={`py-2 text-[9px] font-black uppercase tracking-wider rounded-xl transition-all ${
+                    rightActiveTab === 'typography'
+                      ? 'bg-emerald-600 text-white shadow-lg'
+                      : 'text-gray-400 hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  🔤 Text
                 </button>
               </div>
 
@@ -1471,11 +1547,13 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
                     </div>
 
                     <div className="flex items-center gap-3 bg-black/40 p-2.5 rounded-xl border border-white/5">
-                      <div className="bg-white p-1 rounded-lg shrink-0 border border-white/10 flex items-center justify-center">
+                      <div className="bg-white p-1 rounded-lg shrink-0 border border-white/10 flex items-center justify-center overflow-hidden" style={{ width: '48px', height: '48px' }}>
                         <QRCodeRenderer
                           text={masterInfo.qrCode || ''}
-                          size={48}
-                          className="w-12 h-12 flex items-center justify-center"
+                          width={40}
+                          height={40}
+                          responsive={false}
+                          className="flex items-center justify-center"
                         />
                       </div>
                       <div className="space-y-0.5 min-w-0">
@@ -1628,6 +1706,120 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
                         </div>
                       </div>
 
+                      {/* Picture Layout Controls */}
+                      <div className="pt-2 border-t border-white/5 space-y-2">
+                        <span className="text-[10px] text-purple-400 font-extrabold uppercase tracking-wider block">Picture Box Layout</span>
+                        <div className="grid grid-cols-2 gap-3 font-sans">
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] text-gray-500 font-extrabold uppercase">Picture X (mm)</label>
+                            <input
+                              type="number"
+                              value={activeSection.picture?.x ?? 15}
+                              onChange={(e) => updateSectionProperty(activeSectionId, 'picture', {
+                                ...(activeSection.picture || { x: 15, y: 15, width: 110, height: 110 }),
+                                x: parseInt(e.target.value, 10) || 0
+                              })}
+                              className="w-full bg-black border border-white/10 px-2.5 py-1.5 rounded-xl text-white font-mono text-center focus:outline-none focus:border-purple-500"
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] text-gray-500 font-extrabold uppercase">Picture Y (mm)</label>
+                            <input
+                              type="number"
+                              value={activeSection.picture?.y ?? 15}
+                              onChange={(e) => updateSectionProperty(activeSectionId, 'picture', {
+                                ...(activeSection.picture || { x: 15, y: 15, width: 110, height: 110 }),
+                                y: parseInt(e.target.value, 10) || 0
+                              })}
+                              className="w-full bg-black border border-white/10 px-2.5 py-1.5 rounded-xl text-white font-mono text-center focus:outline-none focus:border-purple-500"
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] text-gray-500 font-extrabold uppercase">Picture Width (mm)</label>
+                            <input
+                              type="number"
+                              min="1"
+                              value={activeSection.picture?.width ?? 110}
+                              onChange={(e) => updateSectionProperty(activeSectionId, 'picture', {
+                                ...(activeSection.picture || { x: 15, y: 15, width: 110, height: 110 }),
+                                width: parseInt(e.target.value, 10) || 0
+                              })}
+                              className="w-full bg-black border border-white/10 px-2.5 py-1.5 rounded-xl text-white font-mono text-center focus:outline-none focus:border-purple-500"
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] text-gray-500 font-extrabold uppercase">Picture Height (mm)</label>
+                            <input
+                              type="number"
+                              min="1"
+                              value={activeSection.picture?.height ?? 110}
+                              onChange={(e) => updateSectionProperty(activeSectionId, 'picture', {
+                                ...(activeSection.picture || { x: 15, y: 15, width: 110, height: 110 }),
+                                height: parseInt(e.target.value, 10) || 0
+                              })}
+                              className="w-full bg-black border border-white/10 px-2.5 py-1.5 rounded-xl text-white font-mono text-center focus:outline-none focus:border-purple-500"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* QR Code Layout Controls */}
+                      <div className="pt-2 border-t border-white/5 space-y-2">
+                        <span className="text-[10px] text-purple-400 font-extrabold uppercase tracking-wider block">QR Code Layout</span>
+                        <div className="grid grid-cols-2 gap-3 font-sans">
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] text-gray-500 font-extrabold uppercase">QR X (mm)</label>
+                            <input
+                              type="number"
+                              value={activeSection.qr?.x ?? 150}
+                              onChange={(e) => updateSectionProperty(activeSectionId, 'qr', {
+                                ...(activeSection.qr || { x: 150, y: 0, width: 50, height: 50 }),
+                                x: parseInt(e.target.value, 10) || 0
+                              })}
+                              className="w-full bg-black border border-white/10 px-2.5 py-1.5 rounded-xl text-white font-mono text-center focus:outline-none focus:border-purple-500"
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] text-gray-500 font-extrabold uppercase">QR Y (mm)</label>
+                            <input
+                              type="number"
+                              value={activeSection.qr?.y ?? 0}
+                              onChange={(e) => updateSectionProperty(activeSectionId, 'qr', {
+                                ...(activeSection.qr || { x: 150, y: 0, width: 50, height: 50 }),
+                                y: parseInt(e.target.value, 10) || 0
+                              })}
+                              className="w-full bg-black border border-white/10 px-2.5 py-1.5 rounded-xl text-white font-mono text-center focus:outline-none focus:border-purple-500"
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] text-gray-500 font-extrabold uppercase">QR Width (mm)</label>
+                            <input
+                              type="number"
+                              min="1"
+                              value={activeSection.qr?.width ?? 50}
+                              onChange={(e) => updateSectionProperty(activeSectionId, 'qr', {
+                                ...(activeSection.qr || { x: 150, y: 0, width: 50, height: 50 }),
+                                width: parseInt(e.target.value, 10) || 0
+                              })}
+                              className="w-full bg-black border border-white/10 px-2.5 py-1.5 rounded-xl text-white font-mono text-center focus:outline-none focus:border-purple-500"
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] text-gray-500 font-extrabold uppercase">QR Height (mm)</label>
+                            <input
+                              type="number"
+                              min="1"
+                              value={activeSection.qr?.height ?? 50}
+                              onChange={(e) => updateSectionProperty(activeSectionId, 'qr', {
+                                ...(activeSection.qr || { x: 150, y: 0, width: 50, height: 50 }),
+                                height: parseInt(e.target.value, 10) || 0
+                              })}
+                              className="w-full bg-black border border-white/10 px-2.5 py-1.5 rounded-xl text-white font-mono text-center focus:outline-none focus:border-purple-500"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
                       {/* Spacings sliders */}
                       <div className="space-y-1.5 font-sans">
                         <label className="text-[10px] text-gray-500 font-extrabold uppercase flex justify-between">
@@ -1744,8 +1936,569 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
                   </div>
                 </div>
               )}
+
+              {/* TAB 3: TYPOGRAPHY & TEXT CUSTOMIZATION */}
+              {rightActiveTab === 'typography' && (
+                <div className="space-y-4 animate-in fade-in duration-150">
+                  <div className="pb-3 border-b border-white/5">
+                    <h3 className="text-[10px] font-black uppercase tracking-widest text-emerald-400 flex items-center gap-1.5">
+                      <Icon name="type" size={12} /> Text Customizer
+                    </h3>
+                    <p className="text-[9px] text-gray-500 mt-1 font-sans">
+                      Select any text element inside the active section to customize its typography, shadows, margins, and borders.
+                    </p>
+                  </div>
+
+                  {/* Section Switcher (compact) */}
+                  <div className="space-y-1.5">
+                    <label className="text-[9px] text-gray-500 font-extrabold uppercase">Selected Section</label>
+                    <div className="grid grid-cols-4 gap-1 bg-black/40 p-1 rounded-xl">
+                      {activeTemplate.sections.map(s => (
+                        <button
+                          key={s.id}
+                          type="button"
+                          onClick={() => {
+                            setActiveSectionId(s.id);
+                            setSelectedTextElementId(''); // reset element on section change
+                          }}
+                          className={`py-1 text-[8px] font-black uppercase tracking-tighter rounded-lg transition-all ${
+                            activeSectionId === s.id
+                              ? 'bg-emerald-600 text-white shadow'
+                              : 'text-gray-500 hover:text-white'
+                          }`}
+                          title={s.name}
+                        >
+                          {s.id === 'master_info' ? 'Master' : s.id === 'kanban_pulled' ? 'Pulled' : s.id === 'warehouse_id' ? 'ID' : 'Display'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Text Element Picker inside active section */}
+                  <div className="space-y-1.5">
+                    <label className="text-[9px] text-gray-500 font-extrabold uppercase">Text Element</label>
+                    <select
+                      value={currentElementId}
+                      onChange={(e) => setSelectedTextElementId(e.target.value)}
+                      className="w-full bg-black text-white text-xs px-3 py-2 border border-white/10 rounded-xl focus:outline-none"
+                    >
+                      {sectionTextElements.map(el => (
+                        <option key={el.id} value={el.id}>{el.label}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Custom properties panel specifically named KANBAN PULLED TEXT for Section 2 warning */}
+                  {activeSectionId === 'kanban_pulled' && currentElementId === 'warningText' ? (
+                    <div className="space-y-4 bg-black/20 p-4 border border-white/5 rounded-2xl">
+                      <div className="flex justify-between items-center pb-2 border-b border-white/5">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-red-400">KANBAN PULLED TEXT</span>
+                        <span className="text-[8px] font-mono text-gray-500 font-bold uppercase">Section 2 Banner</span>
+                      </div>
+
+                      {/* Font Size slider */}
+                      <div className="space-y-1 font-sans">
+                        <label className="text-[9px] text-gray-400 font-bold uppercase flex justify-between">
+                          <span>Font Size</span>
+                          <span className="font-mono text-red-400 font-bold">{(activeSection.textSettings?.warningText?.fontSize ?? 28)}px</span>
+                        </label>
+                        <input
+                          type="range"
+                          min="10"
+                          max="120"
+                          step="1"
+                          value={(activeSection.textSettings?.warningText?.fontSize ?? 28)}
+                          onChange={(e) => updateTextSettingProperty(activeSectionId, 'warningText', 'fontSize', parseInt(e.target.value, 10))}
+                          className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-red-500"
+                        />
+                        <span className="text-[8px] text-gray-600 block leading-tight">Increases up to 72px+ without breaking layout (with auto-center & fit).</span>
+                      </div>
+
+                      {/* Font Weight */}
+                      <div className="space-y-1 font-sans">
+                        <label className="text-[9px] text-gray-400 font-bold uppercase">Font Weight</label>
+                        <select
+                          value={(activeSection.textSettings?.warningText?.fontWeight ?? 'bold')}
+                          onChange={(e) => updateTextSettingProperty(activeSectionId, 'warningText', 'fontWeight', e.target.value)}
+                          className="w-full bg-black text-white text-xs px-2.5 py-1.5 border border-white/10 rounded-xl focus:outline-none"
+                        >
+                          <option value="normal">Regular</option>
+                          <option value="medium">Medium</option>
+                          <option value="semibold">Semi Bold</option>
+                          <option value="bold">Bold</option>
+                          <option value="extrabold">Extra Bold</option>
+                          <option value="black">Black (Ultra)</option>
+                        </select>
+                      </div>
+
+                      {/* Font Colour */}
+                      <div className="space-y-1 font-sans">
+                        <label className="text-[9px] text-gray-400 font-bold uppercase">Font Colour</label>
+                        <div className="flex gap-2">
+                          <input
+                            type="color"
+                            value={(activeSection.textSettings?.warningText?.color ?? '#dc2626')}
+                            onChange={(e) => updateTextSettingProperty(activeSectionId, 'warningText', 'color', e.target.value)}
+                            className="w-8 h-8 rounded-lg overflow-hidden bg-transparent cursor-pointer border border-white/15"
+                          />
+                          <input
+                            type="text"
+                            value={(activeSection.textSettings?.warningText?.color ?? '#dc2626')}
+                            onChange={(e) => updateTextSettingProperty(activeSectionId, 'warningText', 'color', e.target.value)}
+                            className="w-full bg-black text-white font-mono text-center text-xs border border-white/10 px-1 rounded-xl focus:outline-none"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Font Family */}
+                      <div className="space-y-1 font-sans">
+                        <label className="text-[9px] text-gray-400 font-bold uppercase">Font Family</label>
+                        <select
+                          value={(activeSection.textSettings?.warningText?.fontFamily ?? 'sans-serif')}
+                          onChange={(e) => updateTextSettingProperty(activeSectionId, 'warningText', 'fontFamily', e.target.value)}
+                          className="w-full bg-black text-white text-xs px-2.5 py-1.5 border border-white/10 rounded-xl focus:outline-none"
+                        >
+                          {AVAILABLE_FONTS.map(font => (
+                            <option key={font.value} value={font.value}>{font.name}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Letter Spacing */}
+                      <div className="space-y-1 font-sans">
+                        <label className="text-[9px] text-gray-400 font-bold uppercase flex justify-between">
+                          <span>Letter Spacing</span>
+                          <span className="font-mono text-red-400 font-bold">{(activeSection.textSettings?.warningText?.letterSpacing ?? '0px')}</span>
+                        </label>
+                        <select
+                          value={(activeSection.textSettings?.warningText?.letterSpacing ?? '0px')}
+                          onChange={(e) => updateTextSettingProperty(activeSectionId, 'warningText', 'letterSpacing', e.target.value)}
+                          className="w-full bg-black text-white text-xs px-2.5 py-1.5 border border-white/10 rounded-xl focus:outline-none"
+                        >
+                          <option value="-1px">Tight (-1px)</option>
+                          <option value="0px">Normal (0px)</option>
+                          <option value="1px">Wide (1px)</option>
+                          <option value="2px">Extra Wide (2px)</option>
+                          <option value="4px">Tracking (4px)</option>
+                          <option value="8px">Display (8px)</option>
+                        </select>
+                      </div>
+
+                      {/* Text Shadow */}
+                      <div className="space-y-3 pt-2 border-t border-white/5">
+                        <div className="flex justify-between items-center">
+                          <span className="text-[9px] font-bold text-gray-400 uppercase">Text Shadow</span>
+                          <input
+                            type="checkbox"
+                            checked={activeSection.textSettings?.warningText?.shadowEnabled || false}
+                            onChange={(e) => updateTextSettingProperty(activeSectionId, 'warningText', 'shadowEnabled', e.target.checked)}
+                            className="w-3.5 h-3.5 accent-red-500 rounded bg-black border border-white/10"
+                          />
+                        </div>
+                        {activeSection.textSettings?.warningText?.shadowEnabled && (
+                          <div className="space-y-2.5 pl-2 border-l border-white/5">
+                            <div className="space-y-1 font-sans">
+                              <label className="text-[9px] text-gray-500 font-bold uppercase">Shadow Colour</label>
+                              <div className="flex gap-2">
+                                <input
+                                  type="color"
+                                  value={activeSection.textSettings?.warningText?.shadowColor || '#000000'}
+                                  onChange={(e) => updateTextSettingProperty(activeSectionId, 'warningText', 'shadowColor', e.target.value)}
+                                  className="w-6 h-6 rounded-md overflow-hidden bg-transparent cursor-pointer border border-white/15"
+                                />
+                                <input
+                                  type="text"
+                                  value={activeSection.textSettings?.warningText?.shadowColor || '#000000'}
+                                  onChange={(e) => updateTextSettingProperty(activeSectionId, 'warningText', 'shadowColor', e.target.value)}
+                                  className="w-full bg-black text-white font-mono text-center text-[10px] border border-white/10 px-1 rounded-lg focus:outline-none"
+                                />
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-3 gap-2 font-sans">
+                              <div className="space-y-1">
+                                <label className="text-[8px] text-gray-500 font-bold uppercase">Blur</label>
+                                <input
+                                  type="number"
+                                  value={activeSection.textSettings?.warningText?.shadowBlur ?? 2}
+                                  onChange={(e) => updateTextSettingProperty(activeSectionId, 'warningText', 'shadowBlur', parseInt(e.target.value, 10) || 0)}
+                                  className="w-full bg-black border border-white/10 text-center rounded-lg text-xs py-1"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-[8px] text-gray-500 font-bold uppercase">X Offset</label>
+                                <input
+                                  type="number"
+                                  value={activeSection.textSettings?.warningText?.shadowOffsetX ?? 1}
+                                  onChange={(e) => updateTextSettingProperty(activeSectionId, 'warningText', 'shadowOffsetX', parseInt(e.target.value, 10) || 0)}
+                                  className="w-full bg-black border border-white/10 text-center rounded-lg text-xs py-1"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-[8px] text-gray-500 font-bold uppercase">Y Offset</label>
+                                <input
+                                  type="number"
+                                  value={activeSection.textSettings?.warningText?.shadowOffsetY ?? 1}
+                                  onChange={(e) => updateTextSettingProperty(activeSectionId, 'warningText', 'shadowOffsetY', parseInt(e.target.value, 10) || 0)}
+                                  className="w-full bg-black border border-white/10 text-center rounded-lg text-xs py-1"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Rotation slider */}
+                      <div className="space-y-1 font-sans">
+                        <label className="text-[9px] text-gray-400 font-bold uppercase flex justify-between">
+                          <span>Rotation</span>
+                          <span className="font-mono text-red-400 font-bold">{(activeSection.textSettings?.warningText?.rotation ?? 0)}°</span>
+                        </label>
+                        <input
+                          type="range"
+                          min="-180"
+                          max="180"
+                          step="1"
+                          value={(activeSection.textSettings?.warningText?.rotation ?? 0)}
+                          onChange={(e) => updateTextSettingProperty(activeSectionId, 'warningText', 'rotation', parseInt(e.target.value, 10))}
+                          className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-red-500"
+                        />
+                      </div>
+
+                      {/* Horizontal Position offset */}
+                      <div className="space-y-1 font-sans">
+                        <label className="text-[9px] text-gray-400 font-bold uppercase flex justify-between">
+                          <span>Horizontal Position</span>
+                          <span className="font-mono text-red-400 font-bold">{(activeSection.textSettings?.warningText?.horizontalPosition ?? 0)}px</span>
+                        </label>
+                        <input
+                          type="range"
+                          min="-150"
+                          max="150"
+                          step="1"
+                          value={(activeSection.textSettings?.warningText?.horizontalPosition ?? 0)}
+                          onChange={(e) => updateTextSettingProperty(activeSectionId, 'warningText', 'horizontalPosition', parseInt(e.target.value, 10))}
+                          className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-red-500"
+                        />
+                      </div>
+
+                      {/* Vertical Position offset */}
+                      <div className="space-y-1 font-sans">
+                        <label className="text-[9px] text-gray-400 font-bold uppercase flex justify-between">
+                          <span>Vertical Position</span>
+                          <span className="font-mono text-red-400 font-bold">{(activeSection.textSettings?.warningText?.verticalPosition ?? 0)}px</span>
+                        </label>
+                        <input
+                          type="range"
+                          min="-150"
+                          max="150"
+                          step="1"
+                          value={(activeSection.textSettings?.warningText?.verticalPosition ?? 0)}
+                          onChange={(e) => updateTextSettingProperty(activeSectionId, 'warningText', 'verticalPosition', parseInt(e.target.value, 10))}
+                          className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-red-500"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    /* General Property Panel for other text elements */
+                    <div className="space-y-4 bg-black/20 p-4 border border-white/5 rounded-2xl">
+                      <div className="flex justify-between items-center pb-2 border-b border-white/5">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400">Typography / Style Customizer</span>
+                        <span className="text-[8px] font-mono text-gray-500 font-bold uppercase">Element ID: {currentElementId}</span>
+                      </div>
+
+                      {/* Font Size slider */}
+                      <div className="space-y-1 font-sans">
+                        <label className="text-[9px] text-gray-400 font-bold uppercase flex justify-between">
+                          <span>Font Size</span>
+                          <span className="font-mono text-emerald-400 font-bold">{(activeSection.textSettings?.[currentElementId]?.fontSize ?? 12)}px</span>
+                        </label>
+                        <input
+                          type="range"
+                          min="6"
+                          max="80"
+                          step="1"
+                          value={(activeSection.textSettings?.[currentElementId]?.fontSize ?? 12)}
+                          onChange={(e) => updateTextSettingProperty(activeSectionId, currentElementId, 'fontSize', parseInt(e.target.value, 10))}
+                          className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                        />
+                      </div>
+
+                      {/* Font Family selector */}
+                      <div className="space-y-1 font-sans">
+                        <label className="text-[9px] text-gray-400 font-bold uppercase">Font Family</label>
+                        <select
+                          value={(activeSection.textSettings?.[currentElementId]?.fontFamily ?? 'sans-serif')}
+                          onChange={(e) => updateTextSettingProperty(activeSectionId, currentElementId, 'fontFamily', e.target.value)}
+                          className="w-full bg-black text-white text-xs px-2.5 py-1.5 border border-white/10 rounded-xl focus:outline-none"
+                        >
+                          {AVAILABLE_FONTS.map(font => (
+                            <option key={font.value} value={font.value}>{font.name}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Font Weight */}
+                      <div className="space-y-1 font-sans">
+                        <label className="text-[9px] text-gray-400 font-bold uppercase">Font Weight</label>
+                        <select
+                          value={(activeSection.textSettings?.[currentElementId]?.fontWeight ?? 'normal')}
+                          onChange={(e) => updateTextSettingProperty(activeSectionId, currentElementId, 'fontWeight', e.target.value)}
+                          className="w-full bg-black text-white text-xs px-2.5 py-1.5 border border-white/10 rounded-xl focus:outline-none"
+                        >
+                          <option value="normal">Regular</option>
+                          <option value="medium">Medium</option>
+                          <option value="semibold">Semi Bold</option>
+                          <option value="bold">Bold</option>
+                          <option value="extrabold">Extra Bold</option>
+                          <option value="black">Black (Ultra)</option>
+                        </select>
+                      </div>
+
+                      {/* Font Style */}
+                      <div className="space-y-1 font-sans">
+                        <label className="text-[9px] text-gray-400 font-bold uppercase">Font Style</label>
+                        <select
+                          value={(activeSection.textSettings?.[currentElementId]?.fontStyle ?? 'normal')}
+                          onChange={(e) => updateTextSettingProperty(activeSectionId, currentElementId, 'fontStyle', e.target.value as any)}
+                          className="w-full bg-black text-white text-xs px-2.5 py-1.5 border border-white/10 rounded-xl focus:outline-none"
+                        >
+                          <option value="normal">Normal</option>
+                          <option value="italic">Italic</option>
+                        </select>
+                      </div>
+
+                      {/* Letter Spacing */}
+                      <div className="space-y-1 font-sans">
+                        <label className="text-[9px] text-gray-400 font-bold uppercase">Letter Spacing</label>
+                        <select
+                          value={(activeSection.textSettings?.[currentElementId]?.letterSpacing ?? '0px')}
+                          onChange={(e) => updateTextSettingProperty(activeSectionId, currentElementId, 'letterSpacing', e.target.value)}
+                          className="w-full bg-black text-white text-xs px-2.5 py-1.5 border border-white/10 rounded-xl focus:outline-none"
+                        >
+                          <option value="-1px">Tight (-1px)</option>
+                          <option value="0px">Normal (0px)</option>
+                          <option value="1px">Wide (1px)</option>
+                          <option value="2px">Extra Wide (2px)</option>
+                          <option value="4px">Tracking (4px)</option>
+                          <option value="8px">Display (8px)</option>
+                        </select>
+                      </div>
+
+                      {/* Line Height */}
+                      <div className="space-y-1 font-sans">
+                        <label className="text-[9px] text-gray-400 font-bold uppercase flex justify-between">
+                          <span>Line Height</span>
+                          <span className="font-mono text-emerald-400 font-bold">{(activeSection.textSettings?.[currentElementId]?.lineHeight ?? '1.2')}</span>
+                        </label>
+                        <input
+                          type="range"
+                          min="0.8"
+                          max="2.5"
+                          step="0.1"
+                          value={parseFloat(activeSection.textSettings?.[currentElementId]?.lineHeight ?? '1.2')}
+                          onChange={(e) => updateTextSettingProperty(activeSectionId, currentElementId, 'lineHeight', e.target.value)}
+                          className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                        />
+                      </div>
+
+                      {/* Text Colour */}
+                      <div className="space-y-1 font-sans">
+                        <label className="text-[9px] text-gray-400 font-bold uppercase">Text Colour</label>
+                        <div className="flex gap-2">
+                          <input
+                            type="color"
+                            value={(activeSection.textSettings?.[currentElementId]?.color ?? '#000000')}
+                            onChange={(e) => updateTextSettingProperty(activeSectionId, currentElementId, 'color', e.target.value)}
+                            className="w-8 h-8 rounded-lg overflow-hidden bg-transparent cursor-pointer border border-white/15"
+                          />
+                          <input
+                            type="text"
+                            value={(activeSection.textSettings?.[currentElementId]?.color ?? '#000000')}
+                            onChange={(e) => updateTextSettingProperty(activeSectionId, currentElementId, 'color', e.target.value)}
+                            className="w-full bg-black text-white font-mono text-center text-xs border border-white/10 px-1 rounded-xl focus:outline-none"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Text Alignment */}
+                      <div className="space-y-1 font-sans">
+                        <label className="text-[9px] text-gray-400 font-bold uppercase">Text Alignment</label>
+                        <select
+                          value={(activeSection.textSettings?.[currentElementId]?.textAlign ?? 'left')}
+                          onChange={(e) => updateTextSettingProperty(activeSectionId, currentElementId, 'textAlign', e.target.value as any)}
+                          className="w-full bg-black text-white text-xs px-2.5 py-1.5 border border-white/10 rounded-xl focus:outline-none"
+                        >
+                          <option value="left">Left</option>
+                          <option value="center">Center</option>
+                          <option value="right">Right</option>
+                          <option value="justify">Justify</option>
+                        </select>
+                      </div>
+
+                      {/* Text Transform */}
+                      <div className="space-y-1 font-sans">
+                        <label className="text-[9px] text-gray-400 font-bold uppercase">Text Transform</label>
+                        <select
+                          value={(activeSection.textSettings?.[currentElementId]?.textTransform ?? 'normal')}
+                          onChange={(e) => updateTextSettingProperty(activeSectionId, currentElementId, 'textTransform', e.target.value as any)}
+                          className="w-full bg-black text-white text-xs px-2.5 py-1.5 border border-white/10 rounded-xl focus:outline-none"
+                        >
+                          <option value="normal">Normal</option>
+                          <option value="uppercase">Uppercase</option>
+                          <option value="lowercase">Lowercase</option>
+                          <option value="capitalize">Capitalize</option>
+                        </select>
+                      </div>
+
+                      {/* Text Shadow section */}
+                      <div className="space-y-3 pt-3 border-t border-white/5">
+                        <div className="flex justify-between items-center">
+                          <span className="text-[9px] font-bold text-gray-400 uppercase">Text Shadow</span>
+                          <input
+                            type="checkbox"
+                            checked={activeSection.textSettings?.[currentElementId]?.shadowEnabled || false}
+                            onChange={(e) => updateTextSettingProperty(activeSectionId, currentElementId, 'shadowEnabled', e.target.checked)}
+                            className="w-3.5 h-3.5 accent-emerald-500 rounded bg-black border border-white/10"
+                          />
+                        </div>
+                        {activeSection.textSettings?.[currentElementId]?.shadowEnabled && (
+                          <div className="space-y-2.5 pl-2 border-l border-white/5">
+                            <div className="space-y-1 font-sans">
+                              <label className="text-[9px] text-gray-500 font-bold uppercase">Shadow Colour</label>
+                              <div className="flex gap-2">
+                                <input
+                                  type="color"
+                                  value={activeSection.textSettings?.[currentElementId]?.shadowColor || '#000000'}
+                                  onChange={(e) => updateTextSettingProperty(activeSectionId, currentElementId, 'shadowColor', e.target.value)}
+                                  className="w-6 h-6 rounded-md overflow-hidden bg-transparent cursor-pointer border border-white/15"
+                                />
+                                <input
+                                  type="text"
+                                  value={activeSection.textSettings?.[currentElementId]?.shadowColor || '#000000'}
+                                  onChange={(e) => updateTextSettingProperty(activeSectionId, currentElementId, 'shadowColor', e.target.value)}
+                                  className="w-full bg-black text-white font-mono text-center text-[10px] border border-white/10 px-1 rounded-lg focus:outline-none"
+                                />
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-3 gap-2 font-sans">
+                              <div className="space-y-1">
+                                <label className="text-[8px] text-gray-500 font-bold uppercase">Blur</label>
+                                <input
+                                  type="number"
+                                  value={activeSection.textSettings?.[currentElementId]?.shadowBlur ?? 2}
+                                  onChange={(e) => updateTextSettingProperty(activeSectionId, currentElementId, 'shadowBlur', parseInt(e.target.value, 10) || 0)}
+                                  className="w-full bg-black border border-white/10 text-center rounded-lg text-xs py-1"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-[8px] text-gray-500 font-bold uppercase">X Offset</label>
+                                <input
+                                  type="number"
+                                  value={activeSection.textSettings?.[currentElementId]?.shadowOffsetX ?? 1}
+                                  onChange={(e) => updateTextSettingProperty(activeSectionId, currentElementId, 'shadowOffsetX', parseInt(e.target.value, 10) || 0)}
+                                  className="w-full bg-black border border-white/10 text-center rounded-lg text-xs py-1"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-[8px] text-gray-500 font-bold uppercase">Y Offset</label>
+                                <input
+                                  type="number"
+                                  value={activeSection.textSettings?.[currentElementId]?.shadowOffsetY ?? 1}
+                                  onChange={(e) => updateTextSettingProperty(activeSectionId, currentElementId, 'shadowOffsetY', parseInt(e.target.value, 10) || 0)}
+                                  className="w-full bg-black border border-white/10 text-center rounded-lg text-xs py-1"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Stroke settings */}
+                      <div className="space-y-3 pt-3 border-t border-white/5">
+                        <div className="flex justify-between items-center">
+                          <span className="text-[9px] font-bold text-gray-400 uppercase">Text Stroke</span>
+                          <input
+                            type="checkbox"
+                            checked={activeSection.textSettings?.[currentElementId]?.strokeEnabled || false}
+                            onChange={(e) => updateTextSettingProperty(activeSectionId, currentElementId, 'strokeEnabled', e.target.checked)}
+                            className="w-3.5 h-3.5 accent-emerald-500 rounded bg-black border border-white/10"
+                          />
+                        </div>
+                        {activeSection.textSettings?.[currentElementId]?.strokeEnabled && (
+                          <div className="space-y-2.5 pl-2 border-l border-white/5 font-sans">
+                            <div className="space-y-1">
+                              <label className="text-[9px] text-gray-500 font-bold uppercase">Stroke Width (px)</label>
+                              <input
+                                type="number"
+                                min="0.5"
+                                max="5"
+                                step="0.5"
+                                value={activeSection.textSettings?.[currentElementId]?.strokeWidth ?? 1}
+                                onChange={(e) => updateTextSettingProperty(activeSectionId, currentElementId, 'strokeWidth', parseFloat(e.target.value) || 0.5)}
+                                className="w-full bg-black border border-white/10 rounded-lg text-xs py-1 text-center"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-[9px] text-gray-500 font-bold uppercase">Stroke Colour</label>
+                              <div className="flex gap-2">
+                                <input
+                                  type="color"
+                                  value={activeSection.textSettings?.[currentElementId]?.strokeColor || '#ffffff'}
+                                  onChange={(e) => updateTextSettingProperty(activeSectionId, currentElementId, 'strokeColor', e.target.value)}
+                                  className="w-6 h-6 rounded-md overflow-hidden bg-transparent cursor-pointer border border-white/15"
+                                />
+                                <input
+                                  type="text"
+                                  value={activeSection.textSettings?.[currentElementId]?.strokeColor || '#ffffff'}
+                                  onChange={(e) => updateTextSettingProperty(activeSectionId, currentElementId, 'strokeColor', e.target.value)}
+                                  className="w-full bg-black text-white font-mono text-center text-[10px] border border-white/10 px-1 rounded-lg focus:outline-none"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Spacing margin/padding settings */}
+                      <div className="space-y-3 pt-3 border-t border-white/5">
+                        <span className="text-[9px] font-bold text-gray-400 uppercase block">Element Spacing (Margins & Padding)</span>
+                        <div className="grid grid-cols-3 gap-2 font-sans text-xs">
+                          <div className="space-y-1">
+                            <label className="text-[8px] text-gray-500 font-bold uppercase block">Margin Top</label>
+                            <input
+                              type="number"
+                              value={activeSection.textSettings?.[currentElementId]?.marginTop ?? 0}
+                              onChange={(e) => updateTextSettingProperty(activeSectionId, currentElementId, 'marginTop', parseInt(e.target.value, 10) || 0)}
+                              className="w-full bg-black border border-white/10 text-center rounded-lg text-xs py-1"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[8px] text-gray-500 font-bold uppercase block">Margin Btm</label>
+                            <input
+                              type="number"
+                              value={activeSection.textSettings?.[currentElementId]?.marginBottom ?? 0}
+                              onChange={(e) => updateTextSettingProperty(activeSectionId, currentElementId, 'marginBottom', parseInt(e.target.value, 10) || 0)}
+                              className="w-full bg-black border border-white/10 text-center rounded-lg text-xs py-1"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[8px] text-gray-500 font-bold uppercase block">Padding</label>
+                            <input
+                              type="number"
+                              value={activeSection.textSettings?.[currentElementId]?.padding ?? 0}
+                              onChange={(e) => updateTextSettingProperty(activeSectionId, currentElementId, 'padding', parseInt(e.target.value, 10) || 0)}
+                              className="w-full bg-black border border-white/10 text-center rounded-lg text-xs py-1"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </aside>
-          )}
+            );
+          })()}
         </div>
       </div>
 

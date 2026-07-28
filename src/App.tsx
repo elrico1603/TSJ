@@ -6,6 +6,8 @@ import {
   KanbanCard,
   KanbanTemplate,
   OrderItem,
+  GlobalNotification,
+  LeaveRequest,
   getLocalDateString
 } from './types';
 import {
@@ -29,6 +31,12 @@ import { KanbanTemplateManagerPage, DEFAULT_SAMPLE_TEMPLATE } from './components
 import { KanbanDesigner } from './pages/KanbanDesigner';
 import { KanbanPreview } from './pages/KanbanPreview';
 import { QRCodeRenderer } from './components/QRCodeRenderer';
+import { QRScanService } from './components/QRScanService';
+import { NotificationCentre } from './components/NotificationCentre';
+import { LeaveManagementPage } from './components/LeaveManagementPage';
+import { LeaveApplicationModal } from './components/LeaveApplicationModal';
+import { notificationService } from './services/notificationService';
+import { leaveService } from './services/leaveService';
 
 const { SUPER_USER_PIN } = SECURITY;
 
@@ -53,6 +61,26 @@ export default function App() {
   const [pinInput, setPinInput] = useState('');
   const [view, setView] = useState<string>('dashboard'); 
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
+
+  // Global Notification & Leave Management State
+  const [notifications, setNotifications] = useState<GlobalNotification[]>([]);
+  const [showNotificationsModal, setShowNotificationsModal] = useState(false);
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
+  const [showLeaveApplyModal, setShowLeaveApplyModal] = useState(false);
+
+  // Subscribe to Notifications and Leave Requests
+  useEffect(() => {
+    const unsubNotifs = notificationService.subscribeNotifications(items => {
+      setNotifications(items);
+    });
+    const unsubLeave = leaveService.subscribeLeaveRequests(reqs => {
+      setLeaveRequests(reqs);
+    });
+    return () => {
+      unsubNotifs();
+      unsubLeave();
+    };
+  }, []);
   
   // Kanban Job Cards State
   const [kanbanCards, setKanbanCards] = useState<KanbanCard[]>([]);
@@ -62,9 +90,11 @@ export default function App() {
   const initialCardForm = {
     templateId: '',
     cardData: {
+      productName: '',
       productDescription: '',
       imageUrl: '',
       supplierPartNumber: '',
+      supplierNumber: '',
       supplierName: '',
       orderQuantity: '',
       binQuantity: '1 Bin',
@@ -73,6 +103,8 @@ export default function App() {
       createdBy: '',
       createdDate: '',
       lastModified: '',
+      cardColour: '#ffffff',
+      status: 'ACTIVE',
       location: {
         letter: '',
         number: '',
@@ -212,21 +244,101 @@ export default function App() {
 
   // Administration portal permissions checkboxes
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [voiceEnabled, setVoiceEnabled] = useState<boolean>(() => {
+    const saved = localStorage.getItem('voice_announcements_enabled');
+    return saved !== null ? saved === 'true' : true;
+  });
+
+  const handleSetVoiceEnabled = (val: boolean) => {
+    setVoiceEnabled(val);
+    localStorage.setItem('voice_announcements_enabled', String(val));
+  };
 
   // Media Stream variables
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  // Announcement helper
-  const announce = (text: string) => {
+  // Play synthetic Audio Chimes using Web Audio API
+  const playSuccessChime = () => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const now = ctx.currentTime;
+      
+      const playTone = (freq: number, start: number, duration: number) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, start);
+        gain.gain.setValueAtTime(0.12, start);
+        gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(start);
+        osc.stop(start + duration);
+      };
+      
+      playTone(523.25, now, 0.15); // C5
+      playTone(659.25, now + 0.08, 0.25); // E5
+    } catch (e) {
+      console.warn("Audio Context success chime failed:", e);
+    }
+  };
+
+  const playErrorChime = () => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const now = ctx.currentTime;
+      
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(120, now);
+      gain.gain.setValueAtTime(0.18, now);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.3);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.3);
+    } catch (e) {
+      console.warn("Audio Context error chime failed:", e);
+    }
+  };
+
+  // Speaks vocal clock events only if voiceEnabled setting is ON
+  const speakClockEvent = (message: string) => {
+    if (!voiceEnabled) return;
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
+      const utterance = new SpeechSynthesisUtterance(message);
       utterance.rate = 0.9;
       utterance.pitch = 1.0;
       window.speechSynthesis.speak(utterance);
     }
+  };
+
+  const handleClockInSuccess = (empName: string) => {
+    playSuccessChime();
+    speakClockEvent(`Welcome ${empName}.`);
+  };
+
+  const handleClockOutSuccess = (empName: string) => {
+    playSuccessChime();
+    speakClockEvent(`Goodbye ${empName}.`);
+  };
+
+  const handleClockFail = () => {
+    playErrorChime();
+    speakClockEvent("Clocking failed. Please try again.");
+  };
+
+  // Announcement helper
+  const announce = (text: string) => {
+    console.log("Announcement (muted voice):", text);
   };
 
   // Human Time parser
@@ -575,6 +687,11 @@ TS Joinery Kanban System`
       alert("Please select a Kanban template.");
       return;
     }
+    if (!data.productName?.trim()) {
+      announce("Product Name is required.");
+      alert("Product Name is required.");
+      return;
+    }
     if (!data.productDescription?.trim()) {
       announce("Product Description is required.");
       alert("Product Description is required.");
@@ -624,15 +741,18 @@ TS Joinery Kanban System`
     if (!assignedKanbanId) {
       let maxNum = 0;
       kanbanCards.forEach(c => {
-        const kid = c.cardData?.kanbanId;
-        if (kid && kid.startsWith('KAN-')) {
-          const numPart = parseInt(kid.substring(4), 10);
-          if (!isNaN(numPart) && numPart > maxNum) {
-            maxNum = numPart;
+        const kid = c.cardData?.kanbanId || c.cardData?.partNumber;
+        if (kid) {
+          const match = kid.match(/(?:TSJ-)?KAN-(\d+)/i);
+          if (match) {
+            const numPart = parseInt(match[1], 10);
+            if (!isNaN(numPart) && numPart > maxNum) {
+              maxNum = numPart;
+            }
           }
         }
       });
-      assignedKanbanId = `KAN-${String(maxNum + 1).padStart(6, '0')}`;
+      assignedKanbanId = `TSJ-KAN-${String(maxNum + 1).padStart(6, '0')}`;
     }
 
     const creatorUser = data.createdBy || currentUser?.name || currentUser?.email || 'System User';
@@ -643,9 +763,11 @@ TS Joinery Kanban System`
     const updatedCardData = {
       ...data,
       // Section 1 Master Database Fields
+      productName: data.productName.trim(),
       productDescription: data.productDescription.trim(),
       imageUrl: data.imageUrl || '',
       supplierPartNumber: data.supplierPartNumber.trim(),
+      supplierNumber: data.supplierPartNumber.trim(), // Both supplierPartNumber and supplierNumber saved
       supplierName: data.supplierName.trim(),
       orderQuantity: data.orderQuantity.trim(),
       binQuantity: (data.binQuantity || '1 Bin').trim(),
@@ -653,7 +775,13 @@ TS Joinery Kanban System`
       kanbanId: assignedKanbanId,
       createdBy: creatorUser,
       createdDate: createDate,
+      dateCreated: createDate, // Date Created
       lastModified: modDate,
+      dateModified: modDate, // Date Modified
+      cardColour: data.cardColour || '#ffffff', // Card Colour
+      cardColor: data.cardColour || '#ffffff', // Card Color
+      status: data.status || 'ACTIVE', // Template Status
+      templateStatus: data.status || 'ACTIVE', // Status mapping
       location: {
         letter: letter,
         number: number,
@@ -737,17 +865,21 @@ TS Joinery Kanban System`
         cardData: {
           ...initialCardForm.cardData,
           ...cardData,
+          productName: cardData.productName || cardData.productDescription || cardData.partDescription || '',
           productDescription: cardData.productDescription || cardData.partDescription || '',
           imageUrl: cardData.imageUrl || cardData.productImage || '',
           supplierPartNumber: cardData.supplierPartNumber || cardData.partNumber || '',
+          supplierNumber: cardData.supplierNumber || cardData.supplierPartNumber || cardData.partNumber || '',
           supplierName: cardData.supplierName || cardData.supplier || '',
           orderQuantity: cardData.orderQuantity || '',
           binQuantity: cardData.binQuantity || '1 Bin',
           deliveryTime: cardData.deliveryTime || '',
           kanbanId: cardData.kanbanId || '',
           createdBy: cardData.createdBy || '',
-          createdDate: cardData.createdDate || '',
-          lastModified: cardData.lastModified || '',
+          createdDate: cardData.createdDate || cardData.dateCreated || '',
+          lastModified: cardData.lastModified || cardData.dateModified || '',
+          cardColour: cardData.cardColour || '#ffffff',
+          status: cardData.status || cardData.templateStatus || 'ACTIVE',
           location: {
             letter: parsedLetter || '',
             number: parsedNumber || '',
@@ -850,6 +982,7 @@ TS Joinery Kanban System`
           setPendingAction('normal');
         } else {
           setPersonalPinError(true);
+          handleClockFail();
           setTimeout(() => { setPersonalPinInput(''); setPersonalPinError(false); }, 800);
         }
       }
@@ -863,6 +996,7 @@ TS Joinery Kanban System`
       setPendingAction('normal');
     } else {
       setPersonalPinError(true);
+      handleClockFail();
       setTimeout(() => { setPersonalPinInput(''); setPersonalPinError(false); }, 800);
     }
   };
@@ -889,6 +1023,9 @@ TS Joinery Kanban System`
       setSupervisorApprovalPinInput('');
     } else {
       setSupervisorApprovalPinError(true);
+      if (pendingAction !== 'borrow_money' && pendingAction !== 'archive') {
+        handleClockFail();
+      }
       setTimeout(() => { setSupervisorApprovalPinInput(''); setSupervisorApprovalPinError(false); }, 1500);
     }
   };
@@ -1176,7 +1313,13 @@ TS Joinery Kanban System`
       setPersonalPinInput('');
       setSupervisorApprovalPinInput('');
 
-      announce(actionMsg);
+      if (newStatus === 'In') {
+        handleClockInSuccess(emp.name || 'Artisan');
+      } else if (newStatus === 'Out') {
+        handleClockOutSuccess(emp.name || 'Artisan');
+      } else {
+        announce(actionMsg);
+      }
       auditLogger.log('CLOCK_EVENT', emp.name || 'Unknown Artisan', actionMsg);
 
       let updateData: Partial<Employee> = { status: newStatus, lastClock: clockTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
@@ -1435,10 +1578,31 @@ TS Joinery Kanban System`
             </div>
             <div className="w-px h-10 bg-white/10 mx-2"></div>
             <div className="flex items-center gap-4">
-              <button className="relative p-3 rounded-xl bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition-all">
-                <Icon name="bell" size={20} />
-                <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-[#0c0c0c]"></span>
-              </button>
+              {(() => {
+                const filteredNotifs = notificationService.filterForUser(
+                  notifications,
+                  currentUser?.role || (isLocked ? 'Artisan' : 'Admin'),
+                  currentUser?.email || (isLocked ? '' : 'frans@tsjoinery.co.za')
+                );
+                const unreadCount = filteredNotifs.filter(n => !n.isRead).length;
+
+                return (
+                  <button 
+                    onClick={() => setShowNotificationsModal(true)}
+                    className="relative px-3.5 py-2 rounded-xl bg-[#181818] hover:bg-white/10 text-gray-300 hover:text-white border border-white/10 transition-all flex items-center gap-2 active:scale-95 shadow-md"
+                    title="Global Notification Centre"
+                  >
+                    <Icon name="bell" size={20} className="text-[#ff8c00]" />
+                    {unreadCount > 0 ? (
+                      <span className="px-2 py-0.5 bg-red-500 text-white font-mono font-black text-xs rounded-full shadow-lg shadow-red-500/30 animate-pulse">
+                        {unreadCount}
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-mono font-bold text-gray-500">0</span>
+                    )}
+                  </button>
+                );
+              })()}
               {canManageUsers && (
                 <button onClick={() => setShowSettingsModal(true)} className="p-3 rounded-xl bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition-all">
                   <Icon name="settings" size={20} />
@@ -1455,13 +1619,23 @@ TS Joinery Kanban System`
             <div className="space-y-8 font-sans">
               <div>
                 <p className="text-[10px] font-black uppercase text-gray-500 tracking-[0.2em] mb-4">Artisan Terminal</p>
-                <button 
-                  onClick={() => { setAppMode('employee'); setView('dashboard'); setSelectedEmployee(null); }} 
-                  className={`w-full flex items-center space-x-4 p-4 rounded-2xl transition-all ${appMode === 'employee' ? 'bg-[#ff8c00]/10 border border-[#ff8c00]/30 text-[#ff8c00]' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
-                >
-                  <Icon name="clock" size={20} />
-                  <span className="font-black uppercase text-xs tracking-wider font-sans">Clocking Terminal</span>
-                </button>
+                <div className="space-y-2">
+                  <button 
+                    onClick={() => { setAppMode('employee'); setView('dashboard'); setSelectedEmployee(null); }} 
+                    className={`w-full flex items-center space-x-4 p-4 rounded-2xl transition-all ${appMode === 'employee' ? 'bg-[#ff8c00]/10 border border-[#ff8c00]/30 text-[#ff8c00]' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                  >
+                    <Icon name="clock" size={20} />
+                    <span className="font-black uppercase text-xs tracking-wider font-sans">Clocking Terminal</span>
+                  </button>
+
+                  <button 
+                    onClick={() => { setAppMode('qr_scan_service'); setView('dashboard'); }} 
+                    className={`w-full flex items-center space-x-4 p-4 rounded-2xl transition-all ${appMode === 'qr_scan_service' ? 'bg-purple-600/10 border border-purple-500/30 text-purple-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                  >
+                    <Icon name="scan" size={20} />
+                    <span className="font-black uppercase text-xs tracking-wider font-sans">QR Scan Service</span>
+                  </button>
+                </div>
               </div>
 
               <div>
@@ -1513,6 +1687,22 @@ TS Joinery Kanban System`
                   >
                     <Icon name="bar-chart-3" size={20} />
                     <span className="font-black uppercase text-xs tracking-wider">Work Analytics</span>
+                  </button>
+
+                  <button 
+                    disabled={isLocked}
+                    onClick={() => { setAppMode('leave'); setView('dashboard'); }} 
+                    className={`w-full flex items-center space-x-4 p-4 rounded-2xl transition-all ${isLocked ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'leave' ? 'bg-amber-600/10 border border-amber-500/30 text-amber-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                  >
+                    <Icon name="calendar" size={20} />
+                    <div className="flex items-center justify-between w-full">
+                      <span className="font-black uppercase text-xs tracking-wider">Leave Management</span>
+                      {leaveRequests.filter(r => r.status === 'Pending').length > 0 && (
+                        <span className="px-2 py-0.5 bg-amber-500 text-black text-[10px] font-mono font-black rounded-full">
+                          {leaveRequests.filter(r => r.status === 'Pending').length}
+                        </span>
+                      )}
+                    </div>
                   </button>
 
                   <button 
@@ -1670,6 +1860,14 @@ TS Joinery Kanban System`
                   />
                 )}
 
+                {appMode === 'leave' && (
+                  <LeaveManagementPage 
+                    employees={employees}
+                    userRole={currentUser?.role || (isLocked ? 'Artisan' : 'Admin')}
+                    userEmail={currentUser?.email || (isLocked ? '' : 'frans@tsjoinery.co.za')}
+                  />
+                )}
+
                 {appMode === 'mobile' && (
                   <div className="animate-in fade-in duration-500 max-w-2xl mx-auto text-center py-12">
                     <div className="bg-[#151515]/90 border border-white/5 p-10 rounded-[3rem] shadow-2xl backdrop-blur-3xl">
@@ -1678,12 +1876,21 @@ TS Joinery Kanban System`
                       </div>
                       <h2 className="text-3xl font-black uppercase tracking-tight text-white mb-2 font-sans-serif">Mobile companion</h2>
                       <p className="text-xs text-gray-500 uppercase tracking-widest mb-10">Scan the QR code to use the mobile portal.</p>
-                      <div className="bg-white p-6 rounded-[2.5rem] inline-block mx-auto border-4 border-white/5">
-                        <QRCodeRenderer text={APP_MOBILE_LINK} size={250} className="mx-auto" />
+                      <div className="bg-white p-6 rounded-[2.5rem] inline-block mx-auto border-4 border-white/5 w-64 h-64 overflow-hidden flex items-center justify-center">
+                        <QRCodeRenderer text={APP_MOBILE_LINK} width={200} height={200} responsive={false} className="mx-auto flex items-center justify-center" />
                       </div>
                       <p className="text-xs text-gray-600 mt-6 font-mono break-all">{APP_MOBILE_LINK}</p>
                     </div>
                   </div>
+                )}
+
+                {appMode === 'qr_scan_service' && (
+                  <QRScanService 
+                    kanbanCards={kanbanCards}
+                    currentUser={currentUser}
+                    announce={announce}
+                    onClose={() => setAppMode('employee')}
+                  />
                 )}
 
                 {appMode === 'home' && (
@@ -1771,6 +1978,7 @@ TS Joinery Kanban System`
                       </button>
                       <div className="grid grid-cols-2 gap-8 font-sans">
                         <button onClick={() => setView('emp_time_off')} className="p-8 bg-purple-500/10 border-b-8 border-purple-500 rounded-3xl text-purple-400 hover:bg-purple-900/20 transition-all flex flex-col items-center justify-center gap-3 active:scale-95"><Icon name="plane-takeoff" size={40} /><span className="text-xs font-black uppercase tracking-widest">Time Off</span></button>
+                        <button onClick={() => setShowLeaveApplyModal(true)} className="p-8 bg-amber-500/10 border-b-8 border-amber-500 rounded-3xl text-amber-400 hover:bg-amber-900/20 transition-all flex flex-col items-center justify-center gap-3 active:scale-95"><Icon name="calendar" size={40} /><span className="text-xs font-black uppercase tracking-widest font-sans">Apply For Leave</span></button>
                         <button onClick={() => setView('emp_money_borrowed')} className="p-8 bg-emerald-500/10 border-b-8 border-emerald-500 rounded-3xl text-emerald-400 hover:bg-emerald-900/20 transition-all flex flex-col items-center justify-center gap-3 active:scale-95"><Icon name="banknote" size={40} /><span className="text-xs font-black uppercase tracking-widest font-sans">Borrow Money</span></button>
                         <button onClick={() => { setDetailsEmp(selectedEmployee); setShowEmpDetailsModal(true); }} className="p-8 bg-blue-500/10 border-b-8 border-blue-500 rounded-3xl text-blue-400 hover:bg-blue-900/20 transition-all flex flex-col items-center justify-center gap-3 active:scale-95"><Icon name="file-text" size={40} /><span className="text-xs font-black uppercase tracking-widest">View Details</span></button>
                         <button onClick={() => { setPendingAction('archive'); setView('supervisor_approval'); }} className="p-8 bg-red-500/10 border-b-8 border-red-500 rounded-3xl text-red-400 hover:bg-red-900/20 transition-all flex flex-col items-center justify-center gap-3 active:scale-95"><Icon name="archive" size={40} /><span className="text-xs font-black uppercase tracking-widest">Archive Profile</span></button>
@@ -2067,6 +2275,8 @@ TS Joinery Kanban System`
           setShowAddUserModal={setShowAddUserModal}
           setShowSettingsModal={setShowSettingsModal}
           announce={announce}
+          voiceEnabled={voiceEnabled}
+          setVoiceEnabled={handleSetVoiceEnabled}
         />
       )}
 
@@ -2180,6 +2390,23 @@ TS Joinery Kanban System`
                         <option key={t.id} value={t.id || ''}>{t.templateName}</option>
                       ))}
                     </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-black uppercase text-gray-400 tracking-wider flex items-center gap-1">
+                      Product Name <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Laminating Pouch"
+                      value={cardForm.cardData.productName || ''}
+                      onChange={(e) => setCardForm(prev => ({
+                        ...prev,
+                        cardData: { ...prev.cardData, productName: e.target.value }
+                      }))}
+                      className="w-full bg-black border border-white/10 rounded-2xl p-4 text-white font-sans mt-1"
+                    />
                   </div>
 
                   <div>
@@ -2449,6 +2676,72 @@ TS Joinery Kanban System`
                     </div>
                   </div>
 
+                  {/* Card Colour Selector */}
+                  <div>
+                    <label className="text-[10px] font-black uppercase text-gray-400 tracking-wider block mb-2">
+                      Card background Colour
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        { value: '#ffffff', label: 'White', bg: 'bg-white', text: 'text-black' },
+                        { value: '#fef08a', label: 'Yellow', bg: 'bg-yellow-200', text: 'text-black border border-yellow-300' },
+                        { value: '#bfdbfe', label: 'Blue', bg: 'bg-blue-200', text: 'text-black border border-blue-300' },
+                        { value: '#bbf7d0', label: 'Green', bg: 'bg-green-200', text: 'text-black border border-green-300' },
+                        { value: '#fbcfe8', label: 'Pink', bg: 'bg-pink-200', text: 'text-black border border-pink-300' },
+                        { value: '#fed7aa', label: 'Orange', bg: 'bg-orange-200', text: 'text-black border border-orange-300' },
+                        { value: '#e9d5ff', label: 'Purple', bg: 'bg-purple-200', text: 'text-black border border-purple-300' },
+                      ].map((col) => (
+                        <button
+                          key={col.value}
+                          type="button"
+                          onClick={() => setCardForm(prev => ({
+                            ...prev,
+                            cardData: { ...prev.cardData, cardColour: col.value }
+                          }))}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${col.bg} ${col.text} ${
+                            (cardForm.cardData.cardColour || '#ffffff') === col.value
+                              ? 'ring-2 ring-purple-500 scale-105 shadow-md'
+                              : 'opacity-70 hover:opacity-100'
+                          }`}
+                        >
+                          <span className="w-2.5 h-2.5 rounded-full bg-black/10 border border-black/10 shrink-0" />
+                          {col.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Template Status Selector */}
+                  <div>
+                    <label className="text-[10px] font-black uppercase text-gray-400 tracking-wider block mb-2">
+                      Template Status
+                    </label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {[
+                        { value: 'ACTIVE', label: 'Active', bg: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400', activeBg: 'bg-emerald-500 text-black font-black animate-none' },
+                        { value: 'INACTIVE', label: 'Inactive', bg: 'bg-gray-500/10 border-gray-500/30 text-gray-400', activeBg: 'bg-gray-500 text-white font-black' },
+                        { value: 'DISCONTINUED', label: 'Discontinued', bg: 'bg-red-500/10 border-red-500/30 text-red-400', activeBg: 'bg-red-500 text-white font-black' },
+                      ].map((st) => {
+                        const isActive = (cardForm.cardData.status || 'ACTIVE') === st.value;
+                        return (
+                          <button
+                            key={st.value}
+                            type="button"
+                            onClick={() => setCardForm(prev => ({
+                              ...prev,
+                              cardData: { ...prev.cardData, status: st.value }
+                            }))}
+                            className={`py-3 rounded-xl text-xs font-bold text-center border transition-all ${
+                              isActive ? st.activeBg : `${st.bg} hover:bg-white/5`
+                            }`}
+                          >
+                            {st.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
                   <div>
                     <label className="text-[10px] font-black uppercase text-gray-400 tracking-wider">Legacy / Additional Notes</label>
                     <textarea
@@ -2667,11 +2960,13 @@ TS Joinery Kanban System`
 
                 {/* Secure Target QR Code Scan Info */}
                 <div className="bg-black/20 border border-white/5 rounded-3xl p-5 flex items-center gap-5">
-                  <div className="bg-white p-2.5 rounded-2xl w-24 h-24 flex items-center justify-center shadow-md">
+                  <div className="bg-white p-2.5 rounded-2xl w-24 h-24 flex items-center justify-center shadow-md overflow-hidden shrink-0">
                     <QRCodeRenderer 
                       text={`${window.location.origin}/kanban/${scannedKanbanCard.cardData?.kanbanId || 'KAN-000001'}`} 
-                      size={72} 
-                      className="w-full h-full object-contain"
+                      width={80}
+                      height={80}
+                      responsive={false} 
+                      className="flex items-center justify-center"
                     />
                   </div>
                   <div className="flex-1">
@@ -2776,6 +3071,37 @@ TS Joinery Kanban System`
           </div>
         </div>
       )}
+
+      {/* Global Notification Centre Drawer */}
+      <NotificationCentre
+        isOpen={showNotificationsModal}
+        onClose={() => setShowNotificationsModal(false)}
+        notifications={notificationService.filterForUser(
+          notifications,
+          currentUser?.role || (isLocked ? 'Artisan' : 'Admin'),
+          currentUser?.email || (isLocked ? '' : 'frans@tsjoinery.co.za')
+        )}
+        onMarkAsRead={(id) => notificationService.markAsRead(id)}
+        onMarkAllAsRead={() => notificationService.markAllAsRead()}
+        onDeleteNotification={(id) => notificationService.deleteNotification(id)}
+        onNavigateToPage={(relatedPage) => {
+          if (relatedPage === 'leave_management') setAppMode('leave');
+          else if (relatedPage === 'orders') setAppMode('orders');
+          else if (relatedPage === 'analytics') setAppMode('analytics');
+          else if (relatedPage === 'admin') setAppMode('admin');
+        }}
+        userRole={currentUser?.role || (isLocked ? 'Artisan' : 'Admin')}
+        userEmail={currentUser?.email || (isLocked ? '' : 'frans@tsjoinery.co.za')}
+      />
+
+      {/* Leave Application Modal */}
+      <LeaveApplicationModal
+        isOpen={showLeaveApplyModal}
+        onClose={() => setShowLeaveApplyModal(false)}
+        employees={employees}
+        initialEmployee={selectedEmployee}
+        onSuccess={() => {}}
+      />
     </Fragment>
   );
 }

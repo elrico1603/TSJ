@@ -84,6 +84,14 @@ export interface KanbanFieldDefinition {
   sourceField?: string;
 }
 
+export interface KanbanElementBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rightMargin?: number;
+}
+
 export interface KanbanLayoutSection {
   width: number; // reference width in mm
   height: number; // reference height in mm
@@ -91,9 +99,11 @@ export interface KanbanLayoutSection {
   y?: number; // Y position on the page in mm
   fields: KanbanFieldDefinition[];
   layoutType?: 'freeform' | 'structured_kanban' | 'inventory_details' | 'qr_barcode' | 'status_badge';
+  picture?: KanbanElementBounds;
+  qr?: KanbanElementBounds;
   style?: {
     text: string;
-    fontSize: number;
+    fontSize?: number;
     fontColor: string;
     backgroundColor: string;
     borderWidth: number;
@@ -116,7 +126,11 @@ export interface KanbanTemplate {
     section3: KanbanLayoutSection;
     section4: KanbanLayoutSection;
     section5: KanbanLayoutSection;
+    picture?: KanbanElementBounds;
+    qr?: KanbanElementBounds;
   };
+  picture?: KanbanElementBounds;
+  qr?: KanbanElementBounds;
   meta: {
     createdBy: string;
     createdDate: string;
@@ -137,6 +151,8 @@ export interface KanbanCardData {
   orderQuantity?: string;
   deliveryTime?: string;
   location?: KanbanLocation;
+  picture?: KanbanElementBounds;
+  qr?: KanbanElementBounds;
   // Keep previous fields for fallback/safety
   productImage?: string;
   partDescription?: string;
@@ -179,9 +195,86 @@ export interface MasterInformation {
   templateName: string;
   templateType: string;
   binQuantity?: string;
+  cardColour?: string;
+  status?: string;
 }
 
 export const getLocalDateString = (date: Date | string | number): string => {
   const d = new Date(date);
   return d.toISOString().split('T')[0];
 };
+
+export type LeaveType = 
+  | 'Annual Leave'
+  | 'Sick Leave'
+  | 'Family Responsibility'
+  | 'Maternity / Paternity'
+  | 'Unpaid Leave'
+  | 'Study Leave';
+
+export type LeaveStatus = 'Pending' | 'Approved' | 'Rejected';
+
+export interface LeaveRequest {
+  id: string; // e.g. 'LV-2026-0042'
+  employeeId: string;
+  employeeName: string;
+  employeeSurname: string;
+  employeeRole: string;
+  personalCode?: string;
+  leaveType: LeaveType;
+  startDate: string; // YYYY-MM-DD
+  endDate: string; // YYYY-MM-DD
+  totalDays: number;
+  reason: string;
+  attachmentUrl?: string | null;
+  attachmentName?: string | null;
+  status: LeaveStatus;
+  comments?: string;
+  submittedAt: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  // Future Ready Balance fields
+  annualLeaveBalanceBefore?: number;
+  annualLeaveBalanceAfter?: number;
+  fiscalYear?: number;
+}
+
+export interface LeaveBalance {
+  employeeId: string;
+  annualLeaveTotal: number;
+  annualLeaveUsed: number;
+  sickLeaveTotal: number;
+  sickLeaveUsed: number;
+  familyLeaveTotal: number;
+  familyLeaveUsed: number;
+}
+
+export type NotificationCategory = 
+  | 'leave_request'
+  | 'stock_order'
+  | 'clocking_exception'
+  | 'employee_request'
+  | 'system_alert';
+
+export type NotificationPriority = 'low' | 'medium' | 'high' | 'critical';
+
+export interface GlobalNotification {
+  id: string;
+  category: NotificationCategory;
+  categoryLabel: string;
+  title: string;
+  description: string;
+  date: string; // YYYY-MM-DD
+  time: string; // HH:mm
+  priority: NotificationPriority;
+  isRead: boolean;
+  relatedPage: string; // e.g., 'leave_management', 'orders', 'analytics', 'admin'
+  targetRoles?: string[];
+  targetEmails?: string[];
+  metadata?: Record<string, any>;
+  createdAt: string;
+  // Future Ready Push parameters
+  pwaPushReady?: boolean;
+  pushSent?: boolean;
+}
+

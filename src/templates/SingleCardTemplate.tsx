@@ -64,6 +64,7 @@ export const SingleCardTemplate: React.FC<SingleCardTemplateProps> = ({
             fontSizeScale={1.3} // upscale fonts slightly for large tags
             width={masterInfoSec.width}
             height={masterInfoSec.height}
+            textSettings={masterInfoSec.textSettings}
           />
         </div>
       )}

@@ -37,7 +37,24 @@ import {
   Activity,
   LayoutTemplate,
   RefreshCw,
-  HelpCircle
+  HelpCircle,
+  QrCode,
+  Scan,
+  Filter,
+  Plus,
+  Send,
+  Paperclip,
+  AlertTriangle,
+  Check,
+  Search,
+  Mail,
+  Info,
+  ExternalLink,
+  Shield,
+  CheckSquare,
+  XCircle,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 
 interface IconProps {
@@ -85,7 +102,24 @@ export const Icon: React.FC<IconProps> = ({ name, size = 24, className = "", str
     'user-check': UserCheck,
     'activity': Activity,
     'layout-template': LayoutTemplate,
-    'refresh-cw': RefreshCw
+    'refresh-cw': RefreshCw,
+    'qr-code': QrCode,
+    'scan': Scan,
+    'filter': Filter,
+    'plus': Plus,
+    'send': Send,
+    'paperclip': Paperclip,
+    'alert-triangle': AlertTriangle,
+    'check': Check,
+    'search': Search,
+    'mail': Mail,
+    'info': Info,
+    'external-link': ExternalLink,
+    'shield': Shield,
+    'check-square': CheckSquare,
+    'x-circle': XCircle,
+    'eye': Eye,
+    'eye-off': EyeOff
   };
 
   const LucideIcon = iconMap[name] || HelpCircle;

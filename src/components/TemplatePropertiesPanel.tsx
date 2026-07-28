@@ -106,12 +106,59 @@ export const TemplatePropertiesPanel: React.FC<TemplatePropertiesPanelProps> = (
     });
   };
 
+  const calculateMaxQrWidth = (cardWidthMm: number, pictureWidthPx: number): number => {
+    const scaleFactor = 720 / 297;
+    const availableCardWidthPx = Math.round(cardWidthMm * scaleFactor);
+    const pictureColWidthPx = pictureWidthPx + 8;
+    const supplierMinPx = 124;
+    const paddingPx = 16;
+    return Math.max(0, Math.floor(availableCardWidthPx - pictureColWidthPx - supplierMinPx - paddingPx));
+  };
+
   const handleSectionLayoutChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setTemplate(prev => {
       if (!prev) return null;
       const newLayout = JSON.parse(JSON.stringify(prev.layout));
-      newLayout[activeTab] = { ...newLayout[activeTab], [name]: Number(value) || 0 };
+      let val = Number(value) || 0;
+      if (name === 'width') {
+        const maxPrintableWidth = prev.dimensions?.width || 210;
+        val = Math.min(val, maxPrintableWidth);
+
+        const currentPicWidth = newLayout[activeTab]?.picture?.width ?? 110;
+        const maxQr = calculateMaxQrWidth(val, currentPicWidth);
+        const currentQrWidth = newLayout[activeTab]?.qr?.width ?? 110;
+        if (currentQrWidth > maxQr) {
+          newLayout[activeTab].qr = {
+            ...(newLayout[activeTab].qr || { x: 0, y: 15, width: 110, height: 110 }),
+            width: maxQr
+          };
+        }
+      }
+      newLayout[activeTab] = { ...newLayout[activeTab], [name]: val };
+      return { ...prev, layout: newLayout };
+    });
+  };
+
+  const handleNestedLayoutChange = (parentKey: 'picture' | 'qr', fieldName: 'x' | 'y' | 'width' | 'height', value: number) => {
+    setTemplate(prev => {
+      if (!prev) return null;
+      const newLayout = JSON.parse(JSON.stringify(prev.layout));
+      const currentSection = newLayout[activeTab] || {};
+
+      const currentParent = currentSection[parentKey] || {
+        x: parentKey === 'picture' ? 15 : 150,
+        y: 15,
+        width: 110,
+        height: 110
+      };
+      newLayout[activeTab] = {
+        ...currentSection,
+        [parentKey]: {
+          ...currentParent,
+          [fieldName]: value
+        }
+      };
       return { ...prev, layout: newLayout };
     });
   };
@@ -277,24 +324,70 @@ export const TemplatePropertiesPanel: React.FC<TemplatePropertiesPanelProps> = (
                 </div>
               </div>
 
-              <div className="p-3 bg-black/20 rounded-lg border border-white/10">
-                <h5 className="text-[10px] font-bold uppercase text-gray-500 mb-2 font-sans">Section Layout Control</h5>
-                <div className="grid grid-cols-2 gap-x-2 gap-y-3">
-                  <div>
-                    <label className="text-[10px] font-bold uppercase text-gray-500 font-sans">Width (mm)</label>
-                    <input type="number" name="width" value={activeLayout.width || 0} onChange={handleSectionLayoutChange} className="w-full bg-black/40 border border-white/10 rounded-lg p-2 mt-1 text-sm text-white font-sans" />
+              <div className="p-3 bg-black/20 rounded-lg border border-white/10 space-y-4">
+                <div>
+                  <h5 className="text-[10px] font-bold uppercase text-gray-500 mb-2 font-sans">Section Layout Control</h5>
+                  <div className="grid grid-cols-2 gap-x-2 gap-y-3">
+                    <div>
+                      <label className="text-[10px] font-bold uppercase text-gray-500 font-sans">Width (mm)</label>
+                      <input type="number" name="width" value={activeLayout.width || 0} onChange={handleSectionLayoutChange} className="w-full bg-black/40 border border-white/10 rounded-lg p-2 mt-1 text-sm text-white font-sans" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold uppercase text-gray-500 font-sans">Height (mm)</label>
+                      <input type="number" name="height" value={activeLayout.height || 0} onChange={handleSectionLayoutChange} className="w-full bg-black/40 border border-white/10 rounded-lg p-2 mt-1 text-sm text-white font-sans" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold uppercase text-gray-500 font-sans">X Position (mm)</label>
+                      <input type="number" name="x" value={activeLayout.x ?? 0} onChange={handleSectionLayoutChange} className="w-full bg-black/40 border border-white/10 rounded-lg p-2 mt-1 text-sm text-white font-sans" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold uppercase text-gray-500 font-sans">Y Position (mm)</label>
+                      <input type="number" name="y" value={activeLayout.y ?? 0} onChange={handleSectionLayoutChange} className="w-full bg-black/40 border border-white/10 rounded-lg p-2 mt-1 text-sm text-white font-sans" />
+                    </div>
                   </div>
-                  <div>
-                    <label className="text-[10px] font-bold uppercase text-gray-500 font-sans">Height (mm)</label>
-                    <input type="number" name="height" value={activeLayout.height || 0} onChange={handleSectionLayoutChange} className="w-full bg-black/40 border border-white/10 rounded-lg p-2 mt-1 text-sm text-white font-sans" />
+                </div>
+
+                <div className="pt-3 border-t border-white/10">
+                  <h5 className="text-[10px] font-bold uppercase text-purple-400 mb-2 font-sans">Picture Box Layout</h5>
+                  <div className="grid grid-cols-2 gap-x-2 gap-y-3">
+                    <div>
+                      <label className="text-[10px] font-bold uppercase text-gray-500 font-sans">Picture X (mm)</label>
+                      <input type="number" value={activeLayout.picture?.x ?? 15} onChange={(e) => handleNestedLayoutChange('picture', 'x', Number(e.target.value) || 0)} className="w-full bg-black/40 border border-white/10 rounded-lg p-2 mt-1 text-sm text-white font-sans" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold uppercase text-gray-500 font-sans">Picture Y (mm)</label>
+                      <input type="number" value={activeLayout.picture?.y ?? 15} onChange={(e) => handleNestedLayoutChange('picture', 'y', Number(e.target.value) || 0)} className="w-full bg-black/40 border border-white/10 rounded-lg p-2 mt-1 text-sm text-white font-sans" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold uppercase text-gray-500 font-sans">Picture Width (mm)</label>
+                      <input type="number" value={activeLayout.picture?.width ?? 110} onChange={(e) => handleNestedLayoutChange('picture', 'width', Number(e.target.value) || 0)} className="w-full bg-black/40 border border-white/10 rounded-lg p-2 mt-1 text-sm text-white font-sans" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold uppercase text-gray-500 font-sans">Picture Height (mm)</label>
+                      <input type="number" value={activeLayout.picture?.height ?? 110} onChange={(e) => handleNestedLayoutChange('picture', 'height', Number(e.target.value) || 0)} className="w-full bg-black/40 border border-white/10 rounded-lg p-2 mt-1 text-sm text-white font-sans" />
+                    </div>
                   </div>
-                  <div>
-                    <label className="text-[10px] font-bold uppercase text-gray-500 font-sans">X Position (mm)</label>
-                    <input type="number" name="x" value={activeLayout.x ?? 0} onChange={handleSectionLayoutChange} className="w-full bg-black/40 border border-white/10 rounded-lg p-2 mt-1 text-sm text-white font-sans" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold uppercase text-gray-500 font-sans">Y Position (mm)</label>
-                    <input type="number" name="y" value={activeLayout.y ?? 0} onChange={handleSectionLayoutChange} className="w-full bg-black/40 border border-white/10 rounded-lg p-2 mt-1 text-sm text-white font-sans" />
+                </div>
+
+                <div className="pt-3 border-t border-white/10">
+                  <h5 className="text-[10px] font-bold uppercase text-purple-400 mb-2 font-sans">QR Code Layout</h5>
+                  <div className="grid grid-cols-2 gap-x-2 gap-y-3">
+                    <div>
+                      <label className="text-[10px] font-bold uppercase text-gray-500 font-sans">QR X (mm)</label>
+                      <input type="number" value={activeLayout.qr?.x ?? 150} onChange={(e) => handleNestedLayoutChange('qr', 'x', Number(e.target.value) || 0)} className="w-full bg-black/40 border border-white/10 rounded-lg p-2 mt-1 text-sm text-white font-sans" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold uppercase text-gray-500 font-sans">QR Y (mm)</label>
+                      <input type="number" value={activeLayout.qr?.y ?? 0} onChange={(e) => handleNestedLayoutChange('qr', 'y', Number(e.target.value) || 0)} className="w-full bg-black/40 border border-white/10 rounded-lg p-2 mt-1 text-sm text-white font-sans" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold uppercase text-gray-500 font-sans">QR Width (mm)</label>
+                      <input type="number" value={activeLayout.qr?.width ?? 50} onChange={(e) => handleNestedLayoutChange('qr', 'width', Number(e.target.value) || 0)} className="w-full bg-black/40 border border-white/10 rounded-lg p-2 mt-1 text-sm text-white font-sans" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold uppercase text-gray-500 font-sans">QR Height (mm)</label>
+                      <input type="number" value={activeLayout.qr?.height ?? 50} onChange={(e) => handleNestedLayoutChange('qr', 'height', Number(e.target.value) || 0)} className="w-full bg-black/40 border border-white/10 rounded-lg p-2 mt-1 text-sm text-white font-sans" />
+                    </div>
                   </div>
                 </div>
               </div>

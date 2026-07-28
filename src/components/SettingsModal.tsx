@@ -14,6 +14,8 @@ interface SettingsModalProps {
   setShowAddUserModal: (b: boolean) => void;
   setShowSettingsModal: (b: boolean) => void;
   announce: (txt: string) => void;
+  voiceEnabled: boolean;
+  setVoiceEnabled: (val: boolean) => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -27,7 +29,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   updateActiveUser,
   setShowAddUserModal,
   setShowSettingsModal,
-  announce
+  announce,
+  voiceEnabled,
+  setVoiceEnabled
 }) => {
   const [editingPins, setEditingPins] = useState<Record<string, string>>({});
   const [showPasswordId, setShowPasswordId] = useState<string | null>(null);
@@ -262,6 +266,40 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </div>
                 );
               })}
+            </div>
+          </div>
+
+          {/* SYSTEM SETTINGS SECTION */}
+          <div className="bg-[#ff8c00]/5 border-2 border-[#ff8c00]/20 rounded-[2rem] p-6">
+            <h3 className="text-lg font-black uppercase text-[#ff8c00] tracking-widest flex items-center gap-2 font-sans mb-4">
+              <Icon name="sliders" size={20} />
+              System Settings
+            </h3>
+            <div className="bg-black/40 border border-white/10 p-6 rounded-[2rem] flex flex-col md:flex-row items-center justify-between gap-4">
+              <div>
+                <p className="font-black text-white text-base font-sans">Voice Announcements</p>
+                <p className="text-xs text-gray-400 font-bold font-sans mt-0.5">
+                  Play success/error audio chimes and vocal greetings for artisan Clock In and Clock Out events.
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className={`text-xs font-black uppercase tracking-wider ${voiceEnabled ? 'text-[#ff8c00]' : 'text-gray-500'}`}>
+                  {voiceEnabled ? 'Enabled (ON)' : 'Disabled (OFF)'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setVoiceEnabled(!voiceEnabled)}
+                  className={`w-14 h-8 rounded-full p-1 transition-colors duration-300 outline-none flex items-center ${
+                    voiceEnabled ? 'bg-[#ff8c00]' : 'bg-white/10'
+                  }`}
+                >
+                  <div
+                    className={`w-6 h-6 rounded-full bg-white shadow-md transform transition-transform duration-300 ${
+                      voiceEnabled ? 'translate-x-6' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
             </div>
           </div>
 

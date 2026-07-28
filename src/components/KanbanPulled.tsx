@@ -2,6 +2,8 @@ import React from 'react';
 import { KanbanCardMaster } from '../services/kanbanService';
 import { MasterInformation as MasterInfoType } from '../types';
 import { ProductImageWidget } from './ProductImageWidget';
+import { TextCustomizationSettings } from '../services/templateService';
+import { applyTextSettings } from '../utils/textStyleHelper';
 
 interface KanbanPulledProps {
   cardData?: KanbanCardMaster;
@@ -17,6 +19,7 @@ interface KanbanPulledProps {
   fontSizeScale?: number;
   width?: number; // mm
   height?: number; // mm
+  textSettings?: Record<string, TextCustomizationSettings>;
 }
 
 const getColourBg = (colour: string) => {
@@ -53,7 +56,8 @@ export const KanbanPulled: React.FC<KanbanPulledProps> = ({
   padding = 3,
   fontSizeScale = 1.0,
   width,
-  height
+  height,
+  textSettings
 }) => {
   // Extract read-only properties directly from Master Information (single source of truth)
   // fall back to cardData representation if masterInfo is not provided (e.g. for card print templates)
@@ -88,11 +92,10 @@ export const KanbanPulled: React.FC<KanbanPulledProps> = ({
   const scale = Math.min(wScale, hScale) * (fontSizeScale || 1.0);
 
   // Responsive bound font sizes to prevent overlapping
-  const titleFontSize = Math.max(6, Math.min(18, 10.5 * scale));
-  const warningFontSize = Math.max(8, Math.min(26, 14.5 * scale));
-  const binLabelFontSize = Math.max(5, Math.min(10, 7.5 * scale));
-  const binValFontSize = Math.max(7.5, Math.min(14, 9.5 * scale));
-  const badgeFontSize = Math.max(8, Math.min(18, 11 * scale));
+  const titleFontSize = textSettings?.productName?.fontSize ?? Math.max(6, Math.min(18, 10.5 * scale));
+  const binLabelFontSize = textSettings?.binQtyLabel?.fontSize ?? Math.max(5, Math.min(10, 7.5 * scale));
+  const binValFontSize = textSettings?.binQtyValue?.fontSize ?? Math.max(7.5, 9.5 * scale);
+  const badgeFontSize = textSettings?.locationBadge?.fontSize ?? Math.max(8, Math.min(18, 11 * scale));
 
   // Cap dynamic padding so it doesn't take too much height in narrow boxes
   const finalPadding = height ? Math.max(1, Math.min(padding, height * 0.12)) : padding;
@@ -103,33 +106,34 @@ export const KanbanPulled: React.FC<KanbanPulledProps> = ({
     borderRadius: `${cornerRadius}mm`,
     padding: `${finalPadding}mm`,
     width: '100%',
-    height: '100%',
+    minHeight: '100%',
+    height: 'auto',
     boxSizing: 'border-box'
   };
 
   return (
     <div 
       style={containerStyle} 
-      className="flex flex-col h-full w-full justify-between overflow-hidden text-black select-none font-sans"
+      className="flex flex-col min-h-full h-auto w-full justify-between overflow-visible text-black select-none font-sans"
     >
       {/* 1. At the very top: Display the Product Name (Read-only) */}
       <div 
         className="w-full text-center font-extrabold uppercase line-clamp-1 border-b border-black/10 pb-1 shrink-0"
-        style={{ 
+        style={applyTextSettings(textSettings?.productName, { 
           fontSize: `${titleFontSize}px`,
           color: '#000000',
           fontFamily: 'Inter, sans-serif',
           lineHeight: '1.2',
           marginBottom: `${Math.max(1.5, 3.5 * scale)}px`
-        }}
+        })}
       >
         {pName || 'NO PRODUCT NAME'}
       </div>
 
       {/* 2. Middle area: Split Product Image (left) and warned KANBAN PULLED / Bin Quantity (right) */}
-      <div className="flex flex-row items-center justify-between w-full flex-1 min-h-0 gap-2 font-sans overflow-hidden">
+      <div className="flex flex-row items-center justify-between w-full flex-1 min-h-0 gap-2 font-sans overflow-visible">
         {/* Left column: Product Image */}
-        <div className="w-[35%] h-full flex items-center justify-center min-w-0 overflow-hidden">
+        <div className="w-[35%] h-full flex items-center justify-center min-w-0 overflow-visible">
           <ProductImageWidget 
             imageUrl={pImage} 
             altText={pName}
@@ -138,20 +142,51 @@ export const KanbanPulled: React.FC<KanbanPulledProps> = ({
         </div>
 
         {/* Right column: Details and Input */}
-        <div className="w-[60%] h-full flex flex-col justify-center items-center text-center min-w-0 overflow-hidden gap-1">
+        <div className="w-[60%] flex flex-col justify-center items-center text-center min-w-0 gap-1 py-1" style={{ height: 'auto', minHeight: '100%' }}>
           {/* KANBAN PULLED (Centered, Bold, Uppercase, Red, No background) */}
-          <span 
-            className="font-black tracking-wider uppercase text-red-600 leading-none block shrink-0"
-            style={{ fontSize: `${warningFontSize}px` }}
-          >
-            KANBAN PULLED
-          </span>
+          {(() => {
+            const warningSettings = textSettings?.warningText;
+            const baseFontSize = warningSettings?.fontSize ?? 28;
+            
+            const warningFontSizeCalculated = baseFontSize;
+            
+            const warningStyle = applyTextSettings(warningSettings, {
+              fontSize: `${warningFontSizeCalculated}px`,
+              fontWeight: warningSettings?.fontWeight || 'bold',
+              color: warningSettings?.color || '#dc2626',
+              fontFamily: warningSettings?.fontFamily || 'sans-serif',
+              textAlign: 'center',
+              display: 'block',
+              whiteSpace: 'normal',
+              wordBreak: 'break-word',
+              transition: 'all 0.15s ease-out'
+            });
+
+            // Override and guarantee scaled font size
+            warningStyle.fontSize = `${warningFontSizeCalculated}px`;
+
+            // Apply special Section 2 warning settings: Rotation, Horizontal & Vertical Positions
+            const rotationDeg = warningSettings?.rotation ?? 0;
+            const hPos = warningSettings?.horizontalPosition ?? 0;
+            const vPos = warningSettings?.verticalPosition ?? 0;
+            
+            warningStyle.transform = `rotate(${rotationDeg}deg) translate(${hPos}px, ${vPos}px)`;
+
+            return (
+              <span 
+                className="leading-tight shrink-0"
+                style={warningStyle}
+              >
+                KANBAN PULLED
+              </span>
+            );
+          })()}
 
           {/* Bin Quantity Field (Editable inside Section 2 only) */}
           <div className="flex flex-col items-center justify-center shrink-0 min-h-0">
             <span 
               className="text-neutral-500 font-extrabold uppercase tracking-tight leading-none mb-0.5"
-              style={{ fontSize: `${binLabelFontSize}px` }}
+              style={applyTextSettings(textSettings?.binQtyLabel, { fontSize: `${binLabelFontSize}px` })}
             >
               Bin Quantity
             </span>
@@ -163,24 +198,24 @@ export const KanbanPulled: React.FC<KanbanPulledProps> = ({
                 onChange={(e) => onBinQuantityChange(e.target.value)}
                 placeholder="Qty"
                 className="w-full max-w-[120px] text-center bg-white border border-neutral-300 rounded-md text-black font-extrabold focus:outline-none focus:ring-1 focus:ring-purple-500 font-sans leading-none"
-                style={{ 
+                style={applyTextSettings(textSettings?.binQtyValue, { 
                   fontSize: `${binValFontSize}px`,
                   paddingTop: `${Math.max(1.5, 3 * scale)}px`,
                   paddingBottom: `${Math.max(1.5, 3 * scale)}px`,
                   paddingLeft: `${Math.max(3, 6 * scale)}px`,
                   paddingRight: `${Math.max(3, 6 * scale)}px`,
-                }}
+                })}
               />
             ) : (
               <span 
                 className="font-black text-neutral-900 border border-neutral-200 bg-neutral-50 rounded-md leading-none"
-                style={{ 
+                style={applyTextSettings(textSettings?.binQtyValue, { 
                   fontSize: `${binValFontSize}px`,
                   paddingTop: `${Math.max(1.5, 3 * scale)}px`,
                   paddingBottom: `${Math.max(1.5, 3 * scale)}px`,
                   paddingLeft: `${Math.max(4, 8 * scale)}px`,
                   paddingRight: `${Math.max(4, 8 * scale)}px`,
-                }}
+                })}
               >
                 {currentBinQty || 'N/A'}
               </span>
@@ -192,7 +227,7 @@ export const KanbanPulled: React.FC<KanbanPulledProps> = ({
       {/* 3. Bottom of Section: Location display with the selected Location Colour (Read-only) */}
       <div 
         className="w-full text-center font-black text-white tracking-widest uppercase transition-all shrink-0"
-        style={{ 
+        style={applyTextSettings(textSettings?.locationBadge, { 
           backgroundColor: getColourBg(pLocationColour),
           color: getColourText(pLocationColour),
           fontSize: `${badgeFontSize}px`,
@@ -203,7 +238,7 @@ export const KanbanPulled: React.FC<KanbanPulledProps> = ({
           borderRadius: `${Math.max(2, 6 * scale)}px`,
           lineHeight: '1.1',
           marginTop: `${Math.max(1.5, 3.5 * scale)}px`
-        }}
+        })}
       >
         {pLocation || 'NO LOCATION'}
       </div>

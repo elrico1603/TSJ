@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
 
-interface QRCodeRendererProps {
+export interface QRCodeRendererProps {
   text: string;
+  width?: number;
+  height?: number;
   size?: number;
   className?: string;
   responsive?: boolean;
@@ -11,37 +13,68 @@ interface QRCodeRendererProps {
 /**
  * QRCodeRenderer uses the official "qrcode" npm package to generate 
  * an ultra-sharp, scalable SVG representation of the provided text/URI.
+ * Dynamically generated at target width/height without hardcoded 90x90 limits or clipping.
  */
 export const QRCodeRenderer: React.FC<QRCodeRendererProps> = ({
   text,
-  size = 150,
+  width,
+  height,
+  size,
   className = '',
   responsive = false
 }) => {
-  const [svgContent, setSvgContent] = useState<string>('');
+  const [qrData, setQrData] = useState<{ matrixSize: number; innerHtml: string } | null>(null);
+
+  const targetWidth = width || size;
 
   useEffect(() => {
     let active = true;
 
+    if (!text) {
+      setQrData(null);
+      return;
+    }
+
     const options: any = {
       type: 'svg',
-      margin: 1,
+      errorCorrectionLevel: 'H',
+      margin: 1, // minimal margin so QR modules use maximum area without clipping
       color: {
         dark: '#000000',
         light: '#ffffff'
       }
     };
 
-    if (!responsive) {
-      options.width = size;
+    if (targetWidth) {
+      options.width = targetWidth;
     }
 
     // Generate high-resolution SVG string from "qrcode"
     (QRCode.toString(text, options) as any as Promise<string>)
-      .then(svg => {
-        if (active) {
-          setSvgContent(svg);
+      .then(rawSvg => {
+        if (!active) return;
+
+        // 1. Extract SIZE from viewBox (e.g. viewBox="0 0 23 23") or matrix background path
+        const viewBoxMatch = rawSvg.match(/viewBox=["']\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s*["']/i);
+        let matrixSize = 23;
+        if (viewBoxMatch && viewBoxMatch[3]) {
+          matrixSize = parseFloat(viewBoxMatch[3]);
+        } else {
+          const dMatch = rawSvg.match(/d=["']M0 0h([\d.]+)v\1H0z["']/i);
+          if (dMatch && dMatch[1]) {
+            matrixSize = parseFloat(dMatch[1]);
+          }
         }
+
+        // Extract inner SVG content without outer <svg> tag and remove white background path
+        let innerHtml = rawSvg
+          .replace(/<svg[^>]*>/i, '')
+          .replace(/<\/svg>/i, '');
+        
+        // Strip out the white background rectangle path
+        innerHtml = innerHtml.replace(/<path[^>]*fill=["']#(?:ffffff|fff)["'][^>]*\/?>/gi, '');
+
+        setQrData({ matrixSize, innerHtml });
       })
       .catch(err => {
         console.error('Error rendering QR code with npm "qrcode":', err);
@@ -50,33 +83,31 @@ export const QRCodeRenderer: React.FC<QRCodeRendererProps> = ({
     return () => {
       active = false;
     };
-  }, [text, size, responsive]);
+  }, [text, targetWidth, height, size]);
 
-  if (!svgContent) {
+  if (!qrData) {
     return (
-      <div 
-        className={`bg-neutral-200 animate-pulse rounded flex items-center justify-center ${responsive ? 'w-full h-full aspect-square' : ''} ${className}`}
-        style={responsive ? undefined : { width: `${size}px`, height: `${size}px` }}
-      >
-        <span className="text-[8px] text-neutral-400">QR</span>
-      </div>
-    );
-  }
-
-  if (responsive) {
-    return (
-      <div 
-        className={`w-full h-full flex items-center justify-center [&>svg]:w-full [&>svg]:h-full [&>svg]:max-w-full [&>svg]:max-h-full aspect-square ${className}`}
-        dangerouslySetInnerHTML={{ __html: svgContent }}
+      <svg
+        width="100%"
+        height="100%"
+        viewBox="0 0 23 23"
+        preserveAspectRatio="xMidYMid meet"
+        className={`w-full h-full min-w-0 flex-shrink object-contain ${className}`}
+        style={{ minWidth: 0, flexShrink: 1, width: '100%', height: '100%' }}
       />
     );
   }
 
   return (
-    <div 
-      className={`inline-block ${className}`}
-      style={{ width: `${size}px`, height: `${size}px` }}
-      dangerouslySetInnerHTML={{ __html: svgContent }}
+    <svg
+      width="100%"
+      height="100%"
+      viewBox={`0 0 ${qrData.matrixSize} ${qrData.matrixSize}`}
+      preserveAspectRatio="xMidYMid meet"
+      className={`w-full h-full min-w-0 flex-shrink object-contain ${className}`}
+      style={{ minWidth: 0, flexShrink: 1, width: '100%', height: '100%' }}
+      dangerouslySetInnerHTML={{ __html: qrData.innerHtml }}
     />
   );
 };
+

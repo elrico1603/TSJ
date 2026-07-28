@@ -2,7 +2,9 @@ import React from 'react';
 import { KanbanCardMaster } from '../services/kanbanService';
 import { ProductImageWidget } from './ProductImageWidget';
 import { MasterInformation as MasterInfoType } from '../types';
-import { QRCodeRenderer } from './QRCodeRenderer';
+import { QRCodeWidget } from './QRCodeWidget';
+import { TextCustomizationSettings } from '../services/templateService';
+import { applyTextSettings } from '../utils/textStyleHelper';
 
 interface MasterInformationProps {
   cardData?: KanbanCardMaster;
@@ -16,6 +18,7 @@ interface MasterInformationProps {
   fontSizeScale?: number; // 0.8 to 1.5 multiplier
   width?: number; // mm
   height?: number; // mm
+  textSettings?: Record<string, TextCustomizationSettings>;
 }
 
 const getColourBg = (colour: string) => {
@@ -50,7 +53,8 @@ export const MasterInformation: React.FC<MasterInformationProps> = ({
   padding = 4,
   fontSizeScale = 1.0,
   width,
-  height
+  height,
+  textSettings
 }) => {
   // Source values directly from Master Information (single source of truth)
   // fall back to cardData representation if masterInfo is not provided (e.g. for card print templates)
@@ -84,9 +88,11 @@ export const MasterInformation: React.FC<MasterInformationProps> = ({
   // Cap dynamic padding so it doesn't take too much height in narrow boxes
   const finalPadding = height ? Math.max(1, Math.min(padding, height * 0.12)) : padding;
 
+  const finalCardColour = masterInfo?.cardColour || cardData?.cardColour || cardData?.cardColor || (cardData as any)?.cardData?.cardColour || (cardData as any)?.cardData?.cardColor || backgroundColor;
+
   const containerStyle: React.CSSProperties = {
     border: borderStyle !== 'none' ? `${borderWidth}mm ${borderStyle} ${borderColor}` : 'none',
-    backgroundColor: backgroundColor,
+    backgroundColor: finalCardColour,
     borderRadius: `${cornerRadius}mm`,
     padding: `${finalPadding}mm`,
     width: '100%',
@@ -100,114 +106,168 @@ export const MasterInformation: React.FC<MasterInformationProps> = ({
     fontFamily: 'Inter, sans-serif'
   };
 
+  // Independent picture and QR layout coordinates
+  const propSection = (cardData as any)?.section;
+  const cardWidth = width ?? 200;
+  const cardHeight = height ?? 60;
+  const DESIGN_WIDTH = 200; // Baseline design width in mm
+
+  // Designed media dimensions for BOTH Picture and QR Code
+  const DESIGN_MEDIA_WIDTH = propSection?.qr?.width ?? propSection?.picture?.width ?? (cardData as any)?.qr?.width ?? (cardData as any)?.qrWidth ?? 40;
+  const DESIGN_MEDIA_HEIGHT = propSection?.qr?.height ?? propSection?.picture?.height ?? (cardData as any)?.qr?.height ?? (cardData as any)?.qrHeight ?? 40;
+
+  // Scale factor: 1.0 at or above baseline design size, scales down proportionally when smaller
+  const mediaScale = Math.min(1, cardWidth / DESIGN_WIDTH);
+
+  const mediaWidth = DESIGN_MEDIA_WIDTH * mediaScale;
+  const mediaHeight = DESIGN_MEDIA_HEIGHT * mediaScale;
+
+  const rightMargin = propSection?.qr?.rightMargin ?? (cardData as any)?.qr?.rightMargin ?? (cardData as any)?.qrRightMargin ?? 4;
+  const qrGutter = 7; // Fixed 7mm whitespace gap between supplier table and QR container
+
   return (
     <div 
       style={containerStyle} 
-      className="flex flex-col h-full w-full justify-between overflow-hidden text-black select-none font-sans"
+      className="relative flex flex-col h-full w-full justify-between overflow-hidden text-black select-none font-sans"
     >
       {/* 1. PRODUCT NAME: Top area of Section 1 */}
       <div 
-        className="w-full flex flex-col border-b border-black/10 pb-1 shrink-0"
-        style={{ marginBottom: `${Math.max(1, 3 * scale)}px` }}
+        className="flex items-center justify-between border-b border-black/10 pb-1 shrink-0 gap-2"
+        style={{ 
+          width: `${((cardWidth - rightMargin) / cardWidth) * 100}%`,
+          marginBottom: `${Math.max(1, 3 * scale)}px` 
+        }}
       >
-        <div className="flex justify-between items-start w-full gap-2">
-          <span className="text-neutral-400 font-extrabold uppercase tracking-widest leading-none" style={{ fontSize: `${subTitleFontSize}px` }}>
-            DESCRIPTION / PART
-          </span>
-          <span 
-            className="font-mono font-black text-purple-700 bg-purple-50 px-1.5 py-0.5 border border-purple-200 rounded uppercase leading-none shrink-0"
-            style={{ fontSize: `${subTitleFontSize + 1}px` }}
-          >
-            {pId || 'N/A'}
-          </span>
-        </div>
         <div 
-          className="font-extrabold text-neutral-900 mt-1 uppercase leading-tight w-full break-words line-clamp-2"
-          style={{ 
+          className="font-extrabold text-neutral-900 uppercase leading-tight flex-1 min-w-0 break-words line-clamp-2"
+          style={applyTextSettings(textSettings?.productName, { 
             ...textStyle,
             fontSize: `${titleFontSize}px`,
-          }}
+          })}
         >
           {pName || 'NO PRODUCT NAME'}
         </div>
+        <span 
+          className="font-mono font-black text-purple-700 bg-purple-50 px-1.5 py-0.5 border border-purple-200 rounded uppercase leading-none shrink-0"
+          style={applyTextSettings(textSettings?.productCode, { fontSize: `${subTitleFontSize + 1}px` })}
+        >
+          {pId || 'N/A'}
+        </span>
       </div>
 
-      {/* 2. MAIN CONTENT: Three responsive columns below the Product Name using a 3-column CSS Grid */}
-      <div className="grid grid-cols-[30%_45%_25%] items-stretch justify-between flex-1 min-h-0 w-full gap-2 py-1 overflow-hidden">
+      {/* 2. MAIN CONTENT: Picture & Supplier Information */}
+      <div className="flex items-start justify-start flex-1 min-h-0 w-full gap-2 py-1 overflow-hidden relative">
         
         {/* COLUMN 1: Product Image */}
-        <div className="h-full w-full flex items-center justify-center overflow-hidden">
+        <div 
+          className="flex items-start justify-center overflow-hidden shrink-0"
+          style={{
+            width: `${(mediaWidth / cardWidth) * 100}%`,
+            height: '100%',
+          }}
+        >
           <ProductImageWidget 
             imageUrl={pImage} 
             altText={pName}
-            className="h-full w-full max-h-full max-w-full aspect-square rounded border border-neutral-200 bg-white object-contain"
+            className="h-full w-full max-h-full max-w-full rounded border border-neutral-200 bg-white object-contain"
           />
         </div>
 
-        {/* COLUMN 2: Supplier Information */}
+        {/* COLUMN 2: Supplier Information (Expands dynamically between Picture and QR with gutter) */}
         <div 
-          className="h-full flex flex-col justify-between text-neutral-800 min-w-0 divide-y divide-black/10 overflow-hidden"
-          style={{ fontSize: `${specFontSize}px` }}
+          className="h-full flex flex-col justify-between text-neutral-800 min-w-0 divide-y divide-black/10 overflow-hidden flex-1"
+          style={{ 
+            fontSize: `${specFontSize}px`,
+            marginRight: `${((rightMargin + mediaWidth + qrGutter) / cardWidth) * 100}%` 
+          }}
         >
           {/* Row 1: Sup No: */}
           <div className="flex-1 min-h-0 flex items-center justify-between py-0.5 gap-1 font-sans">
-            <span className="font-extrabold uppercase text-neutral-400 tracking-tight shrink-0" style={{ fontSize: `${specLabelFontSize}px` }}>
+            <span 
+              className="font-extrabold uppercase text-neutral-400 tracking-tight shrink-0" 
+              style={applyTextSettings(textSettings?.supplierPartNoLabel, { fontSize: `${specLabelFontSize}px` })}
+            >
               Sup No:
             </span>
-            <span className="font-bold text-neutral-950 truncate text-right flex-1 min-w-0 font-sans" style={{ ...textStyle, fontSize: `${specFontSize}px` }}>
+            <span 
+              className="font-bold text-neutral-950 truncate text-right flex-1 min-w-0 font-sans" 
+              style={applyTextSettings(textSettings?.supplierPartNoValue, { ...textStyle, fontSize: `${specFontSize}px` })}
+            >
               {pSupplierPartNumber || 'N/A'}
             </span>
           </div>
 
           {/* Row 2: Sup Name: */}
           <div className="flex-1 min-h-0 flex items-center justify-between py-0.5 gap-1 font-sans">
-            <span className="font-extrabold uppercase text-neutral-400 tracking-tight shrink-0" style={{ fontSize: `${specLabelFontSize}px` }}>
+            <span 
+              className="font-extrabold uppercase text-neutral-400 tracking-tight shrink-0" 
+              style={applyTextSettings(textSettings?.supplierNameLabel, { fontSize: `${specLabelFontSize}px` })}
+            >
               Sup Name:
             </span>
-            <span className="font-bold text-neutral-950 truncate text-right flex-1 min-w-0 font-sans" style={{ ...textStyle, fontSize: `${specFontSize}px` }}>
+            <span 
+              className="font-bold text-neutral-950 truncate text-right flex-1 min-w-0 font-sans" 
+              style={applyTextSettings(textSettings?.supplierNameValue, { ...textStyle, fontSize: `${specFontSize}px` })}
+            >
               {pSupplierName || 'N/A'}
             </span>
           </div>
 
           {/* Row 3: Order Qty: */}
           <div className="flex-1 min-h-0 flex items-center justify-between py-0.5 gap-1 font-sans">
-            <span className="font-extrabold uppercase text-neutral-400 tracking-tight shrink-0" style={{ fontSize: `${specLabelFontSize}px` }}>
+            <span 
+              className="font-extrabold uppercase text-neutral-400 tracking-tight shrink-0" 
+              style={applyTextSettings(textSettings?.orderQtyLabel, { fontSize: `${specLabelFontSize}px` })}
+            >
               Order Qty:
             </span>
-            <span className="font-black text-purple-700 text-right flex-1 min-w-0 font-sans" style={{ fontSize: `${specFontSize}px` }}>
+            <span 
+              className="font-black text-purple-700 text-right flex-1 min-w-0 font-sans" 
+              style={applyTextSettings(textSettings?.orderQtyValue, { fontSize: `${specFontSize}px` })}
+            >
               {pOrderQuantity || '0'}
             </span>
           </div>
 
           {/* Row 4: Delivery: */}
           <div className="flex-1 min-h-0 flex items-center justify-between py-0.5 gap-1 font-sans">
-            <span className="font-extrabold uppercase text-neutral-400 tracking-tight shrink-0" style={{ fontSize: `${specLabelFontSize}px` }}>
+            <span 
+              className="font-extrabold uppercase text-neutral-400 tracking-tight shrink-0" 
+              style={applyTextSettings(textSettings?.deliveryLabel, { fontSize: `${specLabelFontSize}px` })}
+            >
               Delivery:
             </span>
-            <span className="font-bold text-emerald-600 uppercase text-right flex-1 min-w-0 font-sans" style={{ ...textStyle, fontSize: `${specFontSize}px` }}>
+            <span 
+              className="font-bold text-emerald-600 uppercase text-right flex-1 min-w-0 font-sans" 
+              style={applyTextSettings(textSettings?.deliveryValue, { ...textStyle, fontSize: `${specFontSize}px` })}
+            >
               {pDeliveryTime || 'N/A'}
             </span>
           </div>
         </div>
 
-        {/* COLUMN 3: QR Code */}
-        <div className="h-full w-full flex items-center justify-center overflow-hidden bg-white p-0.5 border border-neutral-200 rounded max-h-full max-w-full aspect-square mx-auto">
-          {pQrCode ? (
-            <QRCodeRenderer
-              text={pQrCode}
-              responsive={true}
-              className="w-full h-full max-h-full max-w-full flex items-center justify-center"
-            />
-          ) : (
-            <div className="text-[6px] text-neutral-400 italic font-mono uppercase text-center">NO QR</div>
-          )}
+        {/* ABSOLUTE QR OBJECT - Positioned inside Section 2 */}
+        <div 
+          className="absolute flex items-start justify-center overflow-hidden z-20 pointer-events-auto py-1"
+          style={{
+            right: `${(rightMargin / cardWidth) * 100}%`,
+            top: 0,
+            bottom: 0,
+            width: `${(mediaWidth / cardWidth) * 100}%`,
+          }}
+        >
+          <QRCodeWidget
+            text={pQrCode}
+            altText={pName}
+            className="h-full w-full max-h-full max-w-full rounded border border-neutral-200 bg-white object-contain"
+          />
         </div>
       </div>
 
-      {/* 3. LOCATION BADGE: Single full-width location badge at the bottom */}
+      {/* 3. LOCATION BADGE: Location badge aligned with content width */}
       <div 
-        className="w-full text-center font-black text-white tracking-widest uppercase transition-all shrink-0"
-        style={{ 
+        className="text-center font-black text-white tracking-widest uppercase transition-all shrink-0"
+        style={applyTextSettings(textSettings?.locationBadge, { 
           backgroundColor: getColourBg(pLocationColour),
           color: getColourText(pLocationColour),
           fontSize: `${badgeFontSize}px`,
@@ -217,8 +277,9 @@ export const MasterInformation: React.FC<MasterInformationProps> = ({
           paddingRight: `${Math.max(4, 10 * scale)}px`,
           borderRadius: `${Math.max(2, 6 * scale)}px`,
           lineHeight: '1.1',
-          marginTop: `${Math.max(1.5, 3.5 * scale)}px`
-        }}
+          marginTop: `${Math.max(1.5, 3.5 * scale)}px`,
+          width: `${((cardWidth - rightMargin) / cardWidth) * 100}%`
+        })}
       >
         {pLocation || 'NO LOCATION'}
       </div>

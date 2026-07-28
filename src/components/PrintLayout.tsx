@@ -27,25 +27,42 @@ export const PrintLayout: React.FC<PrintLayoutProps> = ({ template, cardData }) 
         @media print {
           @page {
             size: A4 portrait;
-            margin: 0;
+            margin: 0 !important;
+          }
+          html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+            background: white !important;
+            color: black !important;
+            width: 100% !important;
+            height: 100% !important;
+            overflow: visible !important;
           }
           body {
-            margin: 0;
-            background: white;
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
+            visibility: hidden !important;
           }
-          .print-wrapper {
-            position: absolute;
-            inset: 0;
-            background: white;
-            padding: 0;
-            margin: 0;
+          #printCanvas, #printCanvas * {
+            visibility: visible !important;
+          }
+          #printCanvas {
             display: block !important;
-            z-index: 9999;
+            position: fixed !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 210mm !important;
+            height: 297mm !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            border: none !important;
+            box-shadow: none !important;
+            background: white !important;
+            border-radius: 0 !important;
+            z-index: 9999999 !important;
+            page-break-after: avoid !important;
           }
           .no-print {
             display: none !important;
+            visibility: hidden !important;
           }
         }
       `}</style>
@@ -80,6 +97,7 @@ export const PrintLayout: React.FC<PrintLayoutProps> = ({ template, cardData }) 
 
       {/* A4 Page Printable Sheet Container */}
       <div 
+        id="printCanvas"
         className="bg-white shadow-2xl border border-neutral-300 relative"
         style={{
           width: '210mm',
@@ -104,8 +122,9 @@ export const PrintLayout: React.FC<PrintLayoutProps> = ({ template, cardData }) 
         {/* Sections placed precisely based on customized (x, y) coordinates and width/height in millimeters */}
         {sectionsList.map((key) => {
           const section = (layout as any)[key] || { width: 95, height: 80, x: 5, y: 10 };
+          const maxPrintableWidth = template.dimensions?.width || 210;
 
-          const widthMm = section.width || 0;
+          const widthMm = Math.min(section.width || 0, maxPrintableWidth);
           const heightMm = section.height || 0;
           const xMm = section.x ?? 0;
           const yMm = section.y ?? 0;
@@ -113,11 +132,11 @@ export const PrintLayout: React.FC<PrintLayoutProps> = ({ template, cardData }) 
           // Render the high-fidelity component
           let panelContent = null;
           if (key === 'section1') {
-            panelContent = <StructuredSection1Layout cardData={cardData} />;
+            panelContent = <StructuredSection1Layout cardData={cardData} section={section} />;
           } else if (key === 'section2') {
             panelContent = <InventoryDetailsSectionLayout cardData={cardData} />;
           } else if (key === 'section3') {
-            panelContent = <QRBarcodeSectionLayout cardData={cardData} />;
+            panelContent = <QRBarcodeSectionLayout cardData={cardData} section={section} />;
           } else if (key === 'section4' || key === 'section5') {
             if (section.style) {
               panelContent = <StatusBadgeSectionLayout sectionLayout={section} />;
