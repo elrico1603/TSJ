@@ -294,16 +294,17 @@ export const LeaveManagementPage: React.FC<LeaveManagementPageProps> = ({
                               <Icon name="x" size={14} />
                               <span>Reject</span>
                             </button>
-                            {canManageLeave && (
-                              <button
-                                onClick={() => setRequestToDelete(req)}
-                                title="Delete Leave Request"
-                                className="p-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 hover:border-red-500/40 transition-all flex items-center justify-center"
-                              >
-                                <Icon name="trash-2" size={16} />
-                              </button>
-                            )}
                           </div>
+                        )}
+
+                        {canManageLeave && (
+                          <button
+                            onClick={() => setRequestToDelete(req)}
+                            title="Delete Leave Request"
+                            className="p-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 hover:border-red-500/40 transition-all flex items-center justify-center active:scale-95"
+                          >
+                            <Icon name="trash-2" size={16} />
+                          </button>
                         )}
                       </div>
                     </div>

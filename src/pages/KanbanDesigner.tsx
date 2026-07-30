@@ -1207,6 +1207,7 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
                         onClick={(e) => {
                           e.stopPropagation();
                           setActiveSectionId(sec.id);
+                          setSelectedTextElementId('');
                         }}
                         className={`transition-all duration-150 backdrop-blur-[1px] flex flex-col justify-between ${sec.id === 'kanban_pulled' ? 'overflow-visible' : 'overflow-hidden'} cursor-grab active:cursor-grabbing ${
                           isSelected
@@ -1255,7 +1256,8 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
           {/* 3. Right Sidebar Panel: Selected Section Layout and Styling properties */}
           {activeTemplate && activeSection && (() => {
             const sectionTextElements = SECTION_TEXT_ELEMENTS[activeSection.id] || [];
-            const currentElementId = selectedTextElementId || sectionTextElements[0]?.id || '';
+            const isValidElement = selectedTextElementId && sectionTextElements.some(el => el.id === selectedTextElementId);
+            const currentElementId = isValidElement ? selectedTextElementId : (sectionTextElements[0]?.id || '');
 
             return (
               <aside className="w-80 bg-[#121212] border-l border-white/10 flex flex-col overflow-y-auto custom-scrollbar p-5 space-y-5">
@@ -1703,120 +1705,6 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
                             onChange={(e) => updateSectionProperty(activeSectionId, 'y', parseInt(e.target.value, 10) || 0)}
                             className="w-full bg-black border border-white/10 px-2.5 py-1.5 rounded-xl text-white font-mono text-center focus:outline-none focus:border-purple-500"
                           />
-                        </div>
-                      </div>
-
-                      {/* Picture Layout Controls */}
-                      <div className="pt-2 border-t border-white/5 space-y-2">
-                        <span className="text-[10px] text-purple-400 font-extrabold uppercase tracking-wider block">Picture Box Layout</span>
-                        <div className="grid grid-cols-2 gap-3 font-sans">
-                          <div className="space-y-1.5">
-                            <label className="text-[10px] text-gray-500 font-extrabold uppercase">Picture X (mm)</label>
-                            <input
-                              type="number"
-                              value={activeSection.picture?.x ?? 15}
-                              onChange={(e) => updateSectionProperty(activeSectionId, 'picture', {
-                                ...(activeSection.picture || { x: 15, y: 15, width: 110, height: 110 }),
-                                x: parseInt(e.target.value, 10) || 0
-                              })}
-                              className="w-full bg-black border border-white/10 px-2.5 py-1.5 rounded-xl text-white font-mono text-center focus:outline-none focus:border-purple-500"
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <label className="text-[10px] text-gray-500 font-extrabold uppercase">Picture Y (mm)</label>
-                            <input
-                              type="number"
-                              value={activeSection.picture?.y ?? 15}
-                              onChange={(e) => updateSectionProperty(activeSectionId, 'picture', {
-                                ...(activeSection.picture || { x: 15, y: 15, width: 110, height: 110 }),
-                                y: parseInt(e.target.value, 10) || 0
-                              })}
-                              className="w-full bg-black border border-white/10 px-2.5 py-1.5 rounded-xl text-white font-mono text-center focus:outline-none focus:border-purple-500"
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <label className="text-[10px] text-gray-500 font-extrabold uppercase">Picture Width (mm)</label>
-                            <input
-                              type="number"
-                              min="1"
-                              value={activeSection.picture?.width ?? 110}
-                              onChange={(e) => updateSectionProperty(activeSectionId, 'picture', {
-                                ...(activeSection.picture || { x: 15, y: 15, width: 110, height: 110 }),
-                                width: parseInt(e.target.value, 10) || 0
-                              })}
-                              className="w-full bg-black border border-white/10 px-2.5 py-1.5 rounded-xl text-white font-mono text-center focus:outline-none focus:border-purple-500"
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <label className="text-[10px] text-gray-500 font-extrabold uppercase">Picture Height (mm)</label>
-                            <input
-                              type="number"
-                              min="1"
-                              value={activeSection.picture?.height ?? 110}
-                              onChange={(e) => updateSectionProperty(activeSectionId, 'picture', {
-                                ...(activeSection.picture || { x: 15, y: 15, width: 110, height: 110 }),
-                                height: parseInt(e.target.value, 10) || 0
-                              })}
-                              className="w-full bg-black border border-white/10 px-2.5 py-1.5 rounded-xl text-white font-mono text-center focus:outline-none focus:border-purple-500"
-                            />
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* QR Code Layout Controls */}
-                      <div className="pt-2 border-t border-white/5 space-y-2">
-                        <span className="text-[10px] text-purple-400 font-extrabold uppercase tracking-wider block">QR Code Layout</span>
-                        <div className="grid grid-cols-2 gap-3 font-sans">
-                          <div className="space-y-1.5">
-                            <label className="text-[10px] text-gray-500 font-extrabold uppercase">QR X (mm)</label>
-                            <input
-                              type="number"
-                              value={activeSection.qr?.x ?? 150}
-                              onChange={(e) => updateSectionProperty(activeSectionId, 'qr', {
-                                ...(activeSection.qr || { x: 150, y: 0, width: 50, height: 50 }),
-                                x: parseInt(e.target.value, 10) || 0
-                              })}
-                              className="w-full bg-black border border-white/10 px-2.5 py-1.5 rounded-xl text-white font-mono text-center focus:outline-none focus:border-purple-500"
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <label className="text-[10px] text-gray-500 font-extrabold uppercase">QR Y (mm)</label>
-                            <input
-                              type="number"
-                              value={activeSection.qr?.y ?? 0}
-                              onChange={(e) => updateSectionProperty(activeSectionId, 'qr', {
-                                ...(activeSection.qr || { x: 150, y: 0, width: 50, height: 50 }),
-                                y: parseInt(e.target.value, 10) || 0
-                              })}
-                              className="w-full bg-black border border-white/10 px-2.5 py-1.5 rounded-xl text-white font-mono text-center focus:outline-none focus:border-purple-500"
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <label className="text-[10px] text-gray-500 font-extrabold uppercase">QR Width (mm)</label>
-                            <input
-                              type="number"
-                              min="1"
-                              value={activeSection.qr?.width ?? 50}
-                              onChange={(e) => updateSectionProperty(activeSectionId, 'qr', {
-                                ...(activeSection.qr || { x: 150, y: 0, width: 50, height: 50 }),
-                                width: parseInt(e.target.value, 10) || 0
-                              })}
-                              className="w-full bg-black border border-white/10 px-2.5 py-1.5 rounded-xl text-white font-mono text-center focus:outline-none focus:border-purple-500"
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <label className="text-[10px] text-gray-500 font-extrabold uppercase">QR Height (mm)</label>
-                            <input
-                              type="number"
-                              min="1"
-                              value={activeSection.qr?.height ?? 50}
-                              onChange={(e) => updateSectionProperty(activeSectionId, 'qr', {
-                                ...(activeSection.qr || { x: 150, y: 0, width: 50, height: 50 }),
-                                height: parseInt(e.target.value, 10) || 0
-                              })}
-                              className="w-full bg-black border border-white/10 px-2.5 py-1.5 rounded-xl text-white font-mono text-center focus:outline-none focus:border-purple-500"
-                            />
-                          </div>
                         </div>
                       </div>
 

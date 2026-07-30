@@ -101,13 +101,12 @@ export const KanbanPulled: React.FC<KanbanPulledProps> = ({
   const finalPadding = height ? Math.max(1, Math.min(padding, height * 0.12)) : padding;
 
   const containerStyle: React.CSSProperties = {
-    border: borderStyle !== 'none' ? `${borderWidth}mm ${borderStyle} ${borderColor}` : 'none',
+    border: (borderStyle && borderStyle !== 'none') ? `${borderWidth ?? 0.5}mm ${borderStyle} ${borderColor || '#000000'}` : `${borderWidth ?? 0.5}mm solid ${borderColor || '#000000'}`,
     backgroundColor: finalBgColor,
-    borderRadius: `${cornerRadius}mm`,
+    borderRadius: `${cornerRadius ?? 2}mm`,
     padding: `${finalPadding}mm`,
     width: '100%',
-    minHeight: '100%',
-    height: 'auto',
+    height: '100%',
     boxSizing: 'border-box'
   };
 

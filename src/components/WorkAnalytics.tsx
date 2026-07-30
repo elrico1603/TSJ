@@ -14,6 +14,8 @@ interface WorkAnalyticsProps {
   handleExportPDF: (emp: Employee) => void;
   setHistoryEmp: (emp: Employee | null) => void;
   setShowHistoryModal: (b: boolean) => void;
+  onViewDetails?: (emp: Employee) => void;
+  onArchiveProfile?: (emp: Employee) => void;
 }
 
 export const WorkAnalytics: React.FC<WorkAnalyticsProps> = ({
@@ -26,7 +28,9 @@ export const WorkAnalytics: React.FC<WorkAnalyticsProps> = ({
   getDailyCombinedRecords,
   handleExportPDF,
   setHistoryEmp,
-  setShowHistoryModal
+  setShowHistoryModal,
+  onViewDetails,
+  onArchiveProfile
 }) => {
   const activeWorkers = employees.filter(emp => !emp.isArchived);
 
@@ -64,26 +68,49 @@ export const WorkAnalytics: React.FC<WorkAnalyticsProps> = ({
                   <p className="text-xs text-gray-400 font-sans">{emp.role}</p>
                 </div>
               </div>
-              <div className="flex items-center gap-8">
+              <div className="flex items-center gap-6">
                 <div className="text-right">
                   <p className="text-2xl font-mono font-black text-emerald-400">{formatTime(totalRangePaid)}</p>
                   <p className="text-[10px] text-gray-500 font-bold uppercase pl-1">Paid labor Hours</p>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
+                  {/* 1. View Details */}
+                  <button 
+                    onClick={() => onViewDetails?.(emp)} 
+                    className="py-2.5 px-3.5 bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 border border-blue-500/20 rounded-xl text-xs font-bold uppercase transition-all flex items-center gap-1.5 active:scale-95"
+                  >
+                    <Icon name="file-text" size={14} />
+                    View Details
+                  </button>
+
+                  {/* 2. Generate Report */}
+                  <button 
+                    onClick={() => handleExportPDF(emp)} 
+                    className="py-2.5 px-3.5 bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-400 border border-emerald-500/20 rounded-xl text-xs font-bold uppercase transition-all flex items-center gap-1.5 active:scale-95"
+                  >
+                    <Icon name="printer" size={14} />
+                    Generate Report
+                  </button>
+
+                  {/* 3. Historical Logs */}
                   <button 
                     onClick={() => { 
                       setHistoryEmp(emp); 
                       setShowHistoryModal(true); 
                     }} 
-                    className="py-3 px-5 bg-white/5 hover:bg-white/10 rounded-xl text-xs font-bold uppercase text-gray-300 transition-colors"
+                    className="py-2.5 px-3.5 bg-white/5 hover:bg-white/10 text-gray-300 border border-white/10 rounded-xl text-xs font-bold uppercase transition-all flex items-center gap-1.5 active:scale-95"
                   >
+                    <Icon name="clock" size={14} />
                     Historical Logs
                   </button>
+
+                  {/* 4. Archive Profile */}
                   <button 
-                    onClick={() => handleExportPDF(emp)} 
-                    className="py-3 px-5 bg-blue-600/10 hover:bg-blue-600/20 rounded-xl text-xs font-bold uppercase text-blue-400 border border-blue-500/20 transition-all"
+                    onClick={() => onArchiveProfile?.(emp)} 
+                    className="py-2.5 px-3.5 bg-red-600/10 hover:bg-red-600/20 text-red-400 border border-red-500/20 rounded-xl text-xs font-bold uppercase transition-all flex items-center gap-1.5 active:scale-95"
                   >
-                    Generate report
+                    <Icon name="archive" size={14} />
+                    Archive Profile
                   </button>
                 </div>
               </div>

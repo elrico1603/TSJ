@@ -45,11 +45,7 @@ export default function App() {
   // ==========================================
   // STATE MANAGEMENT
   // ==========================================
-  const [employees, setEmployees] = useState<Employee[]>([
-    { id: 'mock-Zulu', name: 'Sipho', surname: 'Zulu', role: 'Senior Cabinetmaker', personalCode: '1234', status: 'Out', isArchived: false, todayHours: 0, yesterdayHours: 0, weeklyHours: 0, monthlyHours: 0, history: [], shifts: [], breaks: [], dateStarted: '2022-01-15' },
-    { id: 'mock-Botha', name: 'Johan', surname: 'Botha', role: 'Lead Joiner', personalCode: '5678', status: 'Out', isArchived: false, todayHours: 0, yesterdayHours: 0, weeklyHours: 0, monthlyHours: 0, history: [], shifts: [], breaks: [], dateStarted: '2021-06-01' },
-    { id: 'mock-Mokoena', name: 'Thabo', surname: 'Mokoena', role: 'Apprentice Carpenter', personalCode: '0000', status: 'Out', isArchived: false, todayHours: 0, yesterdayHours: 0, weeklyHours: 0, monthlyHours: 0, history: [], shifts: [], breaks: [], dateStarted: '2023-11-10' }
-  ]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
   const [isCloudLive, setIsCloudLive] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
   
@@ -473,11 +469,7 @@ export default function App() {
           .onSnapshot(async (snap) => {
             if (snap.empty) {
               // auto hydration seed files
-              const initialTeam = [
-                { name: 'Sipho', surname: 'Zulu', role: 'Senior Cabinetmaker', personalCode: '1234', status: 'Out', isArchived: false, todayHours: 0, yesterdayHours: 0, weeklyHours: 0, monthlyHours: 0, history: [], shifts: [], breaks: [], dateStarted: '2022-01-15' },
-                { name: 'Johan', surname: 'Botha', role: 'Lead Joiner', personalCode: '5678', status: 'Out', isArchived: false, todayHours: 0, yesterdayHours: 0, weeklyHours: 0, monthlyHours: 0, history: [], shifts: [], breaks: [], dateStarted: '2021-06-01' },
-                { name: 'Thabo', surname: 'Mokoena', role: 'Apprentice Carpenter', personalCode: '0000', status: 'Out', isArchived: false, todayHours: 0, yesterdayHours: 0, weeklyHours: 0, monthlyHours: 0, history: [], shifts: [], breaks: [], dateStarted: '2023-11-10' }
-              ];
+              const initialTeam: any[] = [];
               for (const worker of initialTeam) {
                 await db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('data').collection('employees').add(worker);
               }
@@ -1859,6 +1851,8 @@ TS Joinery Kanban System`
                     handleExportPDF={handleExportPDF}
                     setHistoryEmp={setHistoryEmp}
                     setShowHistoryModal={setShowHistoryModal}
+                    onViewDetails={(emp) => { setDetailsEmp(emp); setShowEmpDetailsModal(true); }}
+                    onArchiveProfile={(emp) => { setSelectedEmployee(emp); setPendingAction('archive'); setView('supervisor_approval'); }}
                   />
                 )}
 
@@ -1978,12 +1972,10 @@ TS Joinery Kanban System`
                           {selectedEmployee.status === 'In' ? 'Clock Out' : selectedEmployee.status === 'Break' ? 'Return' : 'Clock In'}
                         </p>
                       </button>
-                      <div className="grid grid-cols-2 gap-8 font-sans">
+                      <div className="grid grid-cols-3 gap-6 font-sans">
                         <button onClick={() => setView('emp_time_off')} className="p-8 bg-purple-500/10 border-b-8 border-purple-500 rounded-3xl text-purple-400 hover:bg-purple-900/20 transition-all flex flex-col items-center justify-center gap-3 active:scale-95"><Icon name="plane-takeoff" size={40} /><span className="text-xs font-black uppercase tracking-widest">Time Off</span></button>
                         <button onClick={() => setShowLeaveApplyModal(true)} className="p-8 bg-amber-500/10 border-b-8 border-amber-500 rounded-3xl text-amber-400 hover:bg-amber-900/20 transition-all flex flex-col items-center justify-center gap-3 active:scale-95"><Icon name="calendar" size={40} /><span className="text-xs font-black uppercase tracking-widest font-sans">Apply For Leave</span></button>
                         <button onClick={() => setView('emp_money_borrowed')} className="p-8 bg-emerald-500/10 border-b-8 border-emerald-500 rounded-3xl text-emerald-400 hover:bg-emerald-900/20 transition-all flex flex-col items-center justify-center gap-3 active:scale-95"><Icon name="banknote" size={40} /><span className="text-xs font-black uppercase tracking-widest font-sans">Borrow Money</span></button>
-                        <button onClick={() => { setDetailsEmp(selectedEmployee); setShowEmpDetailsModal(true); }} className="p-8 bg-blue-500/10 border-b-8 border-blue-500 rounded-3xl text-blue-400 hover:bg-blue-900/20 transition-all flex flex-col items-center justify-center gap-3 active:scale-95"><Icon name="file-text" size={40} /><span className="text-xs font-black uppercase tracking-widest">View Details</span></button>
-                        <button onClick={() => { setPendingAction('archive'); setView('supervisor_approval'); }} className="p-8 bg-red-500/10 border-b-8 border-red-500 rounded-3xl text-red-400 hover:bg-red-900/20 transition-all flex flex-col items-center justify-center gap-3 active:scale-95"><Icon name="archive" size={40} /><span className="text-xs font-black uppercase tracking-widest">Archive Profile</span></button>
                       </div>
                     </div>
                   </div>

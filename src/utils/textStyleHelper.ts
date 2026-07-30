@@ -95,9 +95,8 @@ export const AVAILABLE_FONTS = [
  */
 export const SECTION_TEXT_ELEMENTS: Record<string, { id: string; label: string }[]> = {
   master_info: [
-    { id: 'headerEyebrow', label: 'Header Eyebrow (DESCRIPTION / PART)' },
-    { id: 'productCode', label: 'Product Code (Part Number Badge)' },
     { id: 'productName', label: 'Product Name / Description' },
+    { id: 'productCode', label: 'Product Code (Part Number Badge)' },
     { id: 'supplierPartNoLabel', label: 'Supplier Part No. Label' },
     { id: 'supplierPartNoValue', label: 'Supplier Part No. Value' },
     { id: 'supplierNameLabel', label: 'Supplier Name Label' },
