@@ -39,16 +39,24 @@ export const QRScanService: React.FC<QRScanServiceProps> = ({
   const [orderSuccessModal, setOrderSuccessModal] = useState<boolean>(false);
   const [lastSubmittedOrderId, setLastSubmittedOrderId] = useState<string>('');
   const [isReviewMode, setIsReviewMode] = useState<boolean>(false);
+  const [manualCode, setManualCode] = useState<string>('');
 
   const qrCodeInstanceRef = useRef<Html5Qrcode | null>(null);
+  const manualInputRef = useRef<HTMLInputElement | null>(null);
+  const lastScannedRef = useRef<{ id: string; time: number }>({ id: '', time: 0 });
   const videoContainerId = 'qr-reader-element';
 
-  // Load basket from local storage on mount
+  // Load basket from local storage on mount and display recovery notification
   useEffect(() => {
     try {
       const stored = localStorage.getItem('ts_joinery_kanban_basket');
       if (stored) {
-        setBasket(JSON.parse(stored));
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setBasket(parsed);
+          const totalItems = parsed.reduce((sum: number, item: BasketItem) => sum + (item.basketQty || 1), 0);
+          announce(`Recovered previous basket (${totalItems} items).`);
+        }
       }
     } catch (err) {
       console.error('Failed to load basket from localStorage:', err);
@@ -145,10 +153,17 @@ export const QRScanService: React.FC<QRScanServiceProps> = ({
     const cleanId = extractId(rawText);
     if (!cleanId) return;
 
+    // Continuous scanning duplicate guard (ignore exact same code scanned within 1.5s)
+    const now = Date.now();
+    if (lastScannedRef.current.id === cleanId && (now - lastScannedRef.current.time) < 1500) {
+      return;
+    }
+    lastScannedRef.current = { id: cleanId, time: now };
+
     announce(`Successfully scanned ID: ${cleanId}`);
     setScannedId(cleanId);
-    stopCamera();
-    loadTemplateById(cleanId);
+    // DO NOT stop camera for rapid continuous scanning!
+    await loadTemplateById(cleanId, false);
   };
 
   const addToBasket = (card: KanbanCardMaster) => {
@@ -210,7 +225,7 @@ export const QRScanService: React.FC<QRScanServiceProps> = ({
     }
   };
 
-  const loadTemplateById = async (id: string) => {
+  const loadTemplateById = async (id: string, shouldStopCamera = false) => {
     setScanState('loading');
     setLoadedCard(null);
 
@@ -227,7 +242,8 @@ export const QRScanService: React.FC<QRScanServiceProps> = ({
         const localMatch = kanbanCards.find(c => 
           c.cardData?.kanbanId?.toLowerCase() === id.toLowerCase() || 
           c.id?.toLowerCase() === id.toLowerCase() ||
-          c.cardData?.partNumber?.toLowerCase() === id.toLowerCase()
+          c.cardData?.partNumber?.toLowerCase() === id.toLowerCase() ||
+          c.cardData?.supplierPartNumber?.toLowerCase() === id.toLowerCase()
         );
 
         if (localMatch) {
@@ -270,6 +286,25 @@ export const QRScanService: React.FC<QRScanServiceProps> = ({
     } catch (err) {
       console.error('Error loading template:', err);
       setScanState('error');
+    } finally {
+      if (shouldStopCamera) {
+        stopCamera();
+      } else {
+        setTimeout(() => {
+          setScanState('scanning');
+        }, 1000);
+      }
+    }
+  };
+
+  const handleManualSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manualCode.trim()) return;
+    const cleanId = extractId(manualCode.trim());
+    setManualCode('');
+    loadTemplateById(cleanId, false);
+    if (manualInputRef.current) {
+      manualInputRef.current.focus();
     }
   };
 
@@ -821,6 +856,33 @@ export const QRScanService: React.FC<QRScanServiceProps> = ({
           </div>
         </div>
       )}
+
+      {/* Rapid Manual / Bluetooth Barcode Scanner Input */}
+      <div className="bg-purple-950/30 border border-purple-500/30 rounded-3xl p-5 shadow-xl">
+        <p className="text-[10px] font-black uppercase tracking-widest text-purple-400 mb-2 font-sans">Continuous Rapid Scanner / Manual Code Entry</p>
+        <form onSubmit={handleManualSubmit} className="flex items-center gap-3">
+          <div className="relative flex-1">
+            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-purple-400">
+              <Icon name="scan" size={18} />
+            </span>
+            <input
+              ref={manualInputRef}
+              type="text"
+              value={manualCode}
+              onChange={(e) => setManualCode(e.target.value)}
+              placeholder="Scan or type Kanban ID / Part Number..."
+              className="w-full bg-black/60 border border-purple-500/30 rounded-2xl pl-11 pr-4 py-3.5 text-sm font-bold text-white placeholder-gray-500 outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all font-mono"
+            />
+          </div>
+          <button
+            type="submit"
+            className="py-3.5 px-6 bg-purple-600 hover:bg-purple-500 text-white font-black text-xs uppercase tracking-wider rounded-2xl transition-all shrink-0 active:scale-95 shadow-lg flex items-center gap-2"
+          >
+            <Icon name="plus" size={16} />
+            <span>Add</span>
+          </button>
+        </form>
+      </div>
 
       {/* Main Grid Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">

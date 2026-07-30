@@ -38,6 +38,7 @@ import { LeaveManagementPage } from './components/LeaveManagementPage';
 import { LeaveApplicationModal } from './components/LeaveApplicationModal';
 import { notificationService } from './services/notificationService';
 import { leaveService } from './services/leaveService';
+import { UserProfileModal } from './components/UserProfileModal';
 
 const { SUPER_USER_PIN } = SECURITY;
 
@@ -58,6 +59,53 @@ export default function App() {
   const [pinInput, setPinInput] = useState('');
   const [view, setView] = useState<string>('dashboard'); 
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
+
+  // Responsive Layout Mode & Profile Modal State
+  const [layoutMode, setLayoutMode] = useState<'desktop' | 'tablet' | 'phone'>('desktop');
+  const [showUserProfileModal, setShowUserProfileModal] = useState<boolean>(false);
+
+  const getAutoLayoutMode = (): 'desktop' | 'tablet' | 'phone' => {
+    const width = window.innerWidth;
+    if (width < 640) return 'phone';
+    if (width < 1024) return 'tablet';
+    return 'desktop';
+  };
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('ts_joinery_layout_mode') as 'desktop' | 'tablet' | 'phone' | null;
+      if (saved && ['desktop', 'tablet', 'phone'].includes(saved)) {
+        setLayoutMode(saved);
+      } else {
+        setLayoutMode(getAutoLayoutMode());
+      }
+    } catch (e) {
+      setLayoutMode(getAutoLayoutMode());
+    }
+
+    const handleResize = () => {
+      try {
+        const stored = localStorage.getItem('ts_joinery_layout_mode');
+        if (!stored) {
+          setLayoutMode(getAutoLayoutMode());
+        }
+      } catch (e) {
+        setLayoutMode(getAutoLayoutMode());
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const changeLayoutMode = (mode: 'desktop' | 'tablet' | 'phone') => {
+    setLayoutMode(mode);
+    try {
+      localStorage.setItem('ts_joinery_layout_mode', mode);
+    } catch (e) {
+      console.error('Failed to save layout mode', e);
+    }
+  };
 
   // Global Notification & Leave Management State
   const [notifications, setNotifications] = useState<GlobalNotification[]>([]);
@@ -159,22 +207,23 @@ export default function App() {
 
   // Permissions & Roles
   const userPerms = currentUser ? (userPermissions[currentUser.id] || {}) : {};
+  const isStockManager = currentUser?.role === 'Stock Manager';
 
-  const isSupervisorUser = userPerms.canManageUsers !== undefined 
+  const isSupervisorUser = !isStockManager && (userPerms.canManageUsers !== undefined 
     ? userPerms.canManageUsers 
-    : ['Admin', 'Supervisor'].includes(currentUser?.role || '');
+    : ['Admin', 'Supervisor'].includes(currentUser?.role || ''));
 
-  const canManageOrders = userPerms.canManageOrders !== undefined 
+  const canManageOrders = !isStockManager && (userPerms.canManageOrders !== undefined 
     ? userPerms.canManageOrders 
-    : rolePermissions.canManageOrders(currentUser?.role || '');
+    : rolePermissions.canManageOrders(currentUser?.role || ''));
 
-  const canManageUsers = userPerms.canManageUsers !== undefined 
+  const canManageUsers = !isStockManager && (userPerms.canManageUsers !== undefined 
     ? userPerms.canManageUsers 
-    : rolePermissions.canManageUsers(currentUser?.role || '');
+    : rolePermissions.canManageUsers(currentUser?.role || ''));
 
-  const canViewAnalytics = userPerms.canViewAnalytics !== undefined 
+  const canViewAnalytics = !isStockManager && (userPerms.canViewAnalytics !== undefined 
     ? userPerms.canViewAnalytics 
-    : rolePermissions.canViewAnalytics(currentUser?.role || '');
+    : rolePermissions.canViewAnalytics(currentUser?.role || ''));
 
   const updateActiveUser = async (userId: string, updates: Partial<AppUser>) => {
     try {
@@ -940,7 +989,9 @@ TS Joinery Kanban System`
       const canViewAnalyticsOverride = userPerms.canViewAnalytics !== undefined ? userPerms.canViewAnalytics : ['Admin', 'Supervisor', 'HR'].includes(matchedUser.role);
 
       let targetMode = 'admin';
-      if (canManageUsersOverride) {
+      if (matchedUser.role === 'Stock Manager') {
+        targetMode = 'qr_scan_service';
+      } else if (canManageUsersOverride) {
         targetMode = 'admin';
       } else if (canManageOrdersOverride) {
         targetMode = 'orders';
@@ -1030,7 +1081,13 @@ TS Joinery Kanban System`
       if (match) {
         setCurrentUser(match);
         setIsLocked(false);
-        setAppMode(match.role === 'Artisan' ? 'employee' : 'admin');
+        if (match.role === 'Stock Manager') {
+          setAppMode('qr_scan_service');
+        } else if (match.role === 'Artisan') {
+          setAppMode('employee');
+        } else {
+          setAppMode('admin');
+        }
         setView('dashboard');
         auditLogger.log('USER_LOGIN', match.email, `Signed in as ${match.role}`);
       } else {
@@ -1568,6 +1625,48 @@ TS Joinery Kanban System`
               <p className="text-[10px] font-black text-gray-500 uppercase mt-1.5 tracking-widest font-sans">
                 {currentTime.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' })}
               </p>
+
+              {/* Responsive Layout Mode Switcher */}
+              <div className="flex items-center justify-end gap-1 mt-2">
+                <button
+                  onClick={() => changeLayoutMode('desktop')}
+                  title="Switch to Desktop Layout"
+                  className={`p-1.5 rounded-lg border transition-all flex items-center gap-1 text-[9px] font-black uppercase ${
+                    layoutMode === 'desktop'
+                      ? 'bg-[#ff8c00]/20 text-[#ff8c00] border-[#ff8c00]/50 shadow'
+                      : 'bg-white/5 text-gray-500 border-white/10 hover:text-white hover:bg-white/10'
+                  }`}
+                >
+                  <Icon name="monitor" size={13} />
+                  <span className="hidden sm:inline">Desktop</span>
+                </button>
+
+                <button
+                  onClick={() => changeLayoutMode('tablet')}
+                  title="Switch to Tablet Layout"
+                  className={`p-1.5 rounded-lg border transition-all flex items-center gap-1 text-[9px] font-black uppercase ${
+                    layoutMode === 'tablet'
+                      ? 'bg-[#ff8c00]/20 text-[#ff8c00] border-[#ff8c00]/50 shadow'
+                      : 'bg-white/5 text-gray-500 border-white/10 hover:text-white hover:bg-white/10'
+                  }`}
+                >
+                  <Icon name="tablet" size={13} />
+                  <span className="hidden sm:inline">Tablet</span>
+                </button>
+
+                <button
+                  onClick={() => changeLayoutMode('phone')}
+                  title="Switch to Phone Layout"
+                  className={`p-1.5 rounded-lg border transition-all flex items-center gap-1 text-[9px] font-black uppercase ${
+                    layoutMode === 'phone'
+                      ? 'bg-[#ff8c00]/20 text-[#ff8c00] border-[#ff8c00]/50 shadow'
+                      : 'bg-white/5 text-gray-500 border-white/10 hover:text-white hover:bg-white/10'
+                  }`}
+                >
+                  <Icon name="smartphone" size={13} />
+                  <span className="hidden sm:inline">Phone</span>
+                </button>
+              </div>
             </div>
             <div className="w-px h-10 bg-white/10 mx-2"></div>
             <div className="flex items-center gap-4">
@@ -1607,133 +1706,138 @@ TS Joinery Kanban System`
 
         {/* Workspace lateral layouts */}
         <div className="flex-1 flex overflow-hidden">
-          {/* Main lateral application routing sidebar */}
-          <aside className="w-80 bg-black/60 backdrop-blur-2xl border-r border-white/10 p-6 flex flex-col justify-between h-full shrink-0 select-none">
-            <div className="space-y-8 font-sans">
-              <div>
-                <p className="text-[10px] font-black uppercase text-gray-500 tracking-[0.2em] mb-4">Artisan Terminal</p>
-                <div className="space-y-2">
-                  <button 
-                    onClick={() => { setAppMode('employee'); setView('dashboard'); setSelectedEmployee(null); }} 
-                    className={`w-full flex items-center space-x-4 p-4 rounded-2xl transition-all ${appMode === 'employee' ? 'bg-[#ff8c00]/10 border border-[#ff8c00]/30 text-[#ff8c00]' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
-                  >
-                    <Icon name="clock" size={20} />
-                    <span className="font-black uppercase text-xs tracking-wider font-sans">Clocking Terminal</span>
-                  </button>
+          {/* Main lateral application routing sidebar (Hidden in Phone layout mode) */}
+          {layoutMode !== 'phone' && (
+            <aside className="w-80 bg-black/60 backdrop-blur-2xl border-r border-white/10 p-6 flex flex-col justify-between h-full shrink-0 select-none">
+              <div className="space-y-8 font-sans">
+                <div>
+                  <p className="text-[10px] font-black uppercase text-gray-500 tracking-[0.2em] mb-4">Artisan Terminal</p>
+                  <div className="space-y-2">
+                    <button 
+                      onClick={() => { setAppMode('employee'); setView('dashboard'); setSelectedEmployee(null); }} 
+                      className={`w-full flex items-center space-x-4 p-4 rounded-2xl transition-all ${appMode === 'employee' ? 'bg-[#ff8c00]/10 border border-[#ff8c00]/30 text-[#ff8c00]' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                    >
+                      <Icon name="clock" size={20} />
+                      <span className="font-black uppercase text-xs tracking-wider font-sans">Clocking Terminal</span>
+                    </button>
 
-                  <button 
-                    onClick={() => { setAppMode('qr_scan_service'); setView('dashboard'); }} 
-                    className={`w-full flex items-center space-x-4 p-4 rounded-2xl transition-all ${appMode === 'qr_scan_service' ? 'bg-purple-600/10 border border-purple-500/30 text-purple-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
-                  >
-                    <Icon name="scan" size={20} />
-                    <span className="font-black uppercase text-xs tracking-wider font-sans">QR Scan Service</span>
-                  </button>
+                    <button 
+                      onClick={() => { setAppMode('qr_scan_service'); setView('dashboard'); }} 
+                      className={`w-full flex items-center space-x-4 p-4 rounded-2xl transition-all ${appMode === 'qr_scan_service' ? 'bg-purple-600/10 border border-purple-500/30 text-purple-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                    >
+                      <Icon name="scan" size={20} />
+                      <span className="font-black uppercase text-xs tracking-wider font-sans">QR Scan Service</span>
+                    </button>
+                  </div>
                 </div>
-              </div>
 
-              <div>
-                <div className="flex justify-between items-center mb-4">
-                  <p className="text-[10px] font-black uppercase text-gray-500 tracking-[0.2em]">Management Hub</p>
-                  {isLocked && <span className="p-1 bg-red-500/10 text-red-500 border border-red-500/20 rounded text-[8px] font-bold uppercase tracking-widest font-sans">Locked</span>}
-                </div>
-                <div className="space-y-2 font-sans font-sans">
-                  <button 
-                    disabled={isLocked || !canManageUsers}
-                    onClick={() => { setAppMode('template_designer'); }} 
-                    className={`w-full flex items-center space-x-4 p-4 rounded-2xl transition-all ${(isLocked || !canManageUsers) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'template_designer' ? 'bg-purple-600/10 border border-purple-500/30 text-purple-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
-                  >
-                    <Icon name="layout-template" size={20} />
-                    <span className="font-black uppercase text-xs tracking-wider">Kanban Designer</span>
-                  </button>
-
-                  <button 
-                    disabled={isLocked || !canManageOrders}
-                    onClick={() => { setAppMode('orders'); }} 
-                    className={`w-full flex items-center space-x-4 p-4 rounded-2xl transition-all ${(isLocked || !canManageOrders) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'orders' ? 'bg-[#ff8c00]/10 border border-[#ff8c00]/30 text-[#ff8c00]' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
-                  >
-                    <Icon name="banknote" size={20} />
-                    <span className="font-black uppercase text-xs tracking-wider">Order Management</span>
-                  </button>
-
-                  <button 
-                    disabled={isLocked || !canManageUsers}
-                    onClick={() => { setAppMode('admin'); setView('dashboard'); }} 
-                    className={`w-full flex items-center space-x-4 p-4 rounded-2xl transition-all ${(isLocked || !canManageUsers) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'admin' ? 'bg-blue-600/10 border border-blue-500/30 text-blue-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
-                  >
-                    <Icon name="users" size={20} />
-                    <span className="font-black uppercase text-xs tracking-wider">Employer Registration</span>
-                  </button>
-
-                  <button 
-                    disabled={isLocked || !canViewAnalytics}
-                    onClick={() => { setAppMode('analytics'); setView('dashboard'); }} 
-                    className={`w-full flex items-center space-x-4 p-4 rounded-2xl transition-all ${(isLocked || !canViewAnalytics) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'analytics' ? 'bg-emerald-600/10 border border-emerald-500/30 text-emerald-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
-                  >
-                    <Icon name="bar-chart-3" size={20} />
-                    <span className="font-black uppercase text-xs tracking-wider">Work Analytics</span>
-                  </button>
-
-                  <button 
-                    disabled={isLocked}
-                    onClick={() => { setAppMode('leave'); setView('dashboard'); }} 
-                    className={`w-full flex items-center space-x-4 p-4 rounded-2xl transition-all ${isLocked ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'leave' ? 'bg-amber-600/10 border border-amber-500/30 text-amber-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
-                  >
-                    <Icon name="calendar" size={20} />
-                    <div className="flex items-center justify-between w-full">
-                      <span className="font-black uppercase text-xs tracking-wider">Leave Management</span>
-                      {leaveRequests.filter(r => r.status === 'Pending').length > 0 && (
-                        <span className="px-2 py-0.5 bg-amber-500 text-black text-[10px] font-mono font-black rounded-full">
-                          {leaveRequests.filter(r => r.status === 'Pending').length}
-                        </span>
-                      )}
+                {/* Hide Management Hub completely for Stock Manager role */}
+                {!isStockManager && (
+                  <div>
+                    <div className="flex justify-between items-center mb-4">
+                      <p className="text-[10px] font-black uppercase text-gray-500 tracking-[0.2em]">Management Hub</p>
+                      {isLocked && <span className="p-1 bg-red-500/10 text-red-500 border border-red-500/20 rounded text-[8px] font-bold uppercase tracking-widest font-sans">Locked</span>}
                     </div>
-                  </button>
+                    <div className="space-y-2 font-sans font-sans">
+                      <button 
+                        disabled={isLocked || !canManageUsers}
+                        onClick={() => { setAppMode('template_designer'); }} 
+                        className={`w-full flex items-center space-x-4 p-4 rounded-2xl transition-all ${(isLocked || !canManageUsers) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'template_designer' ? 'bg-purple-600/10 border border-purple-500/30 text-purple-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                      >
+                        <Icon name="layout-template" size={20} />
+                        <span className="font-black uppercase text-xs tracking-wider">Kanban Designer</span>
+                      </button>
 
+                      <button 
+                        disabled={isLocked || !canManageOrders}
+                        onClick={() => { setAppMode('orders'); }} 
+                        className={`w-full flex items-center space-x-4 p-4 rounded-2xl transition-all ${(isLocked || !canManageOrders) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'orders' ? 'bg-[#ff8c00]/10 border border-[#ff8c00]/30 text-[#ff8c00]' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                      >
+                        <Icon name="banknote" size={20} />
+                        <span className="font-black uppercase text-xs tracking-wider">Order Management</span>
+                      </button>
+
+                      <button 
+                        disabled={isLocked || !canManageUsers}
+                        onClick={() => { setAppMode('admin'); setView('dashboard'); }} 
+                        className={`w-full flex items-center space-x-4 p-4 rounded-2xl transition-all ${(isLocked || !canManageUsers) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'admin' ? 'bg-blue-600/10 border border-blue-500/30 text-blue-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                      >
+                        <Icon name="users" size={20} />
+                        <span className="font-black uppercase text-xs tracking-wider">Employer Registration</span>
+                      </button>
+
+                      <button 
+                        disabled={isLocked || !canViewAnalytics}
+                        onClick={() => { setAppMode('analytics'); setView('dashboard'); }} 
+                        className={`w-full flex items-center space-x-4 p-4 rounded-2xl transition-all ${(isLocked || !canViewAnalytics) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'analytics' ? 'bg-emerald-600/10 border border-emerald-500/30 text-emerald-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                      >
+                        <Icon name="bar-chart-3" size={20} />
+                        <span className="font-black uppercase text-xs tracking-wider">Work Analytics</span>
+                      </button>
+
+                      <button 
+                        disabled={isLocked}
+                        onClick={() => { setAppMode('leave'); setView('dashboard'); }} 
+                        className={`w-full flex items-center space-x-4 p-4 rounded-2xl transition-all ${isLocked ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'leave' ? 'bg-amber-600/10 border border-amber-500/30 text-amber-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                      >
+                        <Icon name="calendar" size={20} />
+                        <div className="flex items-center justify-between w-full">
+                          <span className="font-black uppercase text-xs tracking-wider">Leave Management</span>
+                          {leaveRequests.filter(r => r.status === 'Pending').length > 0 && (
+                            <span className="px-2 py-0.5 bg-amber-500 text-black text-[10px] font-mono font-black rounded-full">
+                              {leaveRequests.filter(r => r.status === 'Pending').length}
+                            </span>
+                          )}
+                        </div>
+                      </button>
+
+                      <button 
+                        disabled={isLocked}
+                        onClick={() => setAppMode('mobile')} 
+                        className={`w-full flex items-center space-x-4 p-4 rounded-2xl transition-all ${isLocked ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'mobile' ? 'bg-pink-600/10 border border-pink-500/30 text-pink-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                      >
+                        <Icon name="smartphone" size={20} />
+                        <span className="font-black uppercase text-xs tracking-wider">Mobile Deployment</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t border-white/10 pt-6 space-y-3">
+                {isLocked ? (
                   <button 
-                    disabled={isLocked}
-                    onClick={() => setAppMode('mobile')} 
-                    className={`w-full flex items-center space-x-4 p-4 rounded-2xl transition-all ${isLocked ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'mobile' ? 'bg-pink-600/10 border border-pink-500/30 text-pink-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                    onClick={() => setShowPinModal(true)} 
+                    className="w-full py-4 bg-[#ff8c00] hover:bg-[#e07b00] rounded-2xl text-xs font-black uppercase tracking-widest text-white shadow-lg active:scale-95 transition-all flex items-center justify-center space-x-3 font-sans"
                   >
-                    <Icon name="smartphone" size={20} />
-                    <span className="font-black uppercase text-xs tracking-wider">Mobile Deployment</span>
+                    <Icon name="lock" size={16} />
+                    <span>Unlock Management Hub</span>
                   </button>
+                ) : (
+                  <button 
+                    onClick={() => { setIsLocked(true); setAppMode('employee'); setCurrentUser(null); }} 
+                    className="w-full py-4 bg-red-600/10 border border-red-500/30 hover:bg-red-600/20 rounded-2xl text-xs font-black uppercase tracking-widest text-red-500 transition-all flex items-center justify-center space-x-3 font-sans"
+                  >
+                    <Icon name="unlock" size={16} />
+                    <span>Lock Terminal</span>
+                  </button>
+                )}
+
+                <div className="flex items-center justify-between px-2 pt-1 text-[10px] font-mono font-bold text-gray-500 border-t border-white/5">
+                  <span className="flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    System Version
+                  </span>
+                  <span className="text-emerald-400 font-extrabold tracking-wider bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20" title={getBuildInfoString()}>
+                    {CURRENT_VERSION_STRING}
+                  </span>
                 </div>
               </div>
-            </div>
-
-            <div className="border-t border-white/10 pt-6 space-y-3">
-              {isLocked ? (
-                <button 
-                  onClick={() => setShowPinModal(true)} 
-                  className="w-full py-4 bg-[#ff8c00] hover:bg-[#e07b00] rounded-2xl text-xs font-black uppercase tracking-widest text-white shadow-lg active:scale-95 transition-all flex items-center justify-center space-x-3 font-sans"
-                >
-                  <Icon name="lock" size={16} />
-                  <span>Unlock Management Hub</span>
-                </button>
-              ) : (
-                <button 
-                  onClick={() => { setIsLocked(true); setAppMode('employee'); setCurrentUser(null); }} 
-                  className="w-full py-4 bg-red-600/10 border border-red-500/30 hover:bg-red-600/20 rounded-2xl text-xs font-black uppercase tracking-widest text-red-500 transition-all flex items-center justify-center space-x-3 font-sans"
-                >
-                  <Icon name="unlock" size={16} />
-                  <span>Lock Terminal</span>
-                </button>
-              )}
-
-              <div className="flex items-center justify-between px-2 pt-1 text-[10px] font-mono font-bold text-gray-500 border-t border-white/5">
-                <span className="flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  System Version
-                </span>
-                <span className="text-emerald-400 font-extrabold tracking-wider bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20" title={getBuildInfoString()}>
-                  {CURRENT_VERSION_STRING}
-                </span>
-              </div>
-            </div>
-          </aside>
+            </aside>
+          )}
 
           {/* Workspace view wrapper */}
-          <div className="flex-1 overflow-y-auto custom-scrollbar relative">
+          <div className={`flex-1 overflow-y-auto custom-scrollbar relative ${layoutMode === 'phone' ? 'pb-24' : ''}`}>
             {appMode === 'template_designer' && !showCardEditor ? (
               <KanbanDesigner 
                 currentUser={currentUser}
@@ -3096,6 +3200,224 @@ TS Joinery Kanban System`
         initialEmployee={selectedEmployee}
         onSuccess={() => {}}
       />
+
+      {/* Dynamic Phone Layout Bottom Navigation Bar */}
+      {layoutMode === 'phone' && (
+        <nav className="fixed bottom-0 inset-x-0 z-50 bg-black/95 backdrop-blur-2xl border-t border-white/10 px-4 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] flex items-center justify-around shadow-2xl">
+          {(() => {
+            const role = currentUser?.role || (isLocked ? 'Artisan' : 'Admin');
+            const basketCount = (() => {
+              try {
+                const stored = localStorage.getItem('ts_joinery_kanban_basket');
+                if (stored) {
+                  const parsed = JSON.parse(stored);
+                  if (Array.isArray(parsed)) {
+                    return parsed.reduce((sum: number, item: any) => sum + (item.basketQty || 1), 0);
+                  }
+                }
+              } catch (e) {}
+              return 0;
+            })();
+
+            const unreadNotifications = notifications.filter(n => !n.isRead).length;
+
+            let navItems: Array<{
+              id: string;
+              label: string;
+              icon: string;
+              badge?: number;
+              onClick: () => void;
+              isActive: boolean;
+            }> = [];
+
+            if (role === 'Stock Manager') {
+              navItems = [
+                {
+                  id: 'qr_scan',
+                  label: 'QR Scan',
+                  icon: 'scan',
+                  onClick: () => { setAppMode('qr_scan_service'); setView('dashboard'); },
+                  isActive: appMode === 'qr_scan_service'
+                },
+                {
+                  id: 'basket',
+                  label: 'Basket',
+                  icon: 'shopping-bag',
+                  badge: basketCount > 0 ? basketCount : undefined,
+                  onClick: () => { setAppMode('qr_scan_service'); setView('dashboard'); },
+                  isActive: appMode === 'qr_scan_service'
+                },
+                {
+                  id: 'history',
+                  label: 'History',
+                  icon: 'history',
+                  onClick: () => { setAppMode('orders'); setView('dashboard'); },
+                  isActive: appMode === 'orders'
+                },
+                {
+                  id: 'profile',
+                  label: 'Profile',
+                  icon: 'user',
+                  onClick: () => setShowUserProfileModal(true),
+                  isActive: showUserProfileModal
+                }
+              ];
+            } else if (role === 'HR' || role === 'Purchasing') {
+              navItems = [
+                {
+                  id: 'dashboard',
+                  label: 'Dashboard',
+                  icon: 'home',
+                  onClick: () => { setAppMode('admin'); setView('dashboard'); },
+                  isActive: appMode === 'admin'
+                },
+                {
+                  id: 'notifications',
+                  label: 'Alerts',
+                  icon: 'bell',
+                  badge: unreadNotifications > 0 ? unreadNotifications : undefined,
+                  onClick: () => setShowNotificationsModal(true),
+                  isActive: showNotificationsModal
+                },
+                {
+                  id: 'stock_requests',
+                  label: 'Requests',
+                  icon: 'shopping-cart',
+                  onClick: () => { setAppMode('orders'); setView('dashboard'); },
+                  isActive: appMode === 'orders'
+                },
+                {
+                  id: 'profile',
+                  label: 'Profile',
+                  icon: 'user',
+                  onClick: () => setShowUserProfileModal(true),
+                  isActive: showUserProfileModal
+                }
+              ];
+            } else if (role === 'Admin') {
+              navItems = [
+                {
+                  id: 'dashboard',
+                  label: 'Dashboard',
+                  icon: 'home',
+                  onClick: () => { setAppMode('admin'); setView('dashboard'); },
+                  isActive: appMode === 'admin'
+                },
+                {
+                  id: 'management',
+                  label: 'Hub',
+                  icon: 'layout-template',
+                  onClick: () => { setAppMode('template_designer'); },
+                  isActive: appMode === 'template_designer'
+                },
+                {
+                  id: 'analytics',
+                  label: 'Analytics',
+                  icon: 'bar-chart-3',
+                  onClick: () => { setAppMode('analytics'); setView('dashboard'); },
+                  isActive: appMode === 'analytics'
+                },
+                {
+                  id: 'profile',
+                  label: 'Profile',
+                  icon: 'user',
+                  onClick: () => setShowUserProfileModal(true),
+                  isActive: showUserProfileModal
+                }
+              ];
+            } else if (role === 'Supervisor') {
+              navItems = [
+                {
+                  id: 'dashboard',
+                  label: 'Clocking',
+                  icon: 'clock',
+                  onClick: () => { setAppMode('employee'); setView('dashboard'); },
+                  isActive: appMode === 'employee'
+                },
+                {
+                  id: 'qr_scan',
+                  label: 'QR Scan',
+                  icon: 'scan',
+                  onClick: () => { setAppMode('qr_scan_service'); setView('dashboard'); },
+                  isActive: appMode === 'qr_scan_service'
+                },
+                {
+                  id: 'orders',
+                  label: 'Orders',
+                  icon: 'banknote',
+                  onClick: () => { setAppMode('orders'); setView('dashboard'); },
+                  isActive: appMode === 'orders'
+                },
+                {
+                  id: 'profile',
+                  label: 'Profile',
+                  icon: 'user',
+                  onClick: () => setShowUserProfileModal(true),
+                  isActive: showUserProfileModal
+                }
+              ];
+            } else {
+              // Artisan / Default
+              navItems = [
+                {
+                  id: 'clocking',
+                  label: 'Clocking',
+                  icon: 'clock',
+                  onClick: () => { setAppMode('employee'); setView('dashboard'); },
+                  isActive: appMode === 'employee'
+                },
+                {
+                  id: 'qr_scan',
+                  label: 'QR Scan',
+                  icon: 'scan',
+                  onClick: () => { setAppMode('qr_scan_service'); setView('dashboard'); },
+                  isActive: appMode === 'qr_scan_service'
+                },
+                {
+                  id: 'profile',
+                  label: 'Profile',
+                  icon: 'user',
+                  onClick: () => setShowUserProfileModal(true),
+                  isActive: showUserProfileModal
+                }
+              ];
+            }
+
+            return navItems.map((item) => (
+              <button
+                key={item.id}
+                onClick={item.onClick}
+                className={`relative flex flex-col items-center gap-1 py-1 px-3 rounded-2xl transition-all ${
+                  item.isActive ? 'text-[#ff8c00] font-black scale-105' : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                <Icon name={item.icon} size={20} />
+                <span className="text-[10px] uppercase font-bold tracking-wider">{item.label}</span>
+                {item.badge !== undefined && item.badge > 0 && (
+                  <span className="absolute -top-1 -right-1 px-1.5 py-0.5 bg-red-500 text-white font-mono text-[9px] font-black rounded-full shadow">
+                    {item.badge}
+                  </span>
+                )}
+              </button>
+            ));
+          })()}
+        </nav>
+      )}
+
+      {/* User Profile Modal */}
+      {showUserProfileModal && (
+        <UserProfileModal
+          currentUser={currentUser}
+          onClose={() => setShowUserProfileModal(false)}
+          onLock={() => {
+            setIsLocked(true);
+            setAppMode('employee');
+            setCurrentUser(null);
+          }}
+          layoutMode={layoutMode}
+          onChangeLayout={changeLayoutMode}
+        />
+      )}
     </Fragment>
   );
 }

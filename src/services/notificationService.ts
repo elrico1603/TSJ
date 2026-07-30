@@ -3,6 +3,19 @@ import { GlobalNotification, NotificationCategory, NotificationPriority } from '
 
 const NOTIFICATIONS_STORAGE_KEY = 'tsj_global_notifications_v1';
 
+type NotificationListener = (notifications: GlobalNotification[]) => void;
+const listeners = new Set<NotificationListener>();
+
+function notifyListeners(items: GlobalNotification[]) {
+  listeners.forEach(cb => {
+    try {
+      cb(items);
+    } catch (e) {
+      console.error('Error notifying notification listener:', e);
+    }
+  });
+}
+
 // Initial sample data so the system is rich with realistic notifications immediately
 const DEFAULT_NOTIFICATIONS: GlobalNotification[] = [
   {
@@ -117,6 +130,7 @@ export const notificationService = {
     const current = this.getLocalNotifications();
     const updated = [newNotif, ...current];
     this.saveLocalNotifications(updated);
+    notifyListeners(updated);
 
     // 2. Firebase update
     if (db && APP_ID_PATH) {
@@ -163,6 +177,7 @@ export const notificationService = {
     const current = this.getLocalNotifications();
     const updated = current.map(n => (n.id === id ? { ...n, isRead: true } : n));
     this.saveLocalNotifications(updated);
+    notifyListeners(updated);
 
     if (db && APP_ID_PATH) {
       try {
@@ -184,6 +199,7 @@ export const notificationService = {
     const current = this.getLocalNotifications();
     const updated = current.map(n => ({ ...n, isRead: true }));
     this.saveLocalNotifications(updated);
+    notifyListeners(updated);
 
     if (db && APP_ID_PATH) {
       try {
@@ -209,6 +225,7 @@ export const notificationService = {
     const current = this.getLocalNotifications();
     const updated = current.filter(n => n.id !== id);
     this.saveLocalNotifications(updated);
+    notifyListeners(updated);
 
     if (db && APP_ID_PATH) {
       try {
@@ -227,12 +244,15 @@ export const notificationService = {
   },
 
   subscribeNotifications(callback: (notifications: GlobalNotification[]) => void) {
+    listeners.add(callback);
     // Return initial local state first
     callback(this.getLocalNotifications());
 
+    let firebaseUnsub: (() => void) | null = null;
+
     if (db && APP_ID_PATH) {
       try {
-        const unsubscribe = db
+        firebaseUnsub = db
           .collection('artifacts')
           .doc(APP_ID_PATH)
           .collection('public')
@@ -247,7 +267,7 @@ export const notificationService = {
                 });
                 firebaseItems.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
                 this.saveLocalNotifications(firebaseItems);
-                callback(firebaseItems);
+                notifyListeners(firebaseItems);
               }
             },
             err => {
@@ -255,13 +275,17 @@ export const notificationService = {
               callback(this.getLocalNotifications());
             }
           );
-        return unsubscribe;
       } catch (e) {
         console.warn('Unable to subscribe to Firebase notifications:', e);
       }
     }
 
-    return () => {};
+    return () => {
+      listeners.delete(callback);
+      if (firebaseUnsub) {
+        firebaseUnsub();
+      }
+    };
   },
 
   filterForUser(
@@ -289,3 +313,4 @@ export const notificationService = {
     });
   }
 };
+

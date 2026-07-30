@@ -278,3 +278,31 @@ export interface GlobalNotification {
   pushSent?: boolean;
 }
 
+export interface StockRequestItem {
+  productId: string;
+  productName: string;
+  quantity: number;
+  supplier: string;
+  supplierPartNumber: string;
+  location: string;
+}
+
+export interface StockRequest {
+  id: string;
+  requestNumber: string;
+  requestedByUid: string;
+  requestedByName: string;
+  requestedByRole: string;
+  branchId: string;
+  branchName: string;
+  status: 'Pending' | 'Ordered' | 'Received' | 'Completed' | 'Cancelled';
+  createdAt: string;
+  orderedAt?: string;
+  completedAt?: string;
+  totalProducts: number;
+  totalQuantity: number;
+  notes?: string;
+  items: StockRequestItem[];
+}
+
+

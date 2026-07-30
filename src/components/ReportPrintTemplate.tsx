@@ -243,6 +243,16 @@ export const ReportPrintTemplate: React.FC<ReportPrintTemplateProps> = ({
             <p className="text-xs font-bold uppercase text-gray-500 font-sans">Supervisor Authorized Signature</p>
           </div>
         </div>
+
+        {/* Professional Print Footer automatically appearing on printed pages */}
+        <div className="report-print-footer hidden print:flex justify-between items-center text-[9px] font-sans text-gray-600 border-t border-gray-400 pt-2 mt-12 font-bold uppercase tracking-wider">
+          <div>
+            <span>TS Joinery</span> • <span>Employee: {printingEmployee.name} {printingEmployee.surname}</span>
+          </div>
+          <div>
+            <span>Generated: {new Date().toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+          </div>
+        </div>
       </div>
     </div>
   );
