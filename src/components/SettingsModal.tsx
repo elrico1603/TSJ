@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Icon } from './Icon';
 import { AppUser } from '../auth';
+import { APP_VERSION, CURRENT_VERSION_STRING, getGitTag } from '../version';
 
 interface SettingsModalProps {
   pendingUsers: AppUser[];
@@ -299,6 +300,63 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     }`}
                   />
                 </button>
+              </div>
+            </div>
+          </div>
+
+          {/* APPLICATION VERSION & ABOUT SECTION */}
+          <div className="bg-emerald-500/5 border-2 border-emerald-500/20 rounded-[2rem] p-6">
+            <h3 className="text-lg font-black uppercase text-emerald-400 tracking-widest flex items-center gap-2 font-sans mb-4">
+              <Icon name="info" size={20} />
+              Application Information & Version
+            </h3>
+            <div className="bg-black/40 border border-white/10 p-6 rounded-[2rem] space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/10 pb-4">
+                <div>
+                  <p className="font-black text-white text-base font-sans">{APP_VERSION.appName}</p>
+                  <p className="text-xs text-gray-400 font-bold font-sans mt-0.5">
+                    Centralized Production Build & Version Control
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 self-start sm:self-auto">
+                  <span className="px-3 py-1 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-mono font-black text-sm rounded-xl shadow-lg">
+                    {CURRENT_VERSION_STRING}
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs font-sans">
+                <div className="bg-white/5 p-3 rounded-xl border border-white/5">
+                  <span className="text-gray-400 font-bold block uppercase tracking-wider text-[10px]">Major Version</span>
+                  <span className="font-mono font-black text-white text-sm">{APP_VERSION.major}</span>
+                </div>
+                <div className="bg-white/5 p-3 rounded-xl border border-white/5">
+                  <span className="text-gray-400 font-bold block uppercase tracking-wider text-[10px]">Minor Version</span>
+                  <span className="font-mono font-black text-white text-sm">{APP_VERSION.minor}</span>
+                </div>
+                <div className="bg-white/5 p-3 rounded-xl border border-white/5">
+                  <span className="text-gray-400 font-bold block uppercase tracking-wider text-[10px]">Patch Level</span>
+                  <span className="font-mono font-black text-white text-sm">{APP_VERSION.patch}</span>
+                </div>
+                <div className="bg-white/5 p-3 rounded-xl border border-white/5">
+                  <span className="text-gray-400 font-bold block uppercase tracking-wider text-[10px]">Build Number</span>
+                  <span className="font-mono font-black text-emerald-400 text-sm">#{APP_VERSION.buildNumber}</span>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between text-xs text-gray-400 font-sans pt-2 gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-gray-300">Build Date:</span>
+                  <span className="font-mono text-white">{APP_VERSION.buildDate}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-gray-300">Git Tag:</span>
+                  <span className="font-mono text-emerald-400 font-bold">{getGitTag()}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-gray-300">Environment:</span>
+                  <span className="font-mono uppercase text-gray-300">{APP_VERSION.environment}</span>
+                </div>
               </div>
             </div>
           </div>

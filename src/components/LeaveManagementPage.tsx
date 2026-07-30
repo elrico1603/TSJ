@@ -25,6 +25,11 @@ export const LeaveManagementPage: React.FC<LeaveManagementPageProps> = ({
   const [actionType, setActionType] = useState<'Approved' | 'Rejected' | null>(null);
   const [selectedAttachment, setSelectedAttachment] = useState<{ url: string; name: string } | null>(null);
   const [activeTab, setActiveTab] = useState<'manager' | 'employee'>('manager');
+  const [requestToDelete, setRequestToDelete] = useState<LeaveRequest | null>(null);
+  const [isDeleting, setIsDeleting] = useState<boolean>(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const canManageLeave = !userRole || ['Admin', 'HR', 'Manager', 'Supervisor'].includes(userRole) || userRole !== 'Artisan';
 
   useEffect(() => {
     const unsubscribe = leaveService.subscribeLeaveRequests(requests => {
@@ -32,6 +37,25 @@ export const LeaveManagementPage: React.FC<LeaveManagementPageProps> = ({
     });
     return () => unsubscribe();
   }, []);
+
+  const handleDeleteConfirm = async () => {
+    if (!requestToDelete) return;
+    setIsDeleting(true);
+    try {
+      await leaveService.deleteLeaveRequest(requestToDelete.id);
+      setLeaveRequests(prev => prev.filter(r => r.id !== requestToDelete.id));
+      setRequestToDelete(null);
+      setToastMessage('Leave request deleted successfully.');
+      setTimeout(() => {
+        setToastMessage(null);
+      }, 3500);
+    } catch (err) {
+      console.error('Error deleting leave request:', err);
+      alert('Failed to delete leave request.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const handleApproveReject = async () => {
     if (!selectedRequest || !actionType) return;
@@ -248,7 +272,7 @@ export const LeaveManagementPage: React.FC<LeaveManagementPageProps> = ({
                           {req.status}
                         </span>
 
-                        {req.status === 'Pending' && (
+                        {(req.status === 'Pending' || (req.status as string) === 'Open') && (
                           <div className="flex items-center gap-2">
                             <button
                               onClick={() => {
@@ -270,6 +294,15 @@ export const LeaveManagementPage: React.FC<LeaveManagementPageProps> = ({
                               <Icon name="x" size={14} />
                               <span>Reject</span>
                             </button>
+                            {canManageLeave && (
+                              <button
+                                onClick={() => setRequestToDelete(req)}
+                                title="Delete Leave Request"
+                                className="p-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 hover:border-red-500/40 transition-all flex items-center justify-center"
+                              >
+                                <Icon name="trash-2" size={16} />
+                              </button>
+                            )}
                           </div>
                         )}
                       </div>
@@ -485,6 +518,63 @@ export const LeaveManagementPage: React.FC<LeaveManagementPageProps> = ({
         employees={employees}
         onSuccess={() => {}}
       />
+
+      {/* Delete Confirmation Modal */}
+      {requestToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in">
+          <div className="w-full max-w-md bg-[#181818] border border-white/10 rounded-3xl p-6 space-y-6 text-white font-sans shadow-2xl">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-red-500/10 rounded-2xl text-red-500 border border-red-500/20">
+                <Icon name="trash-2" size={24} />
+              </div>
+              <div>
+                <h3 className="text-xl font-black uppercase tracking-tight text-white font-sans">
+                  Delete Leave Request
+                </h3>
+                <p className="text-xs text-gray-400 font-mono font-bold mt-0.5">
+                  {requestToDelete.id} • {requestToDelete.employeeName} {requestToDelete.employeeSurname}
+                </p>
+              </div>
+            </div>
+
+            <p className="text-sm text-gray-300 font-sans leading-relaxed bg-black/40 p-4 rounded-2xl border border-white/5">
+              Are you sure you want to permanently delete this leave request?
+            </p>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                disabled={isDeleting}
+                onClick={() => setRequestToDelete(null)}
+                className="px-5 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-xs font-black uppercase text-gray-300 transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={isDeleting}
+                onClick={handleDeleteConfirm}
+                className="px-6 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-black uppercase tracking-wider text-xs shadow-lg shadow-red-600/20 transition-all flex items-center gap-2"
+              >
+                {isDeleting ? (
+                  <span>Deleting...</span>
+                ) : (
+                  <>
+                    <Icon name="trash-2" size={14} />
+                    <span>Delete</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Success Toast Banner */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-50 bg-emerald-500 text-black px-6 py-4 rounded-2xl font-black text-xs uppercase tracking-wider shadow-2xl flex items-center gap-3 animate-in slide-in-from-bottom-5 font-sans">
+          <Icon name="check-circle" size={20} />
+          <span>{toastMessage}</span>
+        </div>
+      )}
     </div>
   );
 };

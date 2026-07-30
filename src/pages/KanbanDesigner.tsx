@@ -1243,7 +1243,7 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
                   <Icon name="layout-template" size={32} className="text-purple-400" />
                 </div>
                 <div className="space-y-1">
-                  <p className="text-gray-300 font-black uppercase tracking-widest text-sm">Kanban Template Designer</p>
+                  <p className="text-gray-300 font-black uppercase tracking-widest text-sm">Kanban Designer</p>
                   <p className="text-xs text-gray-500 font-sans">
                     Select an existing template from the sidebar layout list, or choose a blueprint layout to create a fresh new design.
                   </p>

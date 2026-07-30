@@ -33,6 +33,7 @@ import { KanbanPreview } from './pages/KanbanPreview';
 import { QRCodeRenderer } from './components/QRCodeRenderer';
 import { QRScanService } from './components/QRScanService';
 import { NotificationCentre } from './components/NotificationCentre';
+import { CURRENT_VERSION_STRING, getBuildInfoString } from './version';
 import { LeaveManagementPage } from './components/LeaveManagementPage';
 import { LeaveApplicationModal } from './components/LeaveApplicationModal';
 import { notificationService } from './services/notificationService';
@@ -1645,21 +1646,12 @@ TS Joinery Kanban System`
                 </div>
                 <div className="space-y-2 font-sans font-sans">
                   <button 
-                    disabled={isLocked || !canManageOrders}
-                    onClick={() => { setAppMode('kanban'); setView('dashboard'); }} 
-                    className={`w-full flex items-center space-x-4 p-4 rounded-2xl transition-all ${(isLocked || !canManageOrders) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'kanban' ? 'bg-blue-600/10 border border-blue-500/30 text-blue-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
-                  >
-                    <Icon name="kanban" size={20} />
-                    <span className="font-black uppercase text-xs tracking-wider">Kanban Creator</span>
-                  </button>
-
-                  <button 
                     disabled={isLocked || !canManageUsers}
                     onClick={() => { setAppMode('template_designer'); }} 
                     className={`w-full flex items-center space-x-4 p-4 rounded-2xl transition-all ${(isLocked || !canManageUsers) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'template_designer' ? 'bg-purple-600/10 border border-purple-500/30 text-purple-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
                   >
                     <Icon name="layout-template" size={20} />
-                    <span className="font-black uppercase text-xs tracking-wider">Template Designer</span>
+                    <span className="font-black uppercase text-xs tracking-wider">Kanban Designer</span>
                   </button>
 
                   <button 
@@ -1717,7 +1709,7 @@ TS Joinery Kanban System`
               </div>
             </div>
 
-            <div className="border-t border-white/10 pt-6">
+            <div className="border-t border-white/10 pt-6 space-y-3">
               {isLocked ? (
                 <button 
                   onClick={() => setShowPinModal(true)} 
@@ -1735,6 +1727,16 @@ TS Joinery Kanban System`
                   <span>Lock Terminal</span>
                 </button>
               )}
+
+              <div className="flex items-center justify-between px-2 pt-1 text-[10px] font-mono font-bold text-gray-500 border-t border-white/5">
+                <span className="flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  System Version
+                </span>
+                <span className="text-emerald-400 font-extrabold tracking-wider bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20" title={getBuildInfoString()}>
+                  {CURRENT_VERSION_STRING}
+                </span>
+              </div>
             </div>
           </aside>
 

@@ -81,6 +81,7 @@ export const Icon: React.FC<IconProps> = ({ name, size = 24, className = "", str
     'id-card': IdCard,
     'user-plus': UserPlus,
     'edit-3': Edit,
+    'trash': Trash2,
     'trash-2': Trash2,
     'calendar': Calendar,
     'arrow-right': ArrowRight,

@@ -278,6 +278,28 @@ export const leaveService = {
     return targetReq;
   },
 
+  async deleteLeaveRequest(leaveRequestId: string): Promise<boolean> {
+    const current = this.getLocalLeaveRequests();
+    const updated = current.filter(req => req.id !== leaveRequestId);
+    this.saveLocalLeaveRequests(updated);
+
+    if (db && APP_ID_PATH) {
+      try {
+        await db
+          .collection('artifacts')
+          .doc(APP_ID_PATH)
+          .collection('public')
+          .doc('leave_requests')
+          .collection('items')
+          .doc(leaveRequestId)
+          .delete();
+      } catch (err) {
+        console.warn('Firebase leave delete error:', err);
+      }
+    }
+    return true;
+  },
+
   subscribeLeaveRequests(callback: (requests: LeaveRequest[]) => void) {
     callback(this.getLocalLeaveRequests());
 
