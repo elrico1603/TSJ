@@ -4,6 +4,9 @@ import { Icon } from './Icon';
 import { getKanbanCard, KanbanCardMaster } from '../services/kanbanService';
 import { db, APP_ID_PATH } from '../firebase';
 import { auditLogger } from '../audit';
+import { stockRequestService } from '../services/stockRequestService';
+import { productMasterService } from '../services/productMasterService';
+import { StockRequestItem } from '../types';
 
 interface QRScanServiceProps {
   kanbanCards: any[]; // Existing card references for listing & simulation
@@ -230,6 +233,40 @@ export const QRScanService: React.FC<QRScanServiceProps> = ({
     setLoadedCard(null);
 
     try {
+      // REQUIREMENT 7: Lookup Product Master first (Single Source of Truth)
+      const masterProduct = productMasterService.lookupProductByIdOrCode(id);
+      if (masterProduct) {
+        const mapped: KanbanCardMaster = {
+          id: masterProduct.id,
+          kanbanId: masterProduct.internalProductCode || masterProduct.id,
+          productDescription: masterProduct.productName,
+          productName: masterProduct.productName,
+          imageUrl: masterProduct.productImage || '',
+          supplierPartNumber: masterProduct.supplierPartNumber || '',
+          supplierName: masterProduct.supplier || '',
+          orderQuantity: String(masterProduct.orderQuantity || 1),
+          binQuantity: '1 Bin',
+          deliveryTime: masterProduct.deliveryTime || 'N/A',
+          location: {
+            letter: masterProduct.location?.split('-')[0] || 'A',
+            number: masterProduct.location?.split('-')[1] || '01',
+            colour: masterProduct.locationColour || 'GREEN'
+          },
+          qrCodeUrl: '',
+          activeTemplateId: 'default',
+          createdDate: masterProduct.createdAt || '',
+          createdBy: masterProduct.createdUser || 'System',
+          lastModifiedDate: masterProduct.updatedAt || '',
+          lastModifiedBy: masterProduct.updatedUser || 'System',
+          status: masterProduct.status === 'Active' ? 'ACTIVE' : 'DISCONTINUED',
+          cardColour: masterProduct.cardColour || '#ffffff'
+        };
+        setLoadedCard(mapped);
+        setScanState('success');
+        addToBasket(mapped);
+        return;
+      }
+
       const card = await getKanbanCard(id);
       if (card) {
         setLoadedCard(card);
@@ -345,60 +382,35 @@ export const QRScanService: React.FC<QRScanServiceProps> = ({
   const handleSendOrder = async () => {
     if (basket.length === 0) return;
 
-    const requestedBy = currentUser?.name || currentUser?.email || 'System User';
-    const now = new Date();
-    const currentDate = now.toLocaleDateString('en-ZA');
-    const currentTime = now.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    const orderId = `SO-${Math.floor(100000 + Math.random() * 900000)}`;
+    const requestedBy = currentUser?.name || currentUser?.email || 'Stock Manager';
+    const requestedByUid = currentUser?.id || currentUser?.uid || 'sm_001';
+    const requestedByRole = currentUser?.role || 'Stock Manager';
+    const branchId = currentUser?.branchId || 'BR-01';
+    const branchName = currentUser?.branch || 'TS Joinery Main Workshop';
 
     try {
-      // 1. Build consolidated order document object
-      const orderItemsSummary = basket.map(item => ({
-        kanbanId: item.id,
-        productName: item.card.productName || item.card.productDescription,
-        supplierName: item.card.supplierName,
-        supplierPartNumber: item.card.supplierPartNumber,
-        baseOrderQuantity: item.card.orderQuantity,
-        binQuantity: item.card.binQuantity,
-        warehouseLocation: `${item.card.location?.letter || ''}${item.card.location?.number || ''}`,
-        locationColour: item.card.location?.colour || 'NONE',
-        deliveryTime: item.card.deliveryTime,
-        orderMultiplier: item.basketQty,
-        totalOrderedQtyStr: `${item.basketQty}x (${item.card.orderQuantity})`
+      // 1. Build StockRequestItems
+      const requestItems: StockRequestItem[] = basket.map(item => ({
+        productId: item.id,
+        productName: item.card.productName || item.card.productDescription || 'No description',
+        quantity: item.basketQty,
+        supplier: item.card.supplierName || 'N/A',
+        supplierPartNumber: item.card.supplierPartNumber || 'N/A',
+        location: `${item.card.location?.letter || ''}${item.card.location?.number || ''}${item.card.location?.colour ? ` (${item.card.location.colour})` : ''}`,
+        imageUrl: item.card.imageUrl || ''
       }));
 
-      const orderHistoryRecord = {
-        orderNumber: orderId,
-        date: currentDate,
-        time: currentTime,
-        requestedBy,
-        products: basket.map(item => item.card.productName || item.card.productDescription || ''),
-        requestedQuantities: basket.map(item => item.basketQty),
-        orderStatus: 'Pending',
-        createdAt: new Date().toISOString(),
-        items: basket.map(item => ({
-          kanbanId: item.id,
-          productName: item.card.productName || item.card.productDescription || '',
-          supplierName: item.card.supplierName || 'N/A',
-          supplierPartNumber: item.card.supplierPartNumber || 'N/A',
-          baseOrderQuantity: item.card.orderQuantity || 'N/A',
-          binQuantity: item.card.binQuantity || '1 Bin',
-          warehouseLocation: `${item.card.location?.letter || ''}${item.card.location?.number || ''}${item.card.location?.colour ? ` (${item.card.location.colour})` : ''}`,
-          deliveryTime: item.card.deliveryTime || 'N/A',
-          basketQty: item.basketQty
-        }))
-      };
+      // 2. Create Stock Request in Firebase and trigger 1 notification
+      const stockReq = await stockRequestService.createStockRequest({
+        requestedByUid,
+        requestedByName: requestedBy,
+        requestedByRole,
+        branchId,
+        branchName,
+        items: requestItems
+      });
 
-      // 2. Save order to Firestore permanently in order_history collection
-      if (db && APP_ID_PATH) {
-        await db.collection('artifacts')
-          .doc(APP_ID_PATH)
-          .collection('public')
-          .doc('data')
-          .collection('order_history')
-          .doc(orderId)
-          .set(orderHistoryRecord);
-      }
+      const orderId = stockReq.requestNumber;
 
       // 3. Log Audit Records for every scanned item in the basket
       for (const item of basket) {
@@ -406,45 +418,23 @@ export const QRScanService: React.FC<QRScanServiceProps> = ({
         await auditLogger.log(
           'STOCK_ORDER_BASKET_SUBMITTED',
           requestedBy,
-          `Stock order submitted for ${item.id} - ${itemDesc}. Order multiplier: ${item.basketQty}x (${item.card.orderQuantity})`
+          `Stock order request ${orderId} submitted for ${item.id} - ${itemDesc}. Quantity: ${item.basketQty}x`
         );
       }
 
-      // 4. Compile beautifully formatted email body for Procurement Manager according to exact spec
-      const divider = "------------------------------------------------";
-      
-      const emailHeader = `${divider}\nOrder Number: ${orderId}\nDate: ${currentDate}\nTime: ${currentTime}\nRequested By: ${requestedBy}\n${divider}\n\n`;
-      
-      const emailProducts = basket.map(item => {
-        const c = item.card;
-        const loc = `${c.location?.letter || ''}${c.location?.number || ''}${c.location?.colour ? ` (${c.location.colour})` : ''}`;
-        return `Product Name: ${c.productName || c.productDescription}\nSupplier: ${c.supplierName || 'N/A'}\nSupplier Number: ${c.supplierPartNumber || 'N/A'}\nRequested Quantity: x${item.basketQty}\nOrder Quantity: ${c.orderQuantity || 'N/A'}\nBin Quantity: ${c.binQuantity || '1 Bin'}\nDelivery Time: ${c.deliveryTime || 'N/A'}\nWarehouse Location: ${loc}`;
-      }).join('\n\n');
-      
-      const emailFooter = `\n\n${divider}\nTotal Products: ${basket.length}\n${divider}`;
-
-      const fullBody = emailHeader + emailProducts + emailFooter;
-
-      const subject = encodeURIComponent(`KANBAN STOCK REQUEST`);
-      const body = encodeURIComponent(fullBody);
-      
-      const mailtoLink = `mailto:janah@tsjoinery.co.za?subject=${subject}&body=${body}`;
-      
-      // Open prefilled email draft client-side (Non-blocking scan complete)
-      window.open(mailtoLink, '_blank');
-
-      // 5. Update state
+      // 4. Update state & open confirmation modal
       setLastSubmittedOrderId(orderId);
       setOrderSuccessModal(true);
+      setIsReviewMode(false);
       
       // Clear local storage and state basket
       saveBasket([]);
       setRecentScanAlert(null);
       
-      announce(`Consolidated Stock Order ${orderId} submitted and sent to procurement.`);
+      announce(`Stock Request ${orderId} submitted successfully.`);
     } catch (err) {
-      console.error('Error submitting stock order:', err);
-      announce('Failed to write stock order to cloud database.');
+      console.error('Error submitting stock request:', err);
+      announce('Failed to submit stock request to cloud database.');
     }
   };
 
@@ -1212,33 +1202,46 @@ export const QRScanService: React.FC<QRScanServiceProps> = ({
                 {/* Mathematical aggregates */}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="bg-white/5 p-3.5 rounded-xl border border-white/5 flex flex-col">
-                    <span className="text-[9px] font-black uppercase text-gray-500 tracking-wider">Unique Items Scanned</span>
+                    <span className="text-[9px] font-black uppercase text-gray-400 tracking-wider">Total Products</span>
                     <span className="text-xl font-black text-white mt-1 leading-none">
                       {basket.length}
                     </span>
                   </div>
 
                   <div className="bg-white/5 p-3.5 rounded-xl border border-white/5 flex flex-col">
-                    <span className="text-[9px] font-black uppercase text-gray-500 tracking-wider">Total Order Units/Bins</span>
-                    <span className="text-xl font-black text-purple-400 mt-1 leading-none">
-                      {basket.reduce((acc, curr) => acc + curr.basketQty, 0)}x
+                    <span className="text-[9px] font-black uppercase text-gray-400 tracking-wider">Total Quantity</span>
+                    <span className="text-xl font-black text-[#ff8c00] mt-1 leading-none">
+                      {basket.reduce((acc, curr) => acc + curr.basketQty, 0)}
                     </span>
                   </div>
                 </div>
 
-                {/* Info Disclaimer */}
-                <p className="text-[10px] text-gray-500 font-sans leading-relaxed text-center">
-                  Pressing SEND ORDER below drafts a consolidated reorder email & publishes the record to the Firestore cloud historical tracker immediately.
-                </p>
+                {/* Basket Action Buttons */}
+                <div className="flex flex-col sm:flex-row items-center gap-3 pt-2">
+                  <button
+                    onClick={() => setIsReviewMode(false)}
+                    className="w-full sm:w-1/3 py-3.5 bg-white/5 hover:bg-white/10 text-gray-300 rounded-2xl text-xs font-bold uppercase tracking-wider transition-all border border-white/10 flex items-center justify-center gap-2"
+                  >
+                    <Icon name="scan" size={14} />
+                    <span>Continue Scanning</span>
+                  </button>
 
-                {/* Submitting CTA Button */}
-                <button
-                  onClick={handleSendOrder}
-                  className="w-full py-4 bg-purple-600 hover:bg-purple-700 text-white rounded-2xl text-xs font-black uppercase tracking-widest transition-all shadow-xl active:scale-[0.99] flex items-center justify-center gap-2"
-                >
-                  <Icon name="check" size={14} />
-                  SEND ORDER ({basket.reduce((acc, curr) => acc + curr.basketQty, 0)} ITEMS)
-                </button>
+                  <button
+                    onClick={clearBasket}
+                    className="w-full sm:w-1/3 py-3.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-2xl text-xs font-bold uppercase tracking-wider transition-all border border-red-500/20 flex items-center justify-center gap-2"
+                  >
+                    <Icon name="trash-2" size={14} />
+                    <span>Clear Basket</span>
+                  </button>
+
+                  <button
+                    onClick={handleSendOrder}
+                    className="w-full sm:w-1/3 py-3.5 bg-[#ff8c00] hover:bg-[#e07b00] text-white rounded-2xl text-xs font-black uppercase tracking-wider transition-all shadow-xl active:scale-[0.99] flex items-center justify-center gap-2"
+                  >
+                    <Icon name="check" size={14} />
+                    <span>Submit Stock Request</span>
+                  </button>
+                </div>
               </div>
             )}
 
@@ -1252,7 +1255,7 @@ export const QRScanService: React.FC<QRScanServiceProps> = ({
       {/* SUCCESS ORDER CONFIRMATION POPUP MODAL */}
       {orderSuccessModal && (
         <div className="fixed inset-0 z-[2000] bg-black/90 backdrop-blur-3xl flex items-center justify-center p-6 animate-in fade-in duration-300">
-          <div className="bg-[#151515] border border-white/10 w-full max-w-md rounded-[3rem] p-8 text-center space-y-6 shadow-2xl overflow-hidden relative">
+          <div className="bg-[#151515] border border-white/10 w-full max-w-md rounded-[3rem] p-8 text-center space-y-6 shadow-2xl overflow-hidden relative font-sans">
             
             {/* Pulsing visual checks */}
             <div className="w-20 h-20 bg-emerald-500 text-black border border-emerald-400/20 rounded-full flex items-center justify-center text-3xl font-black mx-auto shadow-[0_0_35px_theme(colors.emerald.500/50)] animate-bounce mt-4">
@@ -1260,14 +1263,14 @@ export const QRScanService: React.FC<QRScanServiceProps> = ({
             </div>
 
             <div className="space-y-2">
-              <span className="text-[10px] font-black uppercase text-emerald-400 tracking-widest block font-mono">
-                Order ID: {lastSubmittedOrderId}
+              <span className="text-xs font-black uppercase text-[#ff8c00] tracking-widest block font-mono">
+                Request Number: {lastSubmittedOrderId}
               </span>
-              <h3 className="text-2xl font-black uppercase tracking-tight text-white leading-none">
-                Stock Order Dispatched
+              <h3 className="text-xl font-black uppercase tracking-tight text-white leading-tight">
+                Stock Request Submitted Successfully
               </h3>
               <p className="text-xs text-gray-400 max-w-sm mx-auto leading-relaxed font-sans">
-                The consolidated Kanban replenishment batch has been saved to Firebase Firestore under historical procurement logs. The mail client has loaded the template prefill.
+                Your stock request has been saved to Firebase and sent to Janah/Purchasing for review.
               </p>
             </div>
 

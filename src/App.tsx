@@ -38,7 +38,10 @@ import { LeaveManagementPage } from './components/LeaveManagementPage';
 import { LeaveApplicationModal } from './components/LeaveApplicationModal';
 import { notificationService } from './services/notificationService';
 import { leaveService } from './services/leaveService';
+import { generateNextKanbanNumber } from './services/kanbanService';
 import { UserProfileModal } from './components/UserProfileModal';
+import { ProductMasterHub } from './components/ProductMasterHub';
+import { PurchaseOrderHub } from './components/PurchaseOrderHub';
 
 const { SUPER_USER_PIN } = SECURITY;
 
@@ -781,20 +784,7 @@ TS Joinery Kanban System`
     // Assign a unique sequential Kanban ID if it doesn't already exist
     let assignedKanbanId = data.kanbanId;
     if (!assignedKanbanId) {
-      let maxNum = 0;
-      kanbanCards.forEach(c => {
-        const kid = c.cardData?.kanbanId || c.cardData?.partNumber;
-        if (kid) {
-          const match = kid.match(/(?:TSJ-)?KAN-(\d+)/i);
-          if (match) {
-            const numPart = parseInt(match[1], 10);
-            if (!isNaN(numPart) && numPart > maxNum) {
-              maxNum = numPart;
-            }
-          }
-        }
-      });
-      assignedKanbanId = `TSJ-KAN-${String(maxNum + 1).padStart(6, '0')}`;
+      assignedKanbanId = generateNextKanbanNumber(kanbanCards);
     }
 
     const creatorUser = data.createdBy || currentUser?.name || currentUser?.email || 'System User';
@@ -932,10 +922,44 @@ TS Joinery Kanban System`
       });
       setKanbanEditingId(card.id);
     } else {
-      setCardForm(initialCardForm);
+      const nextKanbanId = generateNextKanbanNumber(kanbanCards);
+      setCardForm({
+        ...initialCardForm,
+        cardData: {
+          ...initialCardForm.cardData,
+          kanbanId: nextKanbanId,
+          partNumber: nextKanbanId
+        }
+      });
       setKanbanEditingId(null);
     }
     setShowCardEditor(true);
+  };
+
+  const handleDuplicateCard = async (card: KanbanCard) => {
+    const cardData = card.cardData || {};
+    const nextKanbanId = generateNextKanbanNumber(kanbanCards);
+
+    const duplicatedCardData = {
+      ...cardData,
+      kanbanId: nextKanbanId,
+      partNumber: nextKanbanId,
+      dateCreated: new Date().toISOString(),
+      createdDate: new Date().toISOString(),
+      createdBy: currentUser?.name || currentUser?.email || 'System User',
+      lastModified: new Date().toISOString(),
+      dateModified: new Date().toISOString()
+    };
+
+    const payload = {
+      templateId: card.templateId,
+      cardData: duplicatedCardData,
+      createdAt: new Date().toISOString()
+    };
+
+    const targetRef = db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('data').collection('kanbanCards');
+    await targetRef.add(payload);
+    announce(`Card duplicated with new Kanban Number ${nextKanbanId}`);
   };
 
   const handlePrintKanban = (card: KanbanCard) => {
@@ -1740,6 +1764,24 @@ TS Joinery Kanban System`
                     </div>
                     <div className="space-y-2 font-sans font-sans">
                       <button 
+                        disabled={isLocked}
+                        onClick={() => { setAppMode('product_master'); }} 
+                        className={`w-full flex items-center space-x-4 p-4 rounded-2xl transition-all ${isLocked ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'product_master' ? 'bg-cyan-600/10 border border-cyan-500/30 text-cyan-400' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                      >
+                        <Icon name="box" size={20} />
+                        <span className="font-black uppercase text-xs tracking-wider">Product Master</span>
+                      </button>
+
+                      <button 
+                        disabled={isLocked}
+                        onClick={() => { setAppMode('purchase_orders'); }} 
+                        className={`w-full flex items-center space-x-4 p-4 rounded-2xl transition-all ${isLocked ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'purchase_orders' ? 'bg-cyan-600/10 border border-cyan-500/30 text-cyan-400' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                      >
+                        <Icon name="file-text" size={20} />
+                        <span className="font-black uppercase text-xs tracking-wider">Purchase Orders</span>
+                      </button>
+
+                      <button 
                         disabled={isLocked || !canManageUsers}
                         onClick={() => { setAppMode('template_designer'); }} 
                         className={`w-full flex items-center space-x-4 p-4 rounded-2xl transition-all ${(isLocked || !canManageUsers) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'template_designer' ? 'bg-purple-600/10 border border-purple-500/30 text-purple-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
@@ -1749,12 +1791,12 @@ TS Joinery Kanban System`
                       </button>
 
                       <button 
-                        disabled={isLocked || !canManageOrders}
+                        disabled={isLocked || (!canManageOrders && !isStockManager)}
                         onClick={() => { setAppMode('orders'); }} 
-                        className={`w-full flex items-center space-x-4 p-4 rounded-2xl transition-all ${(isLocked || !canManageOrders) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'orders' ? 'bg-[#ff8c00]/10 border border-[#ff8c00]/30 text-[#ff8c00]' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                        className={`w-full flex items-center space-x-4 p-4 rounded-2xl transition-all ${(isLocked || (!canManageOrders && !isStockManager)) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'orders' ? 'bg-[#ff8c00]/10 border border-[#ff8c00]/30 text-[#ff8c00]' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
                       >
                         <Icon name="banknote" size={20} />
-                        <span className="font-black uppercase text-xs tracking-wider">Order Management</span>
+                        <span className="font-black uppercase text-xs tracking-wider">Procurement & Orders</span>
                       </button>
 
                       <button 
@@ -1848,6 +1890,20 @@ TS Joinery Kanban System`
               />
             ) : (
               <div className="p-12 pb-36 font-sans">
+                {appMode === 'product_master' && (
+                  <ProductMasterHub 
+                    currentUser={currentUser}
+                    announce={announce}
+                  />
+                )}
+
+                {appMode === 'purchase_orders' && (
+                  <PurchaseOrderHub 
+                    currentUser={currentUser}
+                    announce={announce}
+                  />
+                )}
+
                 {appMode === 'employee' && view === 'dashboard' && (
                   <ClockingTerminal 
                     employees={employees}
@@ -1877,6 +1933,7 @@ TS Joinery Kanban System`
                             </div>
                             <div className="flex items-center gap-2 mt-6 pt-4 border-t border-white/5">
                               <button onClick={() => openCardEditor(card)} className="flex-1 py-3 bg-white/5 hover:bg-white/10 rounded-xl text-xs font-bold uppercase text-gray-300">Edit</button>
+                              <button onClick={() => handleDuplicateCard(card)} className="flex-1 py-3 bg-purple-600/10 hover:bg-purple-600/20 border border-purple-500/20 rounded-xl text-xs font-bold uppercase text-purple-400 transition-colors">Duplicate</button>
                               <button onClick={() => handlePrintKanban(card)} className="flex-1 py-3 bg-blue-600/10 hover:bg-blue-600/20 rounded-xl text-xs font-bold uppercase text-blue-400 transition-colors">Print</button>
                               <button onClick={async () => {
                                 if (confirm('Are you sure you want to remove this Kanban Card?')) {
@@ -1904,6 +1961,7 @@ TS Joinery Kanban System`
                   <OrderManagement 
                     isCloudLive={isCloudLive}
                     canManageOrders={canManageOrders}
+                    currentUser={currentUser}
                     announce={announce}
                   />
                 )}
@@ -2473,6 +2531,23 @@ TS Joinery Kanban System`
                 
                 {/* Column 1: Template selection & description & codes */}
                 <div className="space-y-4">
+                  <div>
+                    <label className="text-[10px] font-black uppercase text-gray-400 tracking-wider flex items-center gap-1">
+                      Kanban Number
+                    </label>
+                    <input
+                      type="text"
+                      readOnly
+                      disabled
+                      tabIndex={-1}
+                      value={cardForm.cardData.kanbanId || 'KAN-000001'}
+                      className="w-full bg-black/60 border border-white/10 rounded-2xl p-4 text-purple-400 font-mono mt-1 font-bold select-none cursor-not-allowed uppercase"
+                    />
+                    <p className="text-[8px] font-mono text-gray-500 flex items-center gap-1 mt-1">
+                      🔒 Automatically Generated by the Global ID Service
+                    </p>
+                  </div>
+
                   <div>
                     <label className="text-[10px] font-black uppercase text-gray-400 tracking-wider flex items-center gap-1">
                       Select Kanban Template <span className="text-red-500">*</span>

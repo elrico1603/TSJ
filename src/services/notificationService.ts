@@ -243,6 +243,39 @@ export const notificationService = {
     }
   },
 
+  async dismissStockRequestNotification(requestNumber: string): Promise<void> {
+    const current = this.getLocalNotifications();
+    const matched = current.filter(n => 
+      n.category === 'stock_order' && 
+      (n.title.includes(requestNumber) || (n.description && n.description.includes(requestNumber)))
+    );
+
+    const remaining = current.filter(n => !(
+      n.category === 'stock_order' && 
+      (n.title.includes(requestNumber) || (n.description && n.description.includes(requestNumber)))
+    ));
+
+    this.saveLocalNotifications(remaining);
+    notifyListeners(remaining);
+
+    if (db && APP_ID_PATH) {
+      try {
+        for (const notif of matched) {
+          await db
+            .collection('artifacts')
+            .doc(APP_ID_PATH)
+            .collection('public')
+            .doc('notifications')
+            .collection('items')
+            .doc(notif.id)
+            .delete();
+        }
+      } catch (e) {
+        console.warn('Firebase dismiss stock request notification failed:', e);
+      }
+    }
+  },
+
   subscribeNotifications(callback: (notifications: GlobalNotification[]) => void) {
     listeners.add(callback);
     // Return initial local state first

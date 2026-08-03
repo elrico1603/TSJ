@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Rnd } from 'react-rnd';
 import { Icon } from '../components/Icon';
 import { 
@@ -11,12 +11,13 @@ import {
   TextCustomizationSettings
 } from '../services/templateService';
 import { applyTextSettings, AVAILABLE_FONTS, SECTION_TEXT_ELEMENTS } from '../utils/textStyleHelper';
-import { KanbanCardMaster, getKanbanCards, getKanbanMailtoQRCodeUrl } from '../services/kanbanService';
-import { MasterInformation as MasterInfoType } from '../types';
+import { KanbanCardMaster, getKanbanMailtoQRCodeUrl, generateNextKanbanNumber } from '../services/kanbanService';
+import { productMasterService } from '../services/productMasterService';
+import { MasterInformation as MasterInfoType, ProductMaster } from '../types';
 import { MasterInformation } from '../components/MasterInformation';
 import { KanbanPulled } from '../components/KanbanPulled';
 import { WarehouseIdentification } from '../components/WarehouseIdentification';
-import { WarehouseDisplay } from '../components/WarehouseDisplay';
+import { renderSectionContent as renderSharedSectionContent } from '../components/KanbanCardCanvas';
 import { QRCodeRenderer } from '../components/QRCodeRenderer';
 
 interface KanbanDesignerProps {
@@ -25,46 +26,6 @@ interface KanbanDesignerProps {
   onPrintPreview: (template: KanbanTemplateV2, sampleCard: KanbanCardMaster) => void;
 }
 
-// Sample product card data for preview purposes when no database cards are available
-const FALLBACK_SAMPLE_CARDS: KanbanCardMaster[] = [
-  {
-    kanbanId: 'KAN-000001',
-    productDescription: 'SOLID OAK CORNICE - OGEE PROFILE 3000MM',
-    imageUrl: 'https://images.unsplash.com/photo-1533090161767-e6ffed986c88?auto=format&fit=crop&q=80&w=200',
-    supplierPartNumber: 'OAK-CORN-01',
-    supplierName: 'Sovereign Timber Ltd',
-    orderQuantity: '50 PCS',
-    binQuantity: '2 Bins (25/Bin)',
-    deliveryTime: '3 Days',
-    location: { letter: 'A', number: '12', colour: 'GREEN' },
-    qrCodeUrl: '',
-    activeTemplateId: '',
-    createdDate: new Date().toISOString(),
-    createdBy: 'System Seed',
-    lastModifiedDate: new Date().toISOString(),
-    lastModifiedBy: 'System Seed',
-    status: 'ACTIVE'
-  },
-  {
-    kanbanId: 'KAN-000002',
-    productDescription: 'BRASS HINGES 75MM - heavy duty cabinet fitting',
-    imageUrl: 'https://images.unsplash.com/photo-1581092160607-ee22621dd758?auto=format&fit=crop&q=80&w=200',
-    supplierPartNumber: 'BR-HINGE-75',
-    supplierName: 'Häfele South Africa',
-    orderQuantity: '200 UNITS',
-    binQuantity: '1 Bin',
-    deliveryTime: 'Next Day',
-    location: { letter: 'B', number: '04', colour: 'BLUE' },
-    qrCodeUrl: '',
-    activeTemplateId: '',
-    createdDate: new Date().toISOString(),
-    createdBy: 'System Seed',
-    lastModifiedDate: new Date().toISOString(),
-    lastModifiedBy: 'System Seed',
-    status: 'ACTIVE'
-  }
-];
-
 export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
   currentUser,
   announce,
@@ -72,32 +33,197 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
 }) => {
   const [templates, setTemplates] = useState<KanbanTemplateV2[]>([]);
   const [activeTemplate, setActiveTemplate] = useState<KanbanTemplateV2 | null>(null);
-  const [cardsList, setCardsList] = useState<KanbanCardMaster[]>([]);
-  const [selectedCard, setSelectedCard] = useState<KanbanCardMaster>(FALLBACK_SAMPLE_CARDS[0]);
+  const [productMasters, setProductMasters] = useState<ProductMaster[]>([]);
+  const [selectedProductMaster, setSelectedProductMaster] = useState<ProductMaster | null>(null);
   const [activeSectionId, setActiveSectionId] = useState<string>('master_info');
   const [loading, setLoading] = useState<boolean>(true);
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
 
-  // Unified Master Information single source of truth state
-  const [masterInfo, setMasterInfo] = useState<MasterInfoType>({
-    productName: '',
-    supplier: '',
-    supplierPartNumber: '',
-    orderQuantity: '',
-    deliveryTime: '',
-    location: '',
-    locationColour: 'GREEN',
-    internalProductNumber: '',
-    productImage: '',
-    qrCode: '',
-    templateName: '',
-    templateType: 'A4',
-    binQuantity: ''
-  });
-
-  // Right sidebar panel double tabs
+  // Right sidebar panel triple tabs
   const [rightActiveTab, setRightActiveTab] = useState<'master' | 'layout' | 'typography'>('master');
   const [selectedTextElementId, setSelectedTextElementId] = useState<string>('');
+
+  const [customMasterInfo, setCustomMasterInfo] = useState<Partial<MasterInfoType>>({});
+  const [autoKanbanId, setAutoKanbanId] = useState<string>(() => generateNextKanbanNumber());
+
+  const handleUpdateMasterInfo = (key: keyof MasterInfoType, value: any) => {
+    setCustomMasterInfo(prev => ({ ...prev, [key]: value }));
+    if (key === 'templateName' && activeTemplate) {
+      setActiveTemplate(prev => prev ? ({ ...prev, templateName: value }) : null);
+    }
+    if (key === 'templateType' && activeTemplate) {
+      setActiveTemplate(prev => prev ? ({ ...prev, paperSize: value as any }) : null);
+    }
+  };
+
+  const handleImageUpload = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const result = e.target?.result as string;
+      if (result) {
+        handleUpdateMasterInfo('productImage', result);
+        announce('Uploaded product image successfully.');
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleApplyCrop = () => {
+    if (!cropImageSrc || !cropCanvasRef.current) return;
+    const canvas = cropCanvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      canvas.width = 300;
+      canvas.height = 300;
+      ctx.clearRect(0, 0, 300, 300);
+      ctx.save();
+      ctx.translate(150 + cropPanX, 150 + cropPanY);
+      ctx.rotate((cropRotation * Math.PI) / 180);
+      ctx.scale(cropZoom, cropZoom);
+      ctx.drawImage(img, -img.width / 2, -img.height / 2);
+      ctx.restore();
+
+      const croppedDataUrl = canvas.toDataURL('image/png');
+      handleUpdateMasterInfo('productImage', croppedDataUrl);
+      setIsCropModalOpen(false);
+      announce('Applied cropped image to master product specification.');
+    };
+    img.src = cropImageSrc;
+  };
+
+  // Unified Master Information single source of truth state derived from selected Product Master or default internal placeholders
+  const masterInfo: MasterInfoType = useMemo(() => {
+    let base: MasterInfoType;
+    const currentKanbanId = customMasterInfo.internalProductNumber || 
+      (selectedProductMaster ? (selectedProductMaster.internalProductCode || selectedProductMaster.id) : autoKanbanId);
+
+    if (selectedProductMaster) {
+      const locStr = selectedProductMaster.location || 'A-01-B-01';
+      const qtyStr = selectedProductMaster.orderQuantity 
+        ? `${selectedProductMaster.orderQuantity} ${selectedProductMaster.unit || ''}`.trim() 
+        : '100';
+      const binStr = selectedProductMaster.minimumStock 
+        ? `${selectedProductMaster.minimumStock} Min` 
+        : '100';
+
+      const qrUrl = getKanbanMailtoQRCodeUrl({
+        internalProductNumber: currentKanbanId,
+        productName: selectedProductMaster.productName,
+        supplierPartNumber: selectedProductMaster.supplierPartNumber || 'ABC-123',
+        supplier: selectedProductMaster.supplier || 'Sample Supplier',
+        orderQuantity: qtyStr,
+        binQuantity: binStr,
+        location: locStr,
+        deliveryTime: selectedProductMaster.deliveryTime || '3 Days'
+      });
+
+      base = {
+        productName: selectedProductMaster.productName,
+        supplier: selectedProductMaster.supplier || 'Sample Supplier',
+        supplierPartNumber: selectedProductMaster.supplierPartNumber || 'ABC-123',
+        orderQuantity: qtyStr,
+        deliveryTime: selectedProductMaster.deliveryTime || '3 Days',
+        location: locStr,
+        locationColour: selectedProductMaster.locationColour || 'GREEN',
+        internalProductNumber: currentKanbanId,
+        productImage: selectedProductMaster.productImage || '',
+        qrCode: qrUrl,
+        templateName: activeTemplate?.templateName || '',
+        templateType: activeTemplate?.paperSize || 'A4',
+        binQuantity: binStr,
+        cardColour: selectedProductMaster.cardColour || '#ffffff',
+        status: selectedProductMaster.status === 'Active' ? 'ACTIVE' : 'INACTIVE'
+      };
+    } else {
+      const locStr = 'A-01-B-01';
+      const qrUrl = getKanbanMailtoQRCodeUrl({
+        internalProductNumber: currentKanbanId,
+        productName: 'Sample Product',
+        supplierPartNumber: 'ABC-123',
+        supplier: 'Sample Supplier',
+        orderQuantity: '100',
+        binQuantity: '100',
+        location: locStr,
+        deliveryTime: '3 Days'
+      });
+
+      base = {
+        productName: 'Sample Product',
+        supplier: 'Sample Supplier',
+        supplierPartNumber: 'ABC-123',
+        orderQuantity: '100',
+        deliveryTime: '3 Days',
+        location: locStr,
+        locationColour: 'GREEN',
+        internalProductNumber: currentKanbanId,
+        productImage: 'https://images.unsplash.com/photo-1533090161767-e6ffed986c88?auto=format&fit=crop&q=80&w=200',
+        qrCode: qrUrl,
+        templateName: activeTemplate?.templateName || '',
+        templateType: activeTemplate?.paperSize || 'A4',
+        binQuantity: '100',
+        cardColour: '#ffffff',
+        status: 'ACTIVE'
+      };
+    }
+
+    const merged = { ...base, ...customMasterInfo };
+    const finalKanbanId = merged.internalProductNumber || currentKanbanId;
+
+    const currentQr = getKanbanMailtoQRCodeUrl({
+      internalProductNumber: finalKanbanId,
+      productName: merged.productName || 'Sample Product',
+      supplierPartNumber: merged.supplierPartNumber || 'ABC-123',
+      supplier: merged.supplier || 'Sample Supplier',
+      orderQuantity: merged.orderQuantity || '100',
+      binQuantity: merged.binQuantity || '100',
+      location: merged.location || 'A-01-B-01',
+      deliveryTime: merged.deliveryTime || '3 Days'
+    });
+
+    return { ...merged, internalProductNumber: finalKanbanId, qrCode: currentQr };
+  }, [selectedProductMaster, activeTemplate?.templateName, activeTemplate?.paperSize, customMasterInfo, autoKanbanId]);
+
+  const selectedCard: KanbanCardMaster = useMemo(() => {
+    let letter = 'A';
+    let number = '01-B-01';
+    if (masterInfo.location) {
+      const parts = masterInfo.location.split('-');
+      if (parts.length > 1) {
+        letter = parts[0];
+        number = parts.slice(1).join('-');
+      } else {
+        letter = masterInfo.location.charAt(0);
+        number = masterInfo.location.substring(1);
+      }
+    }
+
+    return {
+      kanbanId: masterInfo.internalProductNumber,
+      productDescription: masterInfo.productName,
+      imageUrl: masterInfo.productImage || '',
+      supplierPartNumber: masterInfo.supplierPartNumber,
+      supplierName: masterInfo.supplier,
+      orderQuantity: masterInfo.orderQuantity,
+      binQuantity: masterInfo.binQuantity || '100',
+      deliveryTime: masterInfo.deliveryTime,
+      location: {
+        letter,
+        number,
+        colour: masterInfo.locationColour || 'GREEN'
+      },
+      qrCodeUrl: masterInfo.qrCode || '',
+      activeTemplateId: activeTemplate?.id || '',
+      createdDate: new Date().toISOString(),
+      createdBy: 'System',
+      lastModifiedDate: new Date().toISOString(),
+      lastModifiedBy: 'System',
+      status: 'ACTIVE'
+    };
+  }, [masterInfo, activeTemplate?.id]);
 
   // Sliders-based image cropping and preview overlay state variables
   const [isCropModalOpen, setIsCropModalOpen] = useState(false);
@@ -239,160 +365,7 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
     setIsPanning(false);
   };
 
-  // Synchronize masterInfo from selectedCard and template layout modifications
-  useEffect(() => {
-    if (selectedCard) {
-      const locStr = `${selectedCard.location?.letter || ''}${selectedCard.location?.number || ''}`.trim();
-      const qrUrl = getKanbanMailtoQRCodeUrl({
-        internalProductNumber: selectedCard.kanbanId || '',
-        productName: selectedCard.productDescription || '',
-        supplierPartNumber: selectedCard.supplierPartNumber || '',
-        supplier: selectedCard.supplierName || '',
-        orderQuantity: selectedCard.orderQuantity || '',
-        binQuantity: selectedCard.binQuantity || '1 Bin',
-        location: locStr,
-        deliveryTime: selectedCard.deliveryTime || 'N/A'
-      });
-
-      setMasterInfo({
-        productName: selectedCard.productName || selectedCard.productDescription || '',
-        supplier: selectedCard.supplierName || '',
-        supplierPartNumber: selectedCard.supplierPartNumber || '',
-        orderQuantity: selectedCard.orderQuantity || '',
-        deliveryTime: selectedCard.deliveryTime || '',
-        location: locStr,
-        locationColour: selectedCard.location?.colour || 'GREEN',
-        internalProductNumber: selectedCard.kanbanId || '',
-        productImage: selectedCard.imageUrl || '',
-        qrCode: qrUrl,
-        templateName: activeTemplate?.templateName || '',
-        templateType: activeTemplate?.paperSize || 'A4',
-        binQuantity: selectedCard.binQuantity || '',
-        cardColour: selectedCard.cardColour || '#ffffff',
-        status: selectedCard.status || 'ACTIVE'
-      });
-    }
-  }, [selectedCard, activeTemplate?.templateName, activeTemplate?.paperSize]);
-
-  // Master Information editor state updates with real-time propagation
-  const handleUpdateMasterInfo = (field: keyof MasterInfoType, value: any) => {
-    setMasterInfo(prev => {
-      const updated = { ...prev, [field]: value };
-
-      // Re-generate QR Code content and URL based on requirements
-      const locStr = updated.location || '';
-      const qrUrl = getKanbanMailtoQRCodeUrl({
-        internalProductNumber: updated.internalProductNumber || '',
-        productName: updated.productName || '',
-        supplierPartNumber: updated.supplierPartNumber || '',
-        supplier: updated.supplier || '',
-        orderQuantity: updated.orderQuantity || '',
-        binQuantity: updated.binQuantity || '1 Bin',
-        location: locStr,
-        deliveryTime: updated.deliveryTime || 'N/A'
-      });
-
-      updated.qrCode = qrUrl;
-
-      // Sync master information updates backward to selectedCard representation
-      setSelectedCard(card => {
-        let letter = '';
-        let number = '';
-        if (locStr) {
-          const match = locStr.match(/^([A-Za-z]+)?(\d+)?$/);
-          if (match) {
-            letter = match[1] || '';
-            number = match[2] || '';
-          } else {
-            letter = locStr.charAt(0);
-            number = locStr.substring(1);
-          }
-        }
-
-        return {
-          ...card,
-          productDescription: updated.productName,
-          supplierName: updated.supplier,
-          supplierPartNumber: updated.supplierPartNumber,
-          orderQuantity: updated.orderQuantity,
-          deliveryTime: updated.deliveryTime,
-          kanbanId: updated.internalProductNumber,
-          imageUrl: updated.productImage,
-          binQuantity: updated.binQuantity || '',
-          location: {
-            letter,
-            number,
-            colour: updated.locationColour
-          },
-          qrCodeUrl: updated.qrCode
-        };
-      });
-
-      // Synchronize changes to Template configuration variables
-      if (field === 'templateName' && activeTemplate) {
-        setActiveTemplate(tpl => tpl ? { ...tpl, templateName: value } : null);
-      }
-      if (field === 'templateType' && activeTemplate) {
-        setActiveTemplate(tpl => tpl ? { ...tpl, paperSize: value as any } : null);
-      }
-
-      return updated;
-    });
-  };
-
-  // Image upload handler to convert file into base64 url
-  const handleImageUpload = (file: File) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      handleUpdateMasterInfo('productImage', reader.result as string);
-      announce('Product image uploaded successfully.');
-    };
-    reader.readAsDataURL(file);
-  };
-
-  // Interactive Client-Side canvas cropping engine
-  const handleApplyCrop = () => {
-    const canvas = cropCanvasRef.current;
-    if (!canvas || !cropImageSrc) return;
-
-    const img = new Image();
-    img.src = cropImageSrc;
-    img.onload = () => {
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-
-      // Reset the crop canvas context before drawing
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.save();
-
-      // Translate context origin to center of the crop bounds target frame
-      ctx.translate(canvas.width / 2, canvas.height / 2);
-      ctx.rotate((cropRotation * Math.PI) / 180);
-      ctx.scale(cropZoom, cropZoom);
-
-      // Draw the original image applying offsets adjusted to scale boundaries
-      const drawWidth = canvas.width;
-      const drawHeight = (img.height / img.width) * drawWidth;
-      
-      ctx.drawImage(
-        img,
-        -drawWidth / 2 + cropPanX,
-        -drawHeight / 2 + cropPanY,
-        drawWidth,
-        drawHeight
-      );
-
-      ctx.restore();
-
-      // Export cropped target frame image back as data URL
-      const croppedBase64 = canvas.toDataURL('image/jpeg', 0.9);
-      handleUpdateMasterInfo('productImage', croppedBase64);
-      setIsCropModalOpen(false);
-      announce('Product image cropped and updated.');
-    };
-  };
-
-  // Load templates and product cards on component mount
+  // Load templates and product masters on component mount
   useEffect(() => {
     loadData();
   }, []);
@@ -400,23 +373,15 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
   const loadData = async () => {
     try {
       setLoading(true);
-      const [fetchedTemplates, fetchedCards] = await Promise.all([
+      const [fetchedTemplates, fetchedProducts] = await Promise.all([
         getTemplates(),
-        getKanbanCards()
+        productMasterService.getProducts()
       ]);
       setTemplates(fetchedTemplates);
-      if (fetchedCards && fetchedCards.length > 0) {
-        setCardsList(fetchedCards);
-        setSelectedCard(fetchedCards[0]);
-      } else {
-        setCardsList(FALLBACK_SAMPLE_CARDS);
-        setSelectedCard(FALLBACK_SAMPLE_CARDS[0]);
-      }
+      setProductMasters(fetchedProducts || []);
     } catch (error) {
       console.error('Failed to load designer context:', error);
-      announce('Failed to load database. Loading mock fallback context.');
-      setCardsList(FALLBACK_SAMPLE_CARDS);
-      setSelectedCard(FALLBACK_SAMPLE_CARDS[0]);
+      announce('Failed to load database. Loading default layout context.');
     } finally {
       setLoading(false);
     }
@@ -452,6 +417,11 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
     const newTpl = createDefaultTemplateBlueprint(defaultName, blueprintType);
     newTpl.meta.createdBy = currentUser?.email || currentUser?.uid || 'elrico@tsjoinery.co.za';
     newTpl.meta.lastModifiedBy = currentUser?.email || currentUser?.uid || 'elrico@tsjoinery.co.za';
+
+    const nextKanbanId = generateNextKanbanNumber();
+    setAutoKanbanId(nextKanbanId);
+    setCustomMasterInfo(prev => ({ ...prev, internalProductNumber: nextKanbanId }));
+
     setActiveTemplate(newTpl);
     if (newTpl.sections.length > 0) {
       setActiveSectionId(newTpl.sections[0].id);
@@ -532,6 +502,10 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
     }
 
     try {
+      const nextKanbanId = generateNextKanbanNumber();
+      setAutoKanbanId(nextKanbanId);
+      setCustomMasterInfo(prev => ({ ...prev, internalProductNumber: nextKanbanId }));
+
       const newTemplateName = `${duplicateProductName.trim().toUpperCase()} TEMPLATE`;
       const duplicate: KanbanTemplateV2 = {
         ...JSON.parse(JSON.stringify(activeTemplate)),
@@ -659,84 +633,11 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
 
   // Renders the actual preview card inside the designer viewport canvas
   const renderSectionContent = (sec: KanbanSectionConfig) => {
-    const scaleFactorFont = sec.height / 60; // relative scale
-    switch (sec.id) {
-      case 'master_info':
-        return (
-          <MasterInformation
-            masterInfo={masterInfo}
-            borderWidth={sec.borderWidth}
-            borderStyle={sec.borderStyle}
-            borderColor={sec.borderColor}
-            backgroundColor={sec.backgroundColor}
-            cornerRadius={sec.cornerRadius}
-            padding={sec.padding}
-            fontSizeScale={scaleFactorFont}
-            width={sec.width}
-            height={sec.height}
-            textSettings={sec.textSettings}
-          />
-        );
-      case 'kanban_pulled':
-        return (
-          <KanbanPulled
-            masterInfo={masterInfo}
-            cardData={selectedCard}
-            binQuantity={selectedCard?.binQuantity}
-            onBinQuantityChange={(val) => {
-              setSelectedCard(prev => prev ? { ...prev, binQuantity: val } : null);
-            }}
-            borderWidth={sec.borderWidth}
-            borderStyle={sec.borderStyle}
-            borderColor={sec.borderColor}
-            backgroundColor={sec.backgroundColor}
-            cornerRadius={sec.cornerRadius}
-            padding={sec.padding}
-            fontSizeScale={scaleFactorFont}
-            width={sec.width}
-            height={sec.height}
-            textSettings={sec.textSettings}
-          />
-        );
-      case 'warehouse_id':
-        return (
-          <WarehouseIdentification
-            masterInfo={masterInfo}
-            borderWidth={sec.borderWidth}
-            borderStyle={sec.borderStyle}
-            borderColor={sec.borderColor}
-            backgroundColor={sec.backgroundColor}
-            cornerRadius={sec.cornerRadius}
-            padding={sec.padding}
-            fontSizeScale={scaleFactorFont}
-            width={sec.width}
-            height={sec.height}
-            textSettings={sec.textSettings}
-          />
-        );
-      case 'warehouse_display':
-        return (
-          <WarehouseDisplay
-            masterInfo={masterInfo}
-            borderWidth={sec.borderWidth}
-            borderStyle={sec.borderStyle}
-            borderColor={sec.borderColor}
-            backgroundColor={sec.backgroundColor}
-            cornerRadius={sec.cornerRadius}
-            padding={sec.padding}
-            fontSizeScale={scaleFactorFont}
-            width={sec.width}
-            height={sec.height}
-            textSettings={sec.textSettings}
-          />
-        );
-      default:
-        return (
-          <div className="w-full h-full flex items-center justify-center text-xs text-neutral-400 italic">
-            Unknown Section
-          </div>
-        );
-    }
+    return renderSharedSectionContent(sec, masterInfo, selectedCard) || (
+      <div className="w-full h-full flex items-center justify-center text-xs text-neutral-400 italic">
+        Unknown Section
+      </div>
+    );
   };
 
   const activeSection = activeTemplate?.sections.find(s => s.id === activeSectionId);
@@ -999,20 +900,21 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
                 />
               </div>
 
-              {/* Sample test card data selector */}
+              {/* Product Master Preview Selector */}
               <div className="flex items-center gap-2">
-                <span className="text-[10px] font-black uppercase tracking-wider text-gray-500">Sample Card Data:</span>
+                <span className="text-[10px] font-black uppercase tracking-wider text-gray-500">Product Master:</span>
                 <select
-                  value={selectedCard.kanbanId}
+                  value={selectedProductMaster?.id || ''}
                   onChange={(e) => {
-                    const matched = cardsList.find(c => c.kanbanId === e.target.value);
-                    if (matched) setSelectedCard(matched);
+                    const matched = productMasters.find(p => p.id === e.target.value);
+                    setSelectedProductMaster(matched || null);
                   }}
                   className="bg-black text-white border border-white/15 px-3 py-1.5 rounded-xl text-xs font-bold uppercase focus:outline-none"
                 >
-                  {cardsList.map(c => (
-                    <option key={c.kanbanId} value={c.kanbanId}>
-                      {c.kanbanId} - {c.productDescription.substring(0, 20)}...
+                  <option value="">Default (Internal Placeholders)</option>
+                  {productMasters.map(pm => (
+                    <option key={pm.id} value={pm.id}>
+                      {pm.internalProductCode || pm.id} - {pm.productName}
                     </option>
                   ))}
                 </select>
@@ -1358,14 +1260,18 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
                     <span className="text-[9px] font-black uppercase tracking-wider text-gray-400 block">Product Identification</span>
 
                     <div className="space-y-1.5">
-                      <label className="text-[9px] text-gray-500 font-extrabold uppercase">Internal Product Number (Kanban ID)</label>
+                      <label className="text-[9px] text-gray-500 font-extrabold uppercase">Kanban Number</label>
                       <input
                         type="text"
-                        value={masterInfo.internalProductNumber}
-                        onChange={(e) => handleUpdateMasterInfo('internalProductNumber', e.target.value.toUpperCase())}
-                        placeholder="e.g. KAN-000001"
-                        className="w-full bg-black border border-white/10 px-3 py-2 rounded-xl text-white text-xs font-mono focus:outline-none focus:border-purple-500 uppercase"
+                        value={masterInfo.internalProductNumber || 'KAN-000001'}
+                        readOnly
+                        disabled
+                        tabIndex={-1}
+                        className="w-full bg-black/60 border border-white/10 px-3 py-2 rounded-xl text-purple-400 text-xs font-mono select-none cursor-not-allowed uppercase font-bold"
                       />
+                      <p className="text-[8px] font-mono text-gray-500 flex items-center gap-1 mt-1">
+                        🔒 Automatically Generated by the Global ID Service
+                      </p>
                     </div>
 
                     <div className="space-y-1.5">
@@ -2390,7 +2296,136 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
         </div>
       </div>
 
-      {/* 4. MODAL: FULL RESOLUTION IMAGE PREVIEW OVERLAY */}
+      {/* 4. MODAL: IMAGE CROPPING TOOL MODAL */}
+      {isCropModalOpen && cropImageSrc && (
+        <div className="fixed inset-0 z-[1550] bg-black/95 flex items-center justify-center p-6 animate-in fade-in">
+          <div className="relative bg-[#121212] border border-white/10 rounded-[2.5rem] p-6 max-w-xl w-full flex flex-col items-center gap-5 font-sans">
+            <button
+              onClick={() => setIsCropModalOpen(false)}
+              className="absolute top-6 right-6 p-2 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white rounded-full transition-colors"
+            >
+              <Icon name="x" size={18} />
+            </button>
+            
+            <div className="text-center space-y-1">
+              <h3 className="text-sm font-black uppercase tracking-widest text-purple-400 flex items-center justify-center gap-2">
+                <Icon name="crop" size={16} /> Interactive Image Crop & Align
+              </h3>
+              <p className="text-[10px] text-gray-500 uppercase tracking-wide">
+                Adjust zoom scale, rotation angle, and pan offset before committing to canvas
+              </p>
+            </div>
+
+            {/* Hidden canvas for performing crop rendering */}
+            <canvas ref={cropCanvasRef} className="hidden" />
+
+            {/* Viewport preview box */}
+            <div className="w-[300px] h-[300px] bg-black rounded-2xl border-2 border-dashed border-purple-500/40 relative overflow-hidden flex items-center justify-center shrink-0">
+              <div
+                style={{
+                  transform: `translate(${cropPanX}px, ${cropPanY}px) rotate(${cropRotation}deg) scale(${cropZoom})`,
+                  transition: 'transform 0.05s ease-out'
+                }}
+                className="w-full h-full flex items-center justify-center"
+              >
+                <img
+                  src={cropImageSrc}
+                  alt="Crop preview target"
+                  className="max-w-full max-h-full object-contain pointer-events-none"
+                  referrerPolicy="no-referrer"
+                />
+              </div>
+            </div>
+
+            {/* Sliders Controls */}
+            <div className="w-full space-y-3 bg-black/40 p-4 rounded-2xl border border-white/5 text-xs">
+              <div className="space-y-1">
+                <div className="flex justify-between text-[9px] font-black uppercase tracking-wider text-gray-400">
+                  <span>Zoom Scale</span>
+                  <span className="font-mono text-purple-400">{cropZoom.toFixed(2)}x</span>
+                </div>
+                <input
+                  type="range"
+                  min="0.5"
+                  max="3"
+                  step="0.05"
+                  value={cropZoom}
+                  onChange={(e) => setCropZoom(parseFloat(e.target.value))}
+                  className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <div className="flex justify-between text-[9px] font-black uppercase tracking-wider text-gray-400">
+                    <span>Pan X</span>
+                    <span className="font-mono text-purple-400">{cropPanX}px</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="-150"
+                    max="150"
+                    step="1"
+                    value={cropPanX}
+                    onChange={(e) => setCropPanX(parseInt(e.target.value, 10))}
+                    className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <div className="flex justify-between text-[9px] font-black uppercase tracking-wider text-gray-400">
+                    <span>Pan Y</span>
+                    <span className="font-mono text-purple-400">{cropPanY}px</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="-150"
+                    max="150"
+                    step="1"
+                    value={cropPanY}
+                    onChange={(e) => setCropPanY(parseInt(e.target.value, 10))}
+                    className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <div className="flex justify-between text-[9px] font-black uppercase tracking-wider text-gray-400">
+                  <span>Rotation</span>
+                  <span className="font-mono text-purple-400">{cropRotation}°</span>
+                </div>
+                <input
+                  type="range"
+                  min="-180"
+                  max="180"
+                  step="1"
+                  value={cropRotation}
+                  onChange={(e) => setCropRotation(parseInt(e.target.value, 10))}
+                  className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-3 w-full">
+              <button
+                type="button"
+                onClick={() => setIsCropModalOpen(false)}
+                className="flex-1 py-2.5 bg-white/5 hover:bg-white/10 rounded-xl text-xs font-black uppercase tracking-widest text-gray-400 hover:text-white transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleApplyCrop}
+                className="flex-1 py-2.5 bg-purple-600 hover:bg-purple-500 rounded-xl text-xs font-black uppercase tracking-widest text-white transition-all shadow-lg shadow-purple-500/20"
+              >
+                Apply Crop
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 5. MODAL: FULL RESOLUTION IMAGE PREVIEW OVERLAY */}
       {isPreviewModalOpen && masterInfo.productImage && (
         <div className="fixed inset-0 z-[1500] bg-black/95 flex items-center justify-center p-6 animate-in fade-in">
           <div className="relative bg-[#121212] border border-white/10 rounded-[2.5rem] p-6 max-w-2xl w-full flex flex-col items-center gap-6 font-sans">
@@ -2412,164 +2447,6 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
             <p className="text-[10px] text-gray-400 uppercase font-bold text-center">
               {masterInfo.productName || 'No Product Name Specified'}
             </p>
-          </div>
-        </div>
-      )}
-
-      {/* 5. MODAL: FINE-TUNED SLIDERS-BASED IMAGE CROPPING ENGINE */}
-      {isCropModalOpen && cropImageSrc && (
-        <div className="fixed inset-0 z-[1500] bg-black/95 flex items-center justify-center p-6 animate-in fade-in">
-          <div className="bg-[#121212] border border-white/10 rounded-[3rem] p-8 max-w-3xl w-full flex flex-col md:grid md:grid-cols-[1fr_280px] gap-8 shadow-2xl relative font-sans">
-            <button
-              onClick={() => setIsCropModalOpen(false)}
-              className="absolute top-6 right-6 p-3 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white rounded-full transition-colors"
-            >
-              <Icon name="x" size={20} />
-            </button>
-
-            {/* Left Frame: Image Canvas Zoom/Pan Crop Boundary Box */}
-            <div className="flex flex-col items-center justify-center gap-4">
-              <h3 className="text-sm font-black uppercase tracking-widest text-white self-start flex items-center gap-2">
-                ✂️ Crop Product Image
-              </h3>
-              
-              <div className="relative w-64 h-64 border border-white/15 rounded-2xl bg-neutral-950 overflow-hidden shadow-inner flex items-center justify-center">
-                {/* Visual crop border target mask */}
-                <div className="absolute inset-0 border-4 border-black/60 pointer-events-none z-10">
-                  <div className="w-full h-full border-2 border-dashed border-[#ff8c00] opacity-80" />
-                </div>
-                
-                {/* Live Visual transform representation of cropped section */}
-                <img
-                  src={cropImageSrc}
-                  alt="Cropping target"
-                  style={{
-                    transform: `translate(${cropPanX}px, ${cropPanY}px) scale(${cropZoom}) rotate(${cropRotation}deg)`,
-                    maxWidth: '100%',
-                    maxHeight: '100%',
-                    transition: 'none'
-                  }}
-                  className="object-contain pointer-events-none select-none"
-                  referrerPolicy="no-referrer"
-                />
-              </div>
-
-              <span className="text-[9px] text-gray-500 uppercase font-black tracking-widest text-center max-w-[240px]">
-                Preview bounds show the cropped area. Sliders calibrate positioning parameters.
-              </span>
-            </div>
-
-            {/* Right Frame: Slider calibration knobs */}
-            <div className="flex flex-col justify-between space-y-6 pt-4 border-t md:border-t-0 md:border-l border-white/5 md:pl-6">
-              <div className="space-y-4">
-                <span className="text-[10px] font-black uppercase tracking-wider text-[#ff8c00] block">Calibration Knobs</span>
-
-                {/* Zoom Knob */}
-                <div className="space-y-1.5">
-                  <div className="flex justify-between text-[10px] font-bold text-gray-400">
-                    <span>ZOOM</span>
-                    <span className="font-mono text-purple-400">{cropZoom.toFixed(2)}x</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="1"
-                    max="4"
-                    step="0.05"
-                    value={cropZoom}
-                    onChange={(e) => setCropZoom(parseFloat(e.target.value))}
-                    className="w-full h-1 bg-neutral-800 rounded appearance-none cursor-pointer accent-purple-500"
-                  />
-                </div>
-
-                {/* Pan X Knob */}
-                <div className="space-y-1.5">
-                  <div className="flex justify-between text-[10px] font-bold text-gray-400">
-                    <span>POSITION X</span>
-                    <span className="font-mono text-purple-400">{cropPanX}px</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="-150"
-                    max="150"
-                    step="1"
-                    value={cropPanX}
-                    onChange={(e) => setCropPanX(parseInt(e.target.value, 10))}
-                    className="w-full h-1 bg-neutral-800 rounded appearance-none cursor-pointer accent-purple-500"
-                  />
-                </div>
-
-                {/* Pan Y Knob */}
-                <div className="space-y-1.5">
-                  <div className="flex justify-between text-[10px] font-bold text-gray-400">
-                    <span>POSITION Y</span>
-                    <span className="font-mono text-purple-400">{cropPanY}px</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="-150"
-                    max="150"
-                    step="1"
-                    value={cropPanY}
-                    onChange={(e) => setCropPanY(parseInt(e.target.value, 10))}
-                    className="w-full h-1 bg-neutral-800 rounded appearance-none cursor-pointer accent-purple-500"
-                  />
-                </div>
-
-                {/* Rotation Knob */}
-                <div className="space-y-1.5">
-                  <div className="flex justify-between text-[10px] font-bold text-gray-400">
-                    <span>ROTATION</span>
-                    <span className="font-mono text-purple-400">{cropRotation}°</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="360"
-                    step="1"
-                    value={cropRotation}
-                    onChange={(e) => setCropRotation(parseInt(e.target.value, 10))}
-                    className="w-full h-1 bg-neutral-800 rounded appearance-none cursor-pointer accent-purple-500"
-                  />
-                </div>
-              </div>
-
-              {/* Action buttons */}
-              <div className="space-y-2">
-                <button
-                  onClick={handleApplyCrop}
-                  className="w-full py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-colors flex items-center justify-center gap-1.5"
-                >
-                  <Icon name="check" size={13} /> Save Crop Area
-                </button>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => {
-                      setCropZoom(1);
-                      setCropPanX(0);
-                      setCropPanY(0);
-                      setCropRotation(0);
-                    }}
-                    className="py-2 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white rounded-xl text-[9px] font-black uppercase tracking-wider transition-colors"
-                  >
-                    Reset Keys
-                  </button>
-                  <button
-                    onClick={() => setIsCropModalOpen(false)}
-                    className="py-2 bg-red-600/10 hover:bg-red-600/20 text-red-500 rounded-xl text-[9px] font-black uppercase tracking-wider transition-colors"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            </div>
-            
-            {/* Hidden canvas used to compile cropping modifications */}
-            <canvas
-              ref={cropCanvasRef}
-              width={400}
-              height={400}
-              className="hidden"
-            />
           </div>
         </div>
       )}

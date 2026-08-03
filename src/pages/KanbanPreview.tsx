@@ -1,10 +1,8 @@
-import React, { useRef } from 'react';
+import React from 'react';
 import { Icon } from '../components/Icon';
 import { KanbanTemplateV2 } from '../services/templateService';
 import { KanbanCardMaster } from '../services/kanbanService';
-import { StandardTemplate } from '../templates/StandardTemplate';
-import { SingleCardTemplate } from '../templates/SingleCardTemplate';
-import { WarehouseTemplate } from '../templates/WarehouseTemplate';
+import { KanbanCardCanvas } from '../components/KanbanCardCanvas';
 
 interface KanbanPreviewProps {
   template: KanbanTemplateV2;
@@ -14,8 +12,8 @@ interface KanbanPreviewProps {
 }
 
 /**
- * KanbanPreview page renders pixel-perfect high-fidelity layouts for standard print jobs,
- * triggering the native window print utility styled dynamically.
+ * KanbanPreview component provides a true 1:1 WYSIWYG print preview for Kanban cards.
+ * Uses the exact same component tree and millimeter dimensions as the Designer Canvas.
  */
 export const KanbanPreview: React.FC<KanbanPreviewProps> = ({
   template,
@@ -23,93 +21,22 @@ export const KanbanPreview: React.FC<KanbanPreviewProps> = ({
   onClose,
   announce
 }) => {
-  const printAreaRef = useRef<HTMLDivElement>(null);
-
-  // Formulate custom CSS for the print-media page sizes dynamically
-  const getPrintStyles = () => {
-    return `
-      @media print {
-        @page {
-          size: A4 portrait;
-          margin: 0 !important;
-        }
-        html, body {
-          background-color: #ffffff !important;
-          color: #000000 !important;
-          margin: 0 !important;
-          padding: 0 !important;
-          -webkit-print-color-adjust: exact !important;
-          print-color-adjust: exact !important;
-          width: 100% !important;
-          height: 100% !important;
-          overflow: visible !important;
-        }
-        body {
-          visibility: hidden !important;
-        }
-        #printCanvas, #printCanvas * {
-          visibility: visible !important;
-        }
-        #printCanvas {
-          display: block !important;
-          position: fixed !important;
-          left: 0 !important;
-          top: 0 !important;
-          width: 210mm !important;
-          height: 297mm !important;
-          margin: 0 !important;
-          padding: 0 !important;
-          border: none !important;
-          box-shadow: none !important;
-          background: white !important;
-          border-radius: 0 !important;
-          z-index: 9999999 !important;
-          page-break-after: avoid !important;
-        }
-        .no-print {
-          display: none !important;
-          visibility: hidden !important;
-        }
-      }
-    `;
-  };
-
   const handlePrint = () => {
-    // Dynamically insert style override block to enforce page guidelines
-    const styleEl = document.createElement('style');
-    styleEl.innerHTML = getPrintStyles();
-    document.head.appendChild(styleEl);
-
-    // Call browser spooler
     window.print();
-
-    // Cleanup
-    document.head.removeChild(styleEl);
     announce('Dispatched print job spooler.');
   };
 
-  // Select layout engine based on blueprint specification or defaults
-  const renderTemplateEngine = () => {
-    const name = template.templateName.toLowerCase();
-    if (name.includes('single') || template.sections.length === 1) {
-      return <SingleCardTemplate cardData={cardData} template={template} previewHeight={1000} />;
-    }
-    if (name.includes('warehouse') || name.includes('bay')) {
-      return <WarehouseTemplate cardData={cardData} template={template} previewHeight={1000} />;
-    }
-    return <StandardTemplate cardData={cardData} template={template} previewHeight={1000} />;
-  };
-
-  const isLandscape = template.orientation === 'Landscape';
+  const marginMm = template.margins !== undefined ? template.margins : 10;
 
   return (
-    <div className="fixed inset-0 z-[1100] bg-black/95 backdrop-blur-xl flex flex-col font-sans overflow-hidden">
+    <div className="fixed inset-0 z-[1100] bg-[#0c0c0c] flex flex-col font-sans overflow-hidden">
       {/* 1. Header Toolbar (Hidden during print) */}
-      <header className="no-print h-16 border-b border-white/10 px-6 bg-[#121212] flex justify-between items-center text-white">
+      <header className="no-print h-16 border-b border-white/10 px-6 bg-[#121212] flex justify-between items-center text-white shrink-0">
         <div className="flex items-center gap-3">
           <button
             onClick={onClose}
             className="p-2 bg-white/5 hover:bg-white/10 rounded-xl text-gray-400 hover:text-white transition-colors"
+            title="Back to Designer"
           >
             <Icon name="arrow-left" size={18} />
           </button>
@@ -118,7 +45,7 @@ export const KanbanPreview: React.FC<KanbanPreviewProps> = ({
               Print Dispatch Spooler
             </h2>
             <p className="text-[10px] text-gray-400">
-              Template: <strong className="text-orange-400">{template.templateName}</strong> ({template.paperSize} {template.orientation})
+              Template: <strong className="text-orange-400">{template.templateName}</strong> ({template.paperSize || 'A4'})
             </p>
           </div>
         </div>
@@ -140,45 +67,106 @@ export const KanbanPreview: React.FC<KanbanPreviewProps> = ({
       </header>
 
       {/* 2. Scrollable Canvas Viewport */}
-      <div className="flex-1 overflow-y-auto p-12 flex flex-col items-center bg-[#0d0d0d]/40 custom-scrollbar select-none">
-        
+      <div className="flex-1 overflow-y-auto p-8 flex flex-col items-center custom-scrollbar">
         {/* Printable Guidelines Indicator */}
         <div className="no-print mb-6 text-center max-w-md">
           <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-600/15 border border-emerald-500/20 rounded-full text-[10px] font-black uppercase tracking-widest text-emerald-400 mb-2">
-            <Icon name="check-circle" size={12} /> Layout Calibrated
+            <Icon name="check-circle" size={12} /> True WYSIWYG Print Engine
           </div>
           <p className="text-xs text-gray-400">
-            Below is the precise page sheet representation. For absolute precision, ensure your print spooler setting has **Margins set to "None"** and **Scale set to 100% (Default)**.
+            Below is the exact A4 print page representation. For 100% true scale print, set browser print margins to <strong>"None"</strong> and scale to <strong>100%</strong>.
           </p>
         </div>
 
-        {/* Scaled Print Page container (Print engine maps to exact millimeters inside media stylesheets) */}
-        <div 
-          ref={printAreaRef}
-          id="printCanvas"
-          className="print-canvas relative bg-white shadow-2xl overflow-hidden rounded-md border border-neutral-300"
-          style={{
-            width: isLandscape ? '1000px' : '707px', // A4 aspect-ratio (210/297) mapped visually
-            height: isLandscape ? '707px' : '1000px'
-          }}
-        >
-          {/* Outer Margin Guidelines frame (hidden during print) */}
-          <div 
-            className="no-print absolute border border-dashed border-neutral-300 pointer-events-none flex justify-between p-1.5"
+        {/* Print Document Area */}
+        <div id="kanbanPrintArea" className="kanban-print-document">
+          {/* Global print media query rules for native browser print */}
+          <style>{`
+            @media print {
+              @page {
+                size: A4 portrait;
+                margin: 0 !important;
+              }
+              html, body {
+                background: #ffffff !important;
+                color: #000000 !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                width: 210mm !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+              }
+              body * {
+                visibility: hidden !important;
+              }
+              #kanbanPrintArea, #kanbanPrintArea * {
+                visibility: visible !important;
+              }
+              #kanbanPrintArea {
+                position: absolute !important;
+                left: 0 !important;
+                top: 0 !important;
+                width: 210mm !important;
+                margin: 0 !important;
+                padding: 0 !important;
+              }
+              .kanban-a4-sheet {
+                box-shadow: none !important;
+                border: none !important;
+                width: 210mm !important;
+                margin: 0 !important;
+                padding: ${marginMm}mm !important;
+              }
+              .kanban-card-wrapper {
+                break-inside: avoid !important;
+                page-break-inside: avoid !important;
+              }
+              .no-print {
+                display: none !important;
+                visibility: hidden !important;
+              }
+            }
+          `}</style>
+
+          {/* Centered White A4 Sheet Container */}
+          <div
+            className="kanban-a4-sheet bg-white shadow-2xl relative border border-neutral-300 text-black box-sizing-border"
             style={{
-              left: `${template.margins * (1000 / 297)}px`,
-              right: `${template.margins * (1000 / 297)}px`,
-              top: `${template.margins * (1000 / 297)}px`,
-              bottom: `${template.margins * (1000 / 297)}px`
+              width: '210mm',
+              minHeight: '297mm',
+              padding: `${marginMm}mm`,
+              boxSizing: 'border-box'
             }}
           >
-            <span className="text-[7px] text-gray-400 font-mono">PRINTABLE MARGIN ({template.margins}mm)</span>
-            <span className="text-[7px] text-gray-400 font-mono">A4 Sheet Frame</span>
-          </div>
+            {/* Printable Margin Guideline (Screen only) */}
+            <div
+              className="no-print absolute border border-dashed border-neutral-300 pointer-events-none flex justify-between p-1"
+              style={{
+                left: `${marginMm}mm`,
+                right: `${marginMm}mm`,
+                top: `${marginMm}mm`,
+                bottom: `${marginMm}mm`
+              }}
+            >
+              <span className="text-[6px] text-gray-400 font-mono tracking-wider">PRINTABLE MARGIN ({marginMm}mm)</span>
+              <span className="text-[6px] text-gray-400 font-mono tracking-wider">A4 Portrait Sheet</span>
+            </div>
 
-          {/* Core render engine container */}
-          <div className="w-full h-full relative" style={{ transform: isLandscape ? 'rotate(-90deg) scale(0.707)' : 'none', transformOrigin: 'center' }}>
-            {renderTemplateEngine()}
+            {/* Stack of Cards starting inside printable margin */}
+            <div className="flex flex-col gap-[5mm] relative w-full">
+              <div
+                className="kanban-card-wrapper"
+                style={{
+                  breakInside: 'avoid',
+                  pageBreakInside: 'avoid'
+                }}
+              >
+                <KanbanCardCanvas
+                  template={template}
+                  cardData={cardData}
+                />
+              </div>
+            </div>
           </div>
         </div>
       </div>

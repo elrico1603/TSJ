@@ -8,6 +8,57 @@ export interface KanbanLocation {
   colour: string;
 }
 
+const KANBAN_MAX_SEQ_KEY = 'kanban_max_issued_sequence';
+
+export function getStoredMaxSequence(): number {
+  try {
+    const val = localStorage.getItem(KANBAN_MAX_SEQ_KEY);
+    return val ? parseInt(val, 10) || 0 : 0;
+  } catch {
+    return 0;
+  }
+}
+
+export function updateStoredMaxSequence(num: number): void {
+  try {
+    const current = getStoredMaxSequence();
+    if (num > current) {
+      localStorage.setItem(KANBAN_MAX_SEQ_KEY, num.toString());
+    }
+  } catch {
+    // Ignore local storage errors in restricted contexts
+  }
+}
+
+/**
+ * Generates the next sequential Kanban Number (e.g. KAN-000001).
+ * Inspects all existing cards and the persisted highest sequence counter
+ * to ensure deleted/archived numbers are NEVER reused.
+ */
+export function generateNextKanbanNumber(existingCards: any[] = []): string {
+  let maxNum = getStoredMaxSequence();
+
+  if (Array.isArray(existingCards)) {
+    existingCards.forEach(c => {
+      const kid = c.kanbanId || c.cardData?.kanbanId || c.cardData?.partNumber || c.partNumber;
+      if (kid) {
+        const match = kid.match(/(?:TSJ-)?KAN-(\d+)/i);
+        if (match) {
+          const numPart = parseInt(match[1], 10);
+          if (!isNaN(numPart) && numPart > maxNum) {
+            maxNum = numPart;
+          }
+        }
+      }
+    });
+  }
+
+  const nextNum = maxNum + 1;
+  updateStoredMaxSequence(nextNum);
+
+  return `KAN-${String(nextNum).padStart(6, '0')}`;
+}
+
 export interface KanbanCardMaster {
   id?: string;
   kanbanId: string; // Unique human-readable code like KAN-000001

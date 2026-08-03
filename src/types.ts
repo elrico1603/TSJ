@@ -254,7 +254,9 @@ export type NotificationCategory =
   | 'stock_order'
   | 'clocking_exception'
   | 'employee_request'
-  | 'system_alert';
+  | 'system_alert'
+  | 'inventory'
+  | 'low_stock';
 
 export type NotificationPriority = 'low' | 'medium' | 'high' | 'critical';
 
@@ -282,9 +284,22 @@ export interface StockRequestItem {
   productId: string;
   productName: string;
   quantity: number;
+  receivedQuantity?: number;
   supplier: string;
   supplierPartNumber: string;
   location: string;
+  imageUrl?: string;
+  notes?: string;
+}
+
+export interface StockRequestHistoryItem {
+  id: string;
+  action: 'Created' | 'Submitted' | 'Ordered' | 'Partially Received' | 'Received' | 'Completed' | 'Cancelled';
+  userId: string;
+  userName: string;
+  role: string;
+  timestamp: string;
+  notes?: string;
 }
 
 export interface StockRequest {
@@ -295,14 +310,210 @@ export interface StockRequest {
   requestedByRole: string;
   branchId: string;
   branchName: string;
-  status: 'Pending' | 'Ordered' | 'Received' | 'Completed' | 'Cancelled';
+  status: 'Pending' | 'Ordered' | 'Partially Received' | 'Received' | 'Completed' | 'Cancelled';
   createdAt: string;
   orderedAt?: string;
+  partiallyReceivedAt?: string;
+  receivedAt?: string;
   completedAt?: string;
+  cancelledAt?: string;
   totalProducts: number;
   totalQuantity: number;
   notes?: string;
   items: StockRequestItem[];
+  history?: StockRequestHistoryItem[];
 }
+
+export interface InventoryItem {
+  id: string;
+  productId: string;
+  productName: string;
+  supplier: string;
+  supplierPartNumber: string;
+  location: string;
+  imageUrl?: string;
+  currentQuantity: number;
+  minimumQuantity: number;
+  maximumQuantity: number;
+  lastUpdated: any;
+  lastUpdatedBy: string;
+}
+
+export interface InventoryHistoryItem {
+  id: string;
+  movementId?: string;
+  inventoryId?: string;
+  productId: string;
+  productName: string;
+  requestNumber?: string;
+  movementType?: string;
+  changeType?: 'Adjusted' | 'Restocked' | 'Deducted' | 'Set' | 'Received';
+  quantity?: number;
+  quantityChange?: number;
+  beforeQuantity?: number;
+  previousQuantity?: number;
+  afterQuantity?: number;
+  newQuantity?: number;
+  performedBy: string;
+  notes?: string;
+  timestamp: string;
+}
+
+export interface ProductMaster {
+  id: string; // Internal Product ID, e.g. "PRD-0001" or "K-101"
+  productName: string;
+  productImage?: string;
+  internalProductCode: string; // e.g. "PRD-0001"
+  supplierId?: string;
+  supplier: string; // Supplier Name
+  supplierPartNumber: string;
+  categoryId?: string;
+  category: string; // e.g. "Board", "Hardware", "Paint", "Consumables", "Machinery Parts", "Packaging"
+  locationId?: string;
+  location: string; // e.g. "A-04-B-12"
+  locationColour?: string; // e.g. "GREEN", "RED", "YELLOW"
+  qrCode?: string; // Product ID or QR payload
+  barcode?: string; // EAN/UPC or barcode string
+  unit: string; // e.g. "ea", "box", "m2", "kg", "pack", "litres"
+  minimumStock: number;
+  maximumStock: number;
+  currentStock?: number; // Read-only from live inventory
+  orderQuantity?: number; // Default order quantity
+  deliveryTime?: string; // e.g. "3 Days"
+  cardColour?: string; // Default background color for Kanban cards
+  status: 'Active' | 'Archived';
+  createdAt: string;
+  updatedAt: string;
+  createdUser?: string;
+  updatedUser?: string;
+}
+
+export interface ProductCategory {
+  id: string;
+  name: string; // e.g. "Board", "Hardware", "Paint", "Consumables", "Machinery Parts", "Packaging"
+  code: string; // e.g. "CAT-BOARD"
+  description?: string;
+  status: 'Active' | 'Archived';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Supplier {
+  id: string;
+  supplierName: string;
+  supplierCode: string; // e.g. "SUP-001"
+  contactPerson: string;
+  telephone: string;
+  email: string;
+  physicalAddress: string;
+  leadTimeDays: number;
+  preferredSupplier: boolean;
+  status: 'Active' | 'Archived';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WarehouseLocation {
+  id: string;
+  aisle: string; // e.g. "A"
+  rack: string; // e.g. "04"
+  shelf: string; // e.g. "B"
+  bin: string; // e.g. "12"
+  locationCode: string; // Formatted as "A-04-B-12"
+  colour?: string; // e.g. "GREEN", "RED", "AMBER"
+  description?: string;
+  status: 'Active' | 'Archived';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MasterAuditLog {
+  id: string;
+  entityType: 'Product' | 'Category' | 'Supplier' | 'WarehouseLocation';
+  entityId: string;
+  entityName: string;
+  action: 'Created' | 'Updated' | 'Archived' | 'Restored' | 'Soft Deleted' | 'Duplicated';
+  user: string;
+  timestamp: string;
+  reason: string;
+  changes?: Record<string, { before: any; after: any }>;
+}
+
+export type PurchaseOrderStatus = 
+  | 'Draft' 
+  | 'Pending Approval' 
+  | 'Approved' 
+  | 'Sent' 
+  | 'Partially Received' 
+  | 'Completed' 
+  | 'Cancelled' 
+  | 'Archived';
+
+export interface PurchaseOrderItem {
+  id: string;
+  productId: string;
+  productName: string;
+  internalProductCode: string;
+  supplierPartNumber: string;
+  unit: string;
+  orderQuantity: number;
+  receivedQuantity: number;
+  unitPrice?: number;
+  totalPrice?: number;
+  location?: string;
+  category?: string;
+}
+
+export interface PurchaseOrderAudit {
+  id: string;
+  action: string;
+  user: string;
+  timestamp: string;
+  notes?: string;
+}
+
+export interface PurchaseOrder {
+  id: string; // Document ID
+  poNumber: string; // e.g. "PO-2026-000001"
+  companyId?: string; // "TS-JOINERY-CPT"
+  branchId?: string; // "MAIN-BRANCH"
+  
+  // Linked Request
+  linkedRequestId?: string; // Stock Request ID or Request Number
+  linkedRequestNumber?: string; // e.g. "REQ-2026-0012"
+  
+  // Supplier Information
+  supplierId?: string;
+  supplierName: string;
+  supplierCode?: string;
+  supplierContactPerson?: string;
+  supplierTelephone?: string;
+  supplierEmail?: string;
+  supplierAddress?: string;
+
+  // Delivery Information
+  deliveryAddress: string;
+  deliveryInstructions?: string;
+  expectedDeliveryDate?: string;
+
+  // Items
+  items: PurchaseOrderItem[];
+  totalProducts: number;
+  totalQuantity: number;
+  estimatedTotalValue?: number;
+
+  // Status & Approvals
+  status: PurchaseOrderStatus;
+  approvedBy?: string;
+  approvedAt?: string;
+  createdUser: string;
+  createdAt: string;
+  updatedUser?: string;
+  updatedAt: string;
+
+  // Audit history
+  auditTrail: PurchaseOrderAudit[];
+}
+
 
 
