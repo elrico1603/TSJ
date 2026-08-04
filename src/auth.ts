@@ -28,6 +28,8 @@ export interface AppUser {
   status: string;
   createdAt: string;
   permissions?: Record<string, boolean>;
+  branchId?: string;
+  branchName?: string;
 }
 
 export const authManager = {

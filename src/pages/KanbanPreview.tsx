@@ -26,7 +26,7 @@ export const KanbanPreview: React.FC<KanbanPreviewProps> = ({
     announce('Dispatched print job spooler.');
   };
 
-  const marginMm = template.margins !== undefined ? template.margins : 10;
+  const marginMm = 0;
 
   return (
     <div className="fixed inset-0 z-[1100] bg-[#0c0c0c] flex flex-col font-sans overflow-hidden">

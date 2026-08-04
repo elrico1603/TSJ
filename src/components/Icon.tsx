@@ -61,7 +61,17 @@ import {
   CheckSquare,
   XCircle,
   Eye,
-  EyeOff
+  EyeOff,
+  Truck,
+  Folder,
+  Upload,
+  Image as ImageIcon,
+  Building,
+  Sliders,
+  Flag,
+  Download,
+  Copy,
+  Share2
 } from 'lucide-react';
 
 interface IconProps {
@@ -134,7 +144,17 @@ export const Icon: React.FC<IconProps> = ({ name, size = 24, className = "", str
     'check-square': CheckSquare,
     'x-circle': XCircle,
     'eye': Eye,
-    'eye-off': EyeOff
+    'eye-off': EyeOff,
+    'truck': Truck,
+    'folder': Folder,
+    'upload': Upload,
+    'image': ImageIcon,
+    'building': Building,
+    'sliders': Sliders,
+    'flag': Flag,
+    'download': Download,
+    'copy': Copy,
+    'share': Share2
   };
 
   const LucideIcon = iconMap[name] || HelpCircle;

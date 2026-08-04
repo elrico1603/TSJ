@@ -42,10 +42,18 @@ import { generateNextKanbanNumber } from './services/kanbanService';
 import { UserProfileModal } from './components/UserProfileModal';
 import { ProductMasterHub } from './components/ProductMasterHub';
 import { PurchaseOrderHub } from './components/PurchaseOrderHub';
+import { companyService } from './services/companyService';
+import { CompanySettingsHub } from './components/CompanySettingsHub';
+import { SystemAdministrationHub } from './components/SystemAdministrationHub';
+import { DispatchHub } from './components/DispatchHub';
 
 const { SUPER_USER_PIN } = SECURITY;
 
 export default function App() {
+  // System Version State
+  const [systemVersion, setSystemVersion] = useState<string>(() => {
+    return companyService.getLocalVersions()[0]?.version || CURRENT_VERSION_STRING;
+  });
   // ==========================================
   // STATE MANAGEMENT
   // ==========================================
@@ -63,9 +71,10 @@ export default function App() {
   const [view, setView] = useState<string>('dashboard'); 
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
 
-  // Responsive Layout Mode & Profile Modal State
+  // Responsive Layout Mode, Header Search & Profile Modal State
   const [layoutMode, setLayoutMode] = useState<'desktop' | 'tablet' | 'phone'>('desktop');
   const [showUserProfileModal, setShowUserProfileModal] = useState<boolean>(false);
+  const [headerSearchQuery, setHeaderSearchQuery] = useState<string>('');
 
   const getAutoLayoutMode = (): 'desktop' | 'tablet' | 'phone' => {
     const width = window.innerWidth;
@@ -116,7 +125,7 @@ export default function App() {
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [showLeaveApplyModal, setShowLeaveApplyModal] = useState(false);
 
-  // Subscribe to Notifications and Leave Requests
+  // Subscribe to Notifications, Leave Requests, and Application Versions
   useEffect(() => {
     const unsubNotifs = notificationService.subscribeNotifications(items => {
       setNotifications(items);
@@ -124,9 +133,15 @@ export default function App() {
     const unsubLeave = leaveService.subscribeLeaveRequests(reqs => {
       setLeaveRequests(reqs);
     });
+    const unsubVersions = companyService.subscribeVersions(vList => {
+      if (vList.length > 0) {
+        setSystemVersion(vList[0].version);
+      }
+    });
     return () => {
       unsubNotifs();
       unsubLeave();
+      unsubVersions();
     };
   }, []);
   
@@ -1624,76 +1639,113 @@ TS Joinery Kanban System`
         <div className="bg-watermark"></div>
         <canvas ref={canvasRef} className="hidden" />
 
-        {/* Global header bar */}
-        <header className="px-8 py-5 border-b border-white/10 bg-[#0c0c0c]/80 backdrop-blur-2xl sticky top-0 z-50 flex justify-between items-center select-none font-sans">
-          <div className="flex items-center space-x-5">
-            <div className="p-3 rounded-2xl bg-[#ff8c00]/10 text-[#ff8c00] shadow-[0_0_20px_rgba(255,140,0,0.15)]">
-              <Icon name="hard-hat" size={28} />
+        {/* Global header bar - Fixed Header (never scrolls) */}
+        <header className="px-4 sm:px-6 lg:px-8 py-3.5 border-b border-white/10 bg-[#0c0c0c]/80 backdrop-blur-2xl sticky top-0 z-50 flex justify-between items-center select-none font-sans shrink-0">
+          <div className="flex items-center space-x-3 lg:space-x-5">
+            <div className="p-2.5 lg:p-3 rounded-2xl bg-[#ff8c00]/10 text-[#ff8c00] shadow-[0_0_20px_rgba(255,140,0,0.15)] shrink-0">
+              <Icon name="hard-hat" size={24} className="lg:w-7 lg:h-7" />
             </div>
             <div>
-              <h1 className="text-2xl font-black italic tracking-tighter uppercase leading-none text-white font-sans">
+              <h1 className="text-xl lg:text-2xl font-black italic tracking-tighter uppercase leading-none text-white font-sans">
                 TimberSmith <span className="text-[#ff8c00] font-sans">Joinery</span>
               </h1>
-              <div className="flex items-center gap-2 mt-1.5 font-sans">
+              <div className="flex items-center gap-2 mt-1 font-sans">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
                 <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 font-sans">System Online</p>
               </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-8 font-sans">
-            <div className="text-right flex flex-col justify-center select-none">
-              <p className="text-2xl font-mono font-black leading-none text-white tracking-tight">
-                {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-              </p>
-              <p className="text-[10px] font-black text-gray-500 uppercase mt-1.5 tracking-widest font-sans">
-                {currentTime.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' })}
-              </p>
+          {/* Header Search Input */}
+          <div className="relative hidden md:flex items-center mx-4">
+            <Icon name="search" size={14} className="absolute left-3 text-gray-400 pointer-events-none" />
+            <input
+              type="text"
+              placeholder="Search system..."
+              value={headerSearchQuery}
+              onChange={(e) => setHeaderSearchQuery(e.target.value)}
+              className="bg-white/5 border border-white/10 rounded-xl pl-8 pr-7 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-[#ff8c00] w-40 lg:w-56 xl:w-64 transition-all"
+            />
+            {headerSearchQuery && (
+              <button onClick={() => setHeaderSearchQuery('')} className="absolute right-2 text-gray-400 hover:text-white text-xs">
+                ×
+              </button>
+            )}
+          </div>
 
-              {/* Responsive Layout Mode Switcher */}
-              <div className="flex items-center justify-end gap-1 mt-2">
-                <button
-                  onClick={() => changeLayoutMode('desktop')}
-                  title="Switch to Desktop Layout"
-                  className={`p-1.5 rounded-lg border transition-all flex items-center gap-1 text-[9px] font-black uppercase ${
-                    layoutMode === 'desktop'
-                      ? 'bg-[#ff8c00]/20 text-[#ff8c00] border-[#ff8c00]/50 shadow'
-                      : 'bg-white/5 text-gray-500 border-white/10 hover:text-white hover:bg-white/10'
-                  }`}
-                >
-                  <Icon name="monitor" size={13} />
-                  <span className="hidden sm:inline">Desktop</span>
-                </button>
-
-                <button
-                  onClick={() => changeLayoutMode('tablet')}
-                  title="Switch to Tablet Layout"
-                  className={`p-1.5 rounded-lg border transition-all flex items-center gap-1 text-[9px] font-black uppercase ${
-                    layoutMode === 'tablet'
-                      ? 'bg-[#ff8c00]/20 text-[#ff8c00] border-[#ff8c00]/50 shadow'
-                      : 'bg-white/5 text-gray-500 border-white/10 hover:text-white hover:bg-white/10'
-                  }`}
-                >
-                  <Icon name="tablet" size={13} />
-                  <span className="hidden sm:inline">Tablet</span>
-                </button>
-
-                <button
-                  onClick={() => changeLayoutMode('phone')}
-                  title="Switch to Phone Layout"
-                  className={`p-1.5 rounded-lg border transition-all flex items-center gap-1 text-[9px] font-black uppercase ${
-                    layoutMode === 'phone'
-                      ? 'bg-[#ff8c00]/20 text-[#ff8c00] border-[#ff8c00]/50 shadow'
-                      : 'bg-white/5 text-gray-500 border-white/10 hover:text-white hover:bg-white/10'
-                  }`}
-                >
-                  <Icon name="smartphone" size={13} />
-                  <span className="hidden sm:inline">Phone</span>
-                </button>
+          <div className="flex items-center gap-3 lg:gap-6 font-sans">
+            {/* Current User Badge */}
+            <div 
+              onClick={() => setShowUserProfileModal(true)}
+              className="cursor-pointer hover:bg-white/10 transition-all flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 text-xs select-none"
+              title="Click to view user profile details"
+            >
+              <div className="w-7 h-7 rounded-full bg-[#ff8c00]/20 border border-[#ff8c00]/40 flex items-center justify-center text-[#ff8c00] font-black text-xs shrink-0">
+                {(currentUser?.fullName || (isLocked ? 'Artisan' : 'Admin')).charAt(0).toUpperCase()}
+              </div>
+              <div className="hidden xl:flex flex-col text-left">
+                <span className="font-bold text-white text-[11px] leading-tight truncate max-w-[110px]">
+                  {currentUser?.fullName || (isLocked ? 'Artisan' : 'Super Admin')}
+                </span>
+                <span className="text-[9px] text-[#ff8c00] font-mono font-bold leading-none uppercase">
+                  {currentUser?.role || (isLocked ? 'Locked' : 'Admin')}
+                </span>
               </div>
             </div>
-            <div className="w-px h-10 bg-white/10 mx-2"></div>
-            <div className="flex items-center gap-4">
+
+            <div className="text-right flex flex-col justify-center select-none hidden sm:flex">
+              <p className="text-lg lg:text-2xl font-mono font-black leading-none text-white tracking-tight">
+                {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+              </p>
+              <p className="text-[9px] lg:text-[10px] font-black text-gray-500 uppercase mt-1 tracking-widest font-sans">
+                {currentTime.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })}
+              </p>
+            </div>
+
+            {/* Layout Mode Selector */}
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => changeLayoutMode('desktop')}
+                title="Switch to Desktop Layout"
+                className={`p-1.5 rounded-lg border transition-all flex items-center gap-1 text-[9px] font-black uppercase ${
+                  layoutMode === 'desktop'
+                    ? 'bg-[#ff8c00]/20 text-[#ff8c00] border-[#ff8c00]/50 shadow'
+                    : 'bg-white/5 text-gray-500 border-white/10 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                <Icon name="monitor" size={13} />
+                <span className="hidden xl:inline">Desktop</span>
+              </button>
+
+              <button
+                onClick={() => changeLayoutMode('tablet')}
+                title="Switch to Tablet Layout"
+                className={`p-1.5 rounded-lg border transition-all flex items-center gap-1 text-[9px] font-black uppercase ${
+                  layoutMode === 'tablet'
+                    ? 'bg-[#ff8c00]/20 text-[#ff8c00] border-[#ff8c00]/50 shadow'
+                    : 'bg-white/5 text-gray-500 border-white/10 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                <Icon name="tablet" size={13} />
+                <span className="hidden xl:inline">Tablet</span>
+              </button>
+
+              <button
+                onClick={() => changeLayoutMode('phone')}
+                title="Switch to Phone Layout"
+                className={`p-1.5 rounded-lg border transition-all flex items-center gap-1 text-[9px] font-black uppercase ${
+                  layoutMode === 'phone'
+                    ? 'bg-[#ff8c00]/20 text-[#ff8c00] border-[#ff8c00]/50 shadow'
+                    : 'bg-white/5 text-gray-500 border-white/10 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                <Icon name="smartphone" size={13} />
+                <span className="hidden xl:inline">Phone</span>
+              </button>
+            </div>
+
+            <div className="w-px h-8 bg-white/10 mx-1 hidden sm:block"></div>
+            <div className="flex items-center gap-2.5">
               {(() => {
                 const filteredNotifs = notificationService.filterForUser(
                   notifications,
@@ -1705,12 +1757,12 @@ TS Joinery Kanban System`
                 return (
                   <button 
                     onClick={() => setShowNotificationsModal(true)}
-                    className="relative px-3.5 py-2 rounded-xl bg-[#181818] hover:bg-white/10 text-gray-300 hover:text-white border border-white/10 transition-all flex items-center gap-2 active:scale-95 shadow-md"
+                    className="relative px-3 py-1.5 lg:px-3.5 lg:py-2 rounded-xl bg-[#181818] hover:bg-white/10 text-gray-300 hover:text-white border border-white/10 transition-all flex items-center gap-2 active:scale-95 shadow-md"
                     title="Global Notification Centre"
                   >
-                    <Icon name="bell" size={20} className="text-[#ff8c00]" />
+                    <Icon name="bell" size={18} className="text-[#ff8c00]" />
                     {unreadCount > 0 ? (
-                      <span className="px-2 py-0.5 bg-red-500 text-white font-mono font-black text-xs rounded-full shadow-lg shadow-red-500/30 animate-pulse">
+                      <span className="px-1.5 py-0.5 bg-red-500 text-white font-mono font-black text-[10px] rounded-full shadow-lg shadow-red-500/30 animate-pulse">
                         {unreadCount}
                       </span>
                     ) : (
@@ -1720,8 +1772,16 @@ TS Joinery Kanban System`
                 );
               })()}
               {canManageUsers && (
-                <button onClick={() => setShowSettingsModal(true)} className="p-3 rounded-xl bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition-all">
-                  <Icon name="settings" size={20} />
+                <button 
+                  onClick={() => { setAppMode('system_admin'); setView('dashboard'); }} 
+                  className={`p-2 lg:p-2.5 rounded-xl border transition-all ${
+                    (appMode === 'system_admin' || appMode === 'company_settings')
+                      ? 'bg-[#ff8c00]/20 text-[#ff8c00] border-[#ff8c00]/50 shadow-md'
+                      : 'bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white border-white/10'
+                  }`} 
+                  title="System Administration"
+                >
+                  <Icon name="settings" size={18} />
                 </button>
               )}
             </div>
@@ -1732,24 +1792,24 @@ TS Joinery Kanban System`
         <div className="flex-1 flex overflow-hidden">
           {/* Main lateral application routing sidebar (Hidden in Phone layout mode) */}
           {layoutMode !== 'phone' && (
-            <aside className="w-80 bg-black/60 backdrop-blur-2xl border-r border-white/10 p-6 flex flex-col justify-between h-full shrink-0 select-none">
-              <div className="space-y-8 font-sans">
+            <aside className="w-72 xl:w-80 bg-black/60 backdrop-blur-2xl border-r border-white/10 p-4 xl:p-6 flex flex-col justify-between h-full overflow-y-auto custom-scrollbar shrink-0 select-none">
+              <div className="space-y-6 xl:space-y-8 font-sans flex-1 overflow-y-auto custom-scrollbar pr-1">
                 <div>
-                  <p className="text-[10px] font-black uppercase text-gray-500 tracking-[0.2em] mb-4">Artisan Terminal</p>
+                  <p className="text-[10px] font-black uppercase text-gray-500 tracking-[0.2em] mb-3 xl:mb-4">Artisan Terminal</p>
                   <div className="space-y-2">
                     <button 
                       onClick={() => { setAppMode('employee'); setView('dashboard'); setSelectedEmployee(null); }} 
-                      className={`w-full flex items-center space-x-4 p-4 rounded-2xl transition-all ${appMode === 'employee' ? 'bg-[#ff8c00]/10 border border-[#ff8c00]/30 text-[#ff8c00]' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                      className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${appMode === 'employee' ? 'bg-[#ff8c00]/10 border border-[#ff8c00]/30 text-[#ff8c00]' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
                     >
-                      <Icon name="clock" size={20} />
+                      <Icon name="clock" size={18} />
                       <span className="font-black uppercase text-xs tracking-wider font-sans">Clocking Terminal</span>
                     </button>
 
                     <button 
                       onClick={() => { setAppMode('qr_scan_service'); setView('dashboard'); }} 
-                      className={`w-full flex items-center space-x-4 p-4 rounded-2xl transition-all ${appMode === 'qr_scan_service' ? 'bg-purple-600/10 border border-purple-500/30 text-purple-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                      className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${appMode === 'qr_scan_service' ? 'bg-purple-600/10 border border-purple-500/30 text-purple-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
                     >
-                      <Icon name="scan" size={20} />
+                      <Icon name="scan" size={18} />
                       <span className="font-black uppercase text-xs tracking-wider font-sans">QR Scan Service</span>
                     </button>
                   </div>
@@ -1758,7 +1818,7 @@ TS Joinery Kanban System`
                 {/* Hide Management Hub completely for Stock Manager role */}
                 {!isStockManager && (
                   <div>
-                    <div className="flex justify-between items-center mb-4">
+                    <div className="flex justify-between items-center mb-3 xl:mb-4">
                       <p className="text-[10px] font-black uppercase text-gray-500 tracking-[0.2em]">Management Hub</p>
                       {isLocked && <span className="p-1 bg-red-500/10 text-red-500 border border-red-500/20 rounded text-[8px] font-bold uppercase tracking-widest font-sans">Locked</span>}
                     </div>
@@ -1766,63 +1826,72 @@ TS Joinery Kanban System`
                       <button 
                         disabled={isLocked}
                         onClick={() => { setAppMode('product_master'); }} 
-                        className={`w-full flex items-center space-x-4 p-4 rounded-2xl transition-all ${isLocked ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'product_master' ? 'bg-cyan-600/10 border border-cyan-500/30 text-cyan-400' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${isLocked ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'product_master' ? 'bg-cyan-600/10 border border-cyan-500/30 text-cyan-400' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
                       >
-                        <Icon name="box" size={20} />
+                        <Icon name="box" size={18} />
                         <span className="font-black uppercase text-xs tracking-wider">Product Master</span>
                       </button>
 
                       <button 
                         disabled={isLocked}
                         onClick={() => { setAppMode('purchase_orders'); }} 
-                        className={`w-full flex items-center space-x-4 p-4 rounded-2xl transition-all ${isLocked ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'purchase_orders' ? 'bg-cyan-600/10 border border-cyan-500/30 text-cyan-400' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${isLocked ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'purchase_orders' ? 'bg-cyan-600/10 border border-cyan-500/30 text-cyan-400' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
                       >
-                        <Icon name="file-text" size={20} />
+                        <Icon name="file-text" size={18} />
                         <span className="font-black uppercase text-xs tracking-wider">Purchase Orders</span>
+                      </button>
+
+                      <button 
+                        disabled={isLocked}
+                        onClick={() => { setAppMode('dispatch'); }} 
+                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${isLocked ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'dispatch' ? 'bg-amber-600/10 border border-amber-500/30 text-amber-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                      >
+                        <Icon name="truck" size={18} />
+                        <span className="font-black uppercase text-xs tracking-wider">Dispatch & Receiving</span>
                       </button>
 
                       <button 
                         disabled={isLocked || !canManageUsers}
                         onClick={() => { setAppMode('template_designer'); }} 
-                        className={`w-full flex items-center space-x-4 p-4 rounded-2xl transition-all ${(isLocked || !canManageUsers) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'template_designer' ? 'bg-purple-600/10 border border-purple-500/30 text-purple-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${(isLocked || !canManageUsers) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'template_designer' ? 'bg-purple-600/10 border border-purple-500/30 text-purple-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
                       >
-                        <Icon name="layout-template" size={20} />
+                        <Icon name="layout-template" size={18} />
                         <span className="font-black uppercase text-xs tracking-wider">Kanban Designer</span>
                       </button>
 
                       <button 
                         disabled={isLocked || (!canManageOrders && !isStockManager)}
                         onClick={() => { setAppMode('orders'); }} 
-                        className={`w-full flex items-center space-x-4 p-4 rounded-2xl transition-all ${(isLocked || (!canManageOrders && !isStockManager)) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'orders' ? 'bg-[#ff8c00]/10 border border-[#ff8c00]/30 text-[#ff8c00]' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${(isLocked || (!canManageOrders && !isStockManager)) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'orders' ? 'bg-[#ff8c00]/10 border border-[#ff8c00]/30 text-[#ff8c00]' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
                       >
-                        <Icon name="banknote" size={20} />
+                        <Icon name="banknote" size={18} />
                         <span className="font-black uppercase text-xs tracking-wider">Procurement & Orders</span>
                       </button>
 
                       <button 
                         disabled={isLocked || !canManageUsers}
                         onClick={() => { setAppMode('admin'); setView('dashboard'); }} 
-                        className={`w-full flex items-center space-x-4 p-4 rounded-2xl transition-all ${(isLocked || !canManageUsers) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'admin' ? 'bg-blue-600/10 border border-blue-500/30 text-blue-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${(isLocked || !canManageUsers) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'admin' ? 'bg-blue-600/10 border border-blue-500/30 text-blue-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
                       >
-                        <Icon name="users" size={20} />
+                        <Icon name="users" size={18} />
                         <span className="font-black uppercase text-xs tracking-wider">Employer Registration</span>
                       </button>
 
                       <button 
                         disabled={isLocked || !canViewAnalytics}
                         onClick={() => { setAppMode('analytics'); setView('dashboard'); }} 
-                        className={`w-full flex items-center space-x-4 p-4 rounded-2xl transition-all ${(isLocked || !canViewAnalytics) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'analytics' ? 'bg-emerald-600/10 border border-emerald-500/30 text-emerald-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${(isLocked || !canViewAnalytics) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'analytics' ? 'bg-emerald-600/10 border border-emerald-500/30 text-emerald-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
                       >
-                        <Icon name="bar-chart-3" size={20} />
+                        <Icon name="bar-chart-3" size={18} />
                         <span className="font-black uppercase text-xs tracking-wider">Work Analytics</span>
                       </button>
 
                       <button 
                         disabled={isLocked}
                         onClick={() => { setAppMode('leave'); setView('dashboard'); }} 
-                        className={`w-full flex items-center space-x-4 p-4 rounded-2xl transition-all ${isLocked ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'leave' ? 'bg-amber-600/10 border border-amber-500/30 text-amber-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${isLocked ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'leave' ? 'bg-amber-600/10 border border-amber-500/30 text-amber-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
                       >
-                        <Icon name="calendar" size={20} />
+                        <Icon name="calendar" size={18} />
                         <div className="flex items-center justify-between w-full">
                           <span className="font-black uppercase text-xs tracking-wider">Leave Management</span>
                           {leaveRequests.filter(r => r.status === 'Pending').length > 0 && (
@@ -1836,9 +1905,9 @@ TS Joinery Kanban System`
                       <button 
                         disabled={isLocked}
                         onClick={() => setAppMode('mobile')} 
-                        className={`w-full flex items-center space-x-4 p-4 rounded-2xl transition-all ${isLocked ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'mobile' ? 'bg-pink-600/10 border border-pink-500/30 text-pink-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${isLocked ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'mobile' ? 'bg-pink-600/10 border border-pink-500/30 text-pink-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
                       >
-                        <Icon name="smartphone" size={20} />
+                        <Icon name="smartphone" size={18} />
                         <span className="font-black uppercase text-xs tracking-wider">Mobile Deployment</span>
                       </button>
                     </div>
@@ -1846,11 +1915,11 @@ TS Joinery Kanban System`
                 )}
               </div>
 
-              <div className="border-t border-white/10 pt-6 space-y-3">
+              <div className="border-t border-white/10 pt-4 xl:pt-6 space-y-3 shrink-0">
                 {isLocked ? (
                   <button 
                     onClick={() => setShowPinModal(true)} 
-                    className="w-full py-4 bg-[#ff8c00] hover:bg-[#e07b00] rounded-2xl text-xs font-black uppercase tracking-widest text-white shadow-lg active:scale-95 transition-all flex items-center justify-center space-x-3 font-sans"
+                    className="w-full py-3.5 xl:py-4 bg-[#ff8c00] hover:bg-[#e07b00] rounded-2xl text-xs font-black uppercase tracking-widest text-white shadow-lg active:scale-95 transition-all flex items-center justify-center space-x-3 font-sans"
                   >
                     <Icon name="lock" size={16} />
                     <span>Unlock Management Hub</span>
@@ -1858,7 +1927,7 @@ TS Joinery Kanban System`
                 ) : (
                   <button 
                     onClick={() => { setIsLocked(true); setAppMode('employee'); setCurrentUser(null); }} 
-                    className="w-full py-4 bg-red-600/10 border border-red-500/30 hover:bg-red-600/20 rounded-2xl text-xs font-black uppercase tracking-widest text-red-500 transition-all flex items-center justify-center space-x-3 font-sans"
+                    className="w-full py-3.5 xl:py-4 bg-red-600/10 border border-red-500/30 hover:bg-red-600/20 rounded-2xl text-xs font-black uppercase tracking-widest text-red-500 transition-all flex items-center justify-center space-x-3 font-sans"
                   >
                     <Icon name="unlock" size={16} />
                     <span>Lock Terminal</span>
@@ -1871,7 +1940,7 @@ TS Joinery Kanban System`
                     System Version
                   </span>
                   <span className="text-emerald-400 font-extrabold tracking-wider bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20" title={getBuildInfoString()}>
-                    {CURRENT_VERSION_STRING}
+                    {systemVersion}
                   </span>
                 </div>
               </div>
@@ -1890,6 +1959,25 @@ TS Joinery Kanban System`
               />
             ) : (
               <div className="p-12 pb-36 font-sans">
+                {(appMode === 'system_admin' || appMode === 'company_settings') && (
+                  <SystemAdministrationHub 
+                    currentUser={currentUser}
+                    activeUsers={activeUsers}
+                    pendingUsers={pendingUsers}
+                    userPermissions={userPermissions}
+                    setUserPermissions={setUserPermissions}
+                    approvePendingUser={authManager.approvePendingUser}
+                    rejectPendingUser={authManager.rejectPendingUser}
+                    deleteActiveUser={authManager.deleteActiveUser}
+                    updateActiveUser={updateActiveUser}
+                    setShowAddUserModal={setShowAddUserModal}
+                    announce={announce}
+                    onVersionUpdated={(latest) => setSystemVersion(latest)}
+                    voiceEnabled={voiceEnabled}
+                    setVoiceEnabled={setVoiceEnabled}
+                  />
+                )}
+
                 {appMode === 'product_master' && (
                   <ProductMasterHub 
                     currentUser={currentUser}
@@ -1899,6 +1987,13 @@ TS Joinery Kanban System`
 
                 {appMode === 'purchase_orders' && (
                   <PurchaseOrderHub 
+                    currentUser={currentUser}
+                    announce={announce}
+                  />
+                )}
+
+                {appMode === 'dispatch' && (
+                  <DispatchHub 
                     currentUser={currentUser}
                     announce={announce}
                   />

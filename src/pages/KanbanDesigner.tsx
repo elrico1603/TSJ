@@ -44,10 +44,12 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
   const [selectedTextElementId, setSelectedTextElementId] = useState<string>('');
 
   const [customMasterInfo, setCustomMasterInfo] = useState<Partial<MasterInfoType>>({});
-  const [autoKanbanId, setAutoKanbanId] = useState<string>(() => generateNextKanbanNumber());
 
   const handleUpdateMasterInfo = (key: keyof MasterInfoType, value: any) => {
     setCustomMasterInfo(prev => ({ ...prev, [key]: value }));
+    if (key === 'internalProductNumber' && activeTemplate) {
+      setActiveTemplate(prev => prev ? ({ ...prev, kanbanId: value }) : null);
+    }
     if (key === 'templateName' && activeTemplate) {
       setActiveTemplate(prev => prev ? ({ ...prev, templateName: value }) : null);
     }
@@ -95,11 +97,14 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
     img.src = cropImageSrc;
   };
 
-  // Unified Master Information single source of truth state derived from selected Product Master or default internal placeholders
+  // Unified Master Information single source of truth state derived from activeTemplate, customMasterInfo, or selected Product Master
   const masterInfo: MasterInfoType = useMemo(() => {
     let base: MasterInfoType;
-    const currentKanbanId = customMasterInfo.internalProductNumber || 
-      (selectedProductMaster ? (selectedProductMaster.internalProductCode || selectedProductMaster.id) : autoKanbanId);
+    const currentKanbanId = 
+      activeTemplate?.kanbanId || 
+      customMasterInfo.internalProductNumber || 
+      selectedProductMaster?.internalProductCode || 
+      '';
 
     if (selectedProductMaster) {
       const locStr = selectedProductMaster.location || 'A-01-B-01';
@@ -142,9 +147,9 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
       const locStr = 'A-01-B-01';
       const qrUrl = getKanbanMailtoQRCodeUrl({
         internalProductNumber: currentKanbanId,
-        productName: 'Sample Product',
-        supplierPartNumber: 'ABC-123',
-        supplier: 'Sample Supplier',
+        productName: activeTemplate?.productName || 'Sample Product',
+        supplierPartNumber: activeTemplate?.supplierPartNumber || 'ABC-123',
+        supplier: activeTemplate?.supplier || 'Sample Supplier',
         orderQuantity: '100',
         binQuantity: '100',
         location: locStr,
@@ -152,9 +157,9 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
       });
 
       base = {
-        productName: 'Sample Product',
-        supplier: 'Sample Supplier',
-        supplierPartNumber: 'ABC-123',
+        productName: activeTemplate?.productName || 'Sample Product',
+        supplier: activeTemplate?.supplier || 'Sample Supplier',
+        supplierPartNumber: activeTemplate?.supplierPartNumber || 'ABC-123',
         orderQuantity: '100',
         deliveryTime: '3 Days',
         location: locStr,
@@ -171,7 +176,7 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
     }
 
     const merged = { ...base, ...customMasterInfo };
-    const finalKanbanId = merged.internalProductNumber || currentKanbanId;
+    const finalKanbanId = activeTemplate?.kanbanId || merged.internalProductNumber || currentKanbanId;
 
     const currentQr = getKanbanMailtoQRCodeUrl({
       internalProductNumber: finalKanbanId,
@@ -185,7 +190,7 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
     });
 
     return { ...merged, internalProductNumber: finalKanbanId, qrCode: currentQr };
-  }, [selectedProductMaster, activeTemplate?.templateName, activeTemplate?.paperSize, customMasterInfo, autoKanbanId]);
+  }, [selectedProductMaster, activeTemplate?.kanbanId, activeTemplate?.templateName, activeTemplate?.paperSize, activeTemplate?.productName, activeTemplate?.supplier, activeTemplate?.supplierPartNumber, customMasterInfo]);
 
   const selectedCard: KanbanCardMaster = useMemo(() => {
     let letter = 'A';
@@ -403,7 +408,15 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
   };
 
   const handleSelectTemplate = (tpl: KanbanTemplateV2) => {
-    setActiveTemplate(JSON.parse(JSON.stringify(tpl)));
+    const cloned: KanbanTemplateV2 = JSON.parse(JSON.stringify(tpl));
+    if (!cloned.kanbanId) {
+      cloned.kanbanId = generateNextKanbanNumber();
+      saveTemplate(cloned).catch(console.error);
+    }
+    setActiveTemplate(cloned);
+    setCustomMasterInfo({
+      internalProductNumber: cloned.kanbanId
+    });
     // Auto focus first section
     if (tpl.sections && tpl.sections.length > 0) {
       setActiveSectionId(tpl.sections[0].id);
@@ -419,10 +432,11 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
     newTpl.meta.lastModifiedBy = currentUser?.email || currentUser?.uid || 'elrico@tsjoinery.co.za';
 
     const nextKanbanId = generateNextKanbanNumber();
-    setAutoKanbanId(nextKanbanId);
-    setCustomMasterInfo(prev => ({ ...prev, internalProductNumber: nextKanbanId }));
+    newTpl.kanbanId = nextKanbanId;
 
     setActiveTemplate(newTpl);
+    setCustomMasterInfo({ internalProductNumber: nextKanbanId });
+
     if (newTpl.sections.length > 0) {
       setActiveSectionId(newTpl.sections[0].id);
     }
@@ -454,8 +468,11 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
     }
 
     try {
+      const kanbanIdToSave = activeTemplate.kanbanId || customMasterInfo.internalProductNumber || generateNextKanbanNumber();
+
       const updatedTemplate: KanbanTemplateV2 = {
         ...activeTemplate,
+        kanbanId: kanbanIdToSave,
         templateName: saveTemplateName.trim().toUpperCase(),
         productName: saveProductName.trim(),
         category: saveCategory.trim(),
@@ -479,6 +496,7 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
 
       // Update active template
       setActiveTemplate({ ...updatedTemplate, id: docId });
+      setCustomMasterInfo(prev => ({ ...prev, internalProductNumber: kanbanIdToSave }));
     } catch (e) {
       console.error(e);
       announce('Failed to save template layout configuration.');
@@ -503,12 +521,11 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
 
     try {
       const nextKanbanId = generateNextKanbanNumber();
-      setAutoKanbanId(nextKanbanId);
-      setCustomMasterInfo(prev => ({ ...prev, internalProductNumber: nextKanbanId }));
 
       const newTemplateName = `${duplicateProductName.trim().toUpperCase()} TEMPLATE`;
       const duplicate: KanbanTemplateV2 = {
         ...JSON.parse(JSON.stringify(activeTemplate)),
+        kanbanId: nextKanbanId,
         templateName: newTemplateName,
         productName: duplicateProductName.trim(),
         meta: {
@@ -527,6 +544,7 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
       const refreshedTemplates = await getTemplates();
       setTemplates(refreshedTemplates);
       setActiveTemplate({ ...duplicate, id: docId });
+      setCustomMasterInfo({ internalProductNumber: nextKanbanId });
     } catch (e) {
       console.error(e);
       announce('Failed to duplicate template.');
@@ -1064,13 +1082,13 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
                   <div 
                     className="absolute border border-dashed border-neutral-300 pointer-events-none flex justify-between p-1"
                     style={{
-                      left: `${mmToPx(activeTemplate.margins)}px`,
-                      right: `${mmToPx(activeTemplate.margins)}px`,
-                      top: `${mmToPx(activeTemplate.margins)}px`,
-                      bottom: `${mmToPx(activeTemplate.margins)}px`
+                      left: '0px',
+                      right: '0px',
+                      top: '0px',
+                      bottom: '0px'
                     }}
                   >
-                    <span className="text-[6px] text-gray-400 font-mono tracking-wider">PRINTABLE MARGIN ({activeTemplate.margins}mm)</span>
+                    <span className="text-[6px] text-gray-400 font-mono tracking-wider">PRINTABLE MARGIN (0mm)</span>
                     <span className="text-[6px] text-gray-400 font-mono tracking-wider">A4 Portrait Canvas</span>
                   </div>
 
@@ -1507,22 +1525,6 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
                           <option value="Landscape">Landscape</option>
                         </select>
                       </div>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] text-gray-400 font-bold uppercase flex justify-between">
-                        <span>Print Margins (mm)</span>
-                        <span className="font-mono text-purple-400 font-bold">{activeTemplate.margins}mm</span>
-                      </label>
-                      <input
-                        type="range"
-                        min="0"
-                        max="30"
-                        step="1"
-                        value={activeTemplate.margins}
-                        onChange={(e) => setActiveTemplate({ ...activeTemplate, margins: parseInt(e.target.value, 10) })}
-                        className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
-                      />
                     </div>
                   </div>
 

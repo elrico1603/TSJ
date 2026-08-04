@@ -59,6 +59,7 @@ export interface KanbanSectionConfig {
 
 export interface KanbanTemplateV2 {
   id?: string;
+  kanbanId?: string;
   templateName: string;
   paperSize: 'A4' | 'A5' | 'A6' | 'Custom';
   orientation: 'Portrait' | 'Landscape';
@@ -142,14 +143,17 @@ export async function deleteTemplate(id: string): Promise<void> {
  * Helper to safely map legacy templates or incomplete templates to V2 format
  */
 export function mapToTemplateV2(id: string, data: any): KanbanTemplateV2 {
+  const kanbanId = data.kanbanId || data.internalProductNumber || '';
+
   // Check if it has the newer sections array format
   if (data.sections && Array.isArray(data.sections)) {
     return {
       id,
+      kanbanId,
       templateName: data.templateName || 'Unnamed Template',
       paperSize: data.paperSize || 'A4',
       orientation: data.orientation || 'Portrait',
-      margins: typeof data.margins === 'number' ? data.margins : 10,
+      margins: 0,
       sections: data.sections.map((sec: any) => ({
         ...sec,
         picture: sec.picture || { x: 15, y: 15, width: 110, height: 110 },
@@ -253,10 +257,11 @@ export function mapToTemplateV2(id: string, data: any): KanbanTemplateV2 {
 
   return {
     id,
+    kanbanId,
     templateName: data.templateName || 'Legacy Template fallback',
     paperSize: 'A4',
     orientation: 'Portrait',
-    margins: 15,
+    margins: 0,
     sections: defaultSections,
     picture: { x: 15, y: 15, width: 110, height: 110 },
     qr: { x: 210, y: 15, width: 110, height: 110 },
@@ -421,7 +426,7 @@ export function createDefaultTemplateBlueprint(name: string, type: 'standard' | 
     templateName: name,
     paperSize: 'A4',
     orientation: 'Portrait',
-    margins: 15,
+    margins: 0,
     sections,
     picture: { x: 15, y: 15, width: 110, height: 110 },
     qr: { x: 210, y: 15, width: 110, height: 110 },

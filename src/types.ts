@@ -515,5 +515,109 @@ export interface PurchaseOrder {
   auditTrail: PurchaseOrderAudit[];
 }
 
+export interface CompanyInfo {
+  companyName: string;
+  tradingName: string;
+  registrationNumber: string;
+  vatNumber: string;
+  telephone: string;
+  mobile: string;
+  email: string;
+  website: string;
+  physicalAddress: string;
+  postalAddress: string;
+  companyLogo: string;
+  primaryContactPerson: string;
+  notes: string;
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+export interface Branch {
+  id: string;
+  branchName: string;
+  branchCode: string;
+  manager: string;
+  telephone: string;
+  email: string;
+  physicalAddress: string;
+  province: string;
+  country: string;
+  status: 'active' | 'inactive' | 'archived';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApplicationVersion {
+  id: string;
+  version: string;
+  releaseDate: string;
+  description: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UserBranchAssignment {
+  userId: string;
+  userName: string;
+  userEmail: string;
+  branchId: string;
+  branchName: string;
+  updatedAt: string;
+}
+
+export type PermissionAction = 'View' | 'Create' | 'Edit' | 'Delete' | 'Approve' | 'Print' | 'Export';
+
+export type PermissionCategory = 
+  | 'SYSTEM ADMINISTRATION'
+  | 'EMPLOYEE MANAGEMENT'
+  | 'KANBAN'
+  | 'PROCUREMENT'
+  | 'REPORTS'
+  | 'SETTINGS';
+
+export interface ModulePermissionConfig {
+  moduleName: string;
+  category: PermissionCategory;
+  actions: Record<PermissionAction, boolean>;
+}
+
+export interface RoleDefinition {
+  id: string;
+  roleName: string;
+  description: string;
+  status: 'active' | 'archived';
+  createdAt: string;
+  updatedAt: string;
+  isSystemDefault?: boolean;
+}
+
+export interface RolePermissions {
+  roleId: string;
+  roleName: string;
+  permissions: Record<string, Record<PermissionAction, boolean>>;
+  updatedAt: string;
+  updatedBy: string;
+}
+
+export interface UserRoleAssignment {
+  userId: string;
+  userName: string;
+  userEmail: string;
+  roleId: string;
+  roleName: string;
+  updatedAt: string;
+}
+
+export interface RoleAuditLogEntry {
+  id: string;
+  date: string;
+  time: string;
+  administrator: string;
+  action: string;
+  previousValue: string;
+  newValue: string;
+}
+
 
 
