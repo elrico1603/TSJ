@@ -188,7 +188,7 @@ export default function App() {
   };
   const [cardForm, setCardForm] = useState(initialCardForm);
   const [kanbanTemplates, setKanbanTemplates] = useState<KanbanTemplate[]>([]);
-  const [v2PrintPreview, setV2PrintPreview] = useState<{ template: any; cardData: any } | null>(null);
+  const [v2PrintPreview, setV2PrintPreview] = useState<{ template: any; cardData: any; masterInfo?: any } | null>(null);
   const [printingItem, setPrintingItem] = useState<{ card: KanbanCard; template: KanbanTemplate } | null>(null);
   const [printingTemplate, setPrintingTemplate] = useState<{ template: KanbanTemplate; cardData: any } | null>(null);
   const [kanbanEditingId, setKanbanEditingId] = useState<string | null>(null);
@@ -1629,6 +1629,7 @@ TS Joinery Kanban System`
         <KanbanPreview
           template={v2PrintPreview.template}
           cardData={v2PrintPreview.cardData}
+          masterInfo={v2PrintPreview.masterInfo}
           onClose={() => setV2PrintPreview(null)}
           announce={announce}
         />
@@ -1953,8 +1954,8 @@ TS Joinery Kanban System`
               <KanbanDesigner 
                 currentUser={currentUser}
                 announce={announce}
-                onPrintPreview={(template, cardData) => {
-                  setV2PrintPreview({ template, cardData });
+                onPrintPreview={(template, cardData, masterInfo) => {
+                  setV2PrintPreview({ template, cardData, masterInfo });
                 }}
               />
             ) : (

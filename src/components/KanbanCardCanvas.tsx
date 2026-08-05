@@ -24,7 +24,7 @@ export const renderSectionContent = (
   masterInfo?: MasterInfoType,
   cardData?: KanbanCardMaster
 ) => {
-  const scaleFactorFont = sec.height / 60; // relative font scale
+  const scaleFactorFont = 1.0; // Font scale is handled proportionally by width & height inside each section component
   switch (sec.id) {
     case 'master_info':
       return (
@@ -114,22 +114,40 @@ export const KanbanCardCanvas: React.FC<KanbanCardCanvasProps> = ({
 }) => {
   const visibleSections = (template.sections || []).filter(s => s.visible !== false);
 
-  // Compute total card height from sections in mm
-  const computedHeightMm = visibleSections.reduce((max, sec) => {
-    const bottom = (sec.y || 0) + (sec.height || 0);
-    return bottom > max ? bottom : max;
-  }, 0);
+  const effectiveMasterInfo: MasterInfoType = masterInfo || {
+    productName: template.productName || cardData?.productDescription || 'Sample Product',
+    supplier: template.supplier || cardData?.supplierName || 'Sample Supplier',
+    supplierPartNumber: template.supplierPartNumber || cardData?.supplierPartNumber || 'ABC-123',
+    orderQuantity: template.orderQuantity || cardData?.orderQuantity || '100',
+    deliveryTime: template.deliveryTime || cardData?.deliveryTime || '3 Days',
+    location: template.location || (cardData?.location ? `${cardData.location.letter || ''}${cardData.location.number || ''}` : 'A-01-B-01'),
+    locationColour: template.locationColour || cardData?.location?.colour || 'GREEN',
+    internalProductNumber: template.kanbanId || cardData?.kanbanId || 'KAN-001',
+    productImage: cardData?.imageUrl || 'https://images.unsplash.com/photo-1533090161767-e6ffed986c88?auto=format&fit=crop&q=80&w=200',
+    qrCode: cardData?.qrCodeUrl || '',
+    templateName: template.templateName || '',
+    templateType: template.paperSize || 'A4',
+    binQuantity: template.binQuantity || cardData?.binQuantity || '100',
+    cardColour: cardData?.cardColour || '#ffffff',
+    status: 'ACTIVE'
+  };
 
-  // Fallback to 297mm if full sheet or 0
-  const cardHeightMm = computedHeightMm > 0 ? computedHeightMm : 297;
-  const cardWidthMm = template.dimensions?.width || 210;
+  const cardWidthMm = template.dimensions?.width || (template.paperSize === 'A5' ? 148 : 210);
+  const cardHeightMm = template.dimensions?.height || (template.paperSize === 'A5' ? 210 : 297);
+
+  // Designer reference canvas height (680px for 297mm A4 height -> 2.28956228956 px/mm)
+  const canvasHeightPx = 680;
+  const scaleFactor = canvasHeightPx / 297;
+
+  const widthPx = cardWidthMm * scaleFactor;
+  const heightPx = cardHeightMm * scaleFactor;
 
   return (
     <div
       className={`kanban-card-canvas relative bg-white select-none overflow-hidden ${className}`}
       style={{
-        width: `${cardWidthMm}mm`,
-        height: `${cardHeightMm}mm`,
+        width: `${widthPx}px`,
+        height: `${heightPx}px`,
         position: 'relative',
         boxSizing: 'border-box',
         ...style
@@ -140,17 +158,17 @@ export const KanbanCardCanvas: React.FC<KanbanCardCanvasProps> = ({
           key={sec.id}
           style={{
             position: 'absolute',
-            left: `${sec.x}mm`,
-            top: `${sec.y}mm`,
-            width: `${sec.width}mm`,
-            height: `${sec.height}mm`,
+            left: `${sec.x * scaleFactor}px`,
+            top: `${sec.y * scaleFactor}px`,
+            width: `${sec.width * scaleFactor}px`,
+            height: `${sec.height * scaleFactor}px`,
             zIndex: sec.zIndex || 1,
             transform: sec.rotation ? `rotate(${sec.rotation}deg)` : undefined,
-            borderRadius: `${sec.cornerRadius || 0}mm`
+            borderRadius: `${(sec.cornerRadius || 0) * scaleFactor}px`
           }}
           className={`overflow-hidden ${sec.borderStyle && sec.borderStyle !== 'none' ? `border-${sec.borderWidth} ${sec.borderStyle}` : ''}`}
         >
-          {renderSectionContent(sec, masterInfo, cardData)}
+          {renderSectionContent(sec, effectiveMasterInfo, cardData)}
         </div>
       ))}
     </div>

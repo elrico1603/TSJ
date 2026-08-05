@@ -245,7 +245,7 @@ export const SystemAdministrationHub: React.FC<SystemAdministrationHubProps> = (
                 </div>
                 <div className="p-3 bg-white/5 rounded-xl flex items-center justify-between">
                   <span className="text-gray-300">Responsive Layout Engine & Auto Height</span>
-                  <span className="text-emerald-400 font-bold">ACTIVE (v1.0.0.010)</span>
+                  <span className="text-emerald-400 font-bold">ACTIVE (v1.0.0.018)</span>
                 </div>
                 <div className="p-3 bg-white/5 rounded-xl flex items-center justify-between">
                   <span className="text-gray-300">Voice Announcement Chime Engine</span>

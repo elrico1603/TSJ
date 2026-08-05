@@ -3,10 +3,12 @@ import { Icon } from '../components/Icon';
 import { KanbanTemplateV2 } from '../services/templateService';
 import { KanbanCardMaster } from '../services/kanbanService';
 import { KanbanCardCanvas } from '../components/KanbanCardCanvas';
+import { MasterInformation as MasterInfoType } from '../types';
 
 interface KanbanPreviewProps {
   template: KanbanTemplateV2;
   cardData: KanbanCardMaster;
+  masterInfo?: MasterInfoType;
   onClose: () => void;
   announce: (message: string) => void;
 }
@@ -18,6 +20,7 @@ interface KanbanPreviewProps {
 export const KanbanPreview: React.FC<KanbanPreviewProps> = ({
   template,
   cardData,
+  masterInfo,
   onClose,
   announce
 }) => {
@@ -26,7 +29,14 @@ export const KanbanPreview: React.FC<KanbanPreviewProps> = ({
     announce('Dispatched print job spooler.');
   };
 
-  const marginMm = 0;
+  const cardWidthMm = template.dimensions?.width || (template.paperSize === 'A5' ? 148 : 210);
+  const cardHeightMm = template.dimensions?.height || (template.paperSize === 'A5' ? 210 : 297);
+
+  // Designer reference parameters & physical page scale ratio
+  const scaleFactor = 680 / 297;
+  const cardWidthPx = cardWidthMm * scaleFactor;
+  const cardHeightPx = cardHeightMm * scaleFactor;
+  const printScale = (96 * 297) / (25.4 * 680);
 
   return (
     <div className="fixed inset-0 z-[1100] bg-[#0c0c0c] flex flex-col font-sans overflow-hidden">
@@ -93,6 +103,7 @@ export const KanbanPreview: React.FC<KanbanPreviewProps> = ({
                 margin: 0 !important;
                 padding: 0 !important;
                 width: 210mm !important;
+                height: 297mm !important;
                 -webkit-print-color-adjust: exact !important;
                 print-color-adjust: exact !important;
               }
@@ -107,6 +118,7 @@ export const KanbanPreview: React.FC<KanbanPreviewProps> = ({
                 left: 0 !important;
                 top: 0 !important;
                 width: 210mm !important;
+                height: 297mm !important;
                 margin: 0 !important;
                 padding: 0 !important;
               }
@@ -114,12 +126,17 @@ export const KanbanPreview: React.FC<KanbanPreviewProps> = ({
                 box-shadow: none !important;
                 border: none !important;
                 width: 210mm !important;
+                height: 297mm !important;
                 margin: 0 !important;
-                padding: ${marginMm}mm !important;
+                padding: 0 !important;
+                position: relative !important;
+                overflow: hidden !important;
               }
               .kanban-card-wrapper {
                 break-inside: avoid !important;
                 page-break-inside: avoid !important;
+                width: 210mm !important;
+                height: 297mm !important;
               }
               .no-print {
                 display: none !important;
@@ -130,42 +147,48 @@ export const KanbanPreview: React.FC<KanbanPreviewProps> = ({
 
           {/* Centered White A4 Sheet Container */}
           <div
-            className="kanban-a4-sheet bg-white shadow-2xl relative border border-neutral-300 text-black box-sizing-border"
+            className="kanban-a4-sheet bg-white shadow-2xl relative border border-neutral-300 text-black box-sizing-border overflow-hidden"
             style={{
-              width: '210mm',
-              minHeight: '297mm',
-              padding: `${marginMm}mm`,
+              width: `${cardWidthMm}mm`,
+              height: `${cardHeightMm}mm`,
+              position: 'relative',
               boxSizing: 'border-box'
             }}
           >
             {/* Printable Margin Guideline (Screen only) */}
             <div
-              className="no-print absolute border border-dashed border-neutral-300 pointer-events-none flex justify-between p-1"
+              className="no-print absolute border border-dashed border-neutral-300 pointer-events-none flex justify-between p-1 z-50"
               style={{
-                left: `${marginMm}mm`,
-                right: `${marginMm}mm`,
-                top: `${marginMm}mm`,
-                bottom: `${marginMm}mm`
+                left: 0,
+                right: 0,
+                top: 0,
+                bottom: 0
               }}
             >
-              <span className="text-[6px] text-gray-400 font-mono tracking-wider">PRINTABLE MARGIN ({marginMm}mm)</span>
-              <span className="text-[6px] text-gray-400 font-mono tracking-wider">A4 Portrait Sheet</span>
+              <span className="text-[6px] text-gray-400 font-mono tracking-wider">PRINTABLE MARGIN (0mm)</span>
+              <span className="text-[6px] text-gray-400 font-mono tracking-wider">{template.paperSize || 'A4'} Portrait Sheet</span>
             </div>
 
-            {/* Stack of Cards starting inside printable margin */}
-            <div className="flex flex-col gap-[5mm] relative w-full">
-              <div
-                className="kanban-card-wrapper"
-                style={{
-                  breakInside: 'avoid',
-                  pageBreakInside: 'avoid'
-                }}
-              >
-                <KanbanCardCanvas
-                  template={template}
-                  cardData={cardData}
-                />
-              </div>
+            {/* Scaled Canvas Container mapping Designer master canvas to physical paper dimensions */}
+            <div
+              className="kanban-card-wrapper"
+              style={{
+                width: `${cardWidthPx}px`,
+                height: `${cardHeightPx}px`,
+                transform: `scale(${printScale})`,
+                transformOrigin: 'top left',
+                position: 'absolute',
+                left: 0,
+                top: 0,
+                breakInside: 'avoid',
+                pageBreakInside: 'avoid'
+              }}
+            >
+              <KanbanCardCanvas
+                template={template}
+                cardData={cardData}
+                masterInfo={masterInfo}
+              />
             </div>
           </div>
         </div>

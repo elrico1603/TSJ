@@ -70,6 +70,46 @@ export const DEFAULT_BRANCHES: Branch[] = [
 
 export const DEFAULT_VERSIONS: ApplicationVersion[] = [
   {
+    id: 'VER-1018',
+    version: '1.0.0.018',
+    releaseDate: '2026-08-05',
+    description: 'Phase 2 - Print Preview Pipeline Alignment: Mapped KanbanCardCanvas rendering matrix to physical A4 paper dimensions using precise viewport scaling, delivering true WYSIWYG parity between Designer, Print Preview, and PDF output.',
+    createdAt: '2026-08-05T00:05:00.000Z',
+    updatedAt: '2026-08-05T00:05:00.000Z'
+  },
+  {
+    id: 'VER-1017',
+    version: '1.0.0.017',
+    releaseDate: '2026-08-04',
+    description: 'Designer Restoration: Restored Kanban Designer canvas layout, sizing, and rendering parameters to exact Version 15 master specifications.',
+    createdAt: '2026-08-04T05:53:00.000Z',
+    updatedAt: '2026-08-04T05:53:00.000Z'
+  },
+  {
+    id: 'VER-1016',
+    version: '1.0.0.016',
+    releaseDate: '2026-08-04',
+    description: 'Architectural Refactor: Unified Kanban Designer onto true 1:1 A4 canvas dimensions (210mm x 297mm / 96 DPI), using viewport CSS transform scaling for seamless WYSIWYG matching with Print Preview.',
+    createdAt: '2026-08-04T05:00:00.000Z',
+    updatedAt: '2026-08-04T05:00:00.000Z'
+  },
+  {
+    id: 'VER-1015',
+    version: '1.0.0.015',
+    releaseDate: '2026-08-04',
+    description: 'Print Pipeline Diagnostic & Verification Audit: Traced rendering execution stack and layout properties between Designer and Print Preview.',
+    createdAt: '2026-08-04T04:50:00.000Z',
+    updatedAt: '2026-08-04T04:50:00.000Z'
+  },
+  {
+    id: 'VER-1014',
+    version: '1.0.0.014',
+    releaseDate: '2026-08-04',
+    description: 'Architectural Refactor: Consolidated Kanban Designer and Print Preview into a single unified KanbanCardCanvas rendering pipeline.',
+    createdAt: '2026-08-04T04:30:00.000Z',
+    updatedAt: '2026-08-04T04:30:00.000Z'
+  },
+  {
     id: 'VER-1011',
     version: '1.0.0.011',
     releaseDate: '2026-08-03',

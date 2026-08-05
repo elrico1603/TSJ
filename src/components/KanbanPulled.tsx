@@ -113,7 +113,7 @@ export const KanbanPulled: React.FC<KanbanPulledProps> = ({
   return (
     <div 
       style={containerStyle} 
-      className="flex flex-col min-h-full h-auto w-full justify-between overflow-visible text-black select-none font-sans"
+      className="flex flex-col h-full w-full justify-between overflow-hidden text-black select-none font-sans"
     >
       {/* 1. At the very top: Display the Product Name (Read-only) */}
       <div 
@@ -130,9 +130,9 @@ export const KanbanPulled: React.FC<KanbanPulledProps> = ({
       </div>
 
       {/* 2. Middle area: Split Product Image (left) and warned KANBAN PULLED / Bin Quantity (right) */}
-      <div className="flex flex-row items-center justify-between w-full flex-1 min-h-0 gap-2 font-sans overflow-visible">
+      <div className="flex flex-row items-center justify-between w-full flex-1 min-h-0 gap-2 font-sans overflow-hidden">
         {/* Left column: Product Image */}
-        <div className="w-[35%] h-full flex items-center justify-center min-w-0 overflow-visible">
+        <div className="w-[35%] h-full flex items-center justify-center min-w-0 overflow-hidden">
           <ProductImageWidget 
             imageUrl={pImage} 
             altText={pName}
@@ -141,7 +141,7 @@ export const KanbanPulled: React.FC<KanbanPulledProps> = ({
         </div>
 
         {/* Right column: Details and Input */}
-        <div className="w-[60%] flex flex-col justify-center items-center text-center min-w-0 gap-1 py-1" style={{ height: 'auto', minHeight: '100%' }}>
+        <div className="w-[60%] flex flex-col justify-center items-center text-center min-w-0 gap-1 py-1 h-full">
           {/* KANBAN PULLED (Centered, Bold, Uppercase, Red, No background) */}
           {(() => {
             const warningSettings = textSettings?.warningText;

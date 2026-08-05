@@ -70,6 +70,11 @@ export interface KanbanTemplateV2 {
   description?: string;
   supplier?: string;
   supplierPartNumber?: string;
+  orderQuantity?: string;
+  deliveryTime?: string;
+  location?: string;
+  locationColour?: string;
+  binQuantity?: string;
   picture?: {
     x: number;
     y: number;
@@ -164,6 +169,11 @@ export function mapToTemplateV2(id: string, data: any): KanbanTemplateV2 {
       description: data.description || '',
       supplier: data.supplier || '',
       supplierPartNumber: data.supplierPartNumber || '',
+      orderQuantity: data.orderQuantity || '',
+      deliveryTime: data.deliveryTime || '',
+      location: data.location || '',
+      locationColour: data.locationColour || '',
+      binQuantity: data.binQuantity || '',
       picture: data.picture || { x: 15, y: 15, width: 110, height: 110 },
       qr: data.qr || { x: 210, y: 15, width: 110, height: 110 },
       meta: {
@@ -263,6 +273,16 @@ export function mapToTemplateV2(id: string, data: any): KanbanTemplateV2 {
     orientation: 'Portrait',
     margins: 0,
     sections: defaultSections,
+    productName: data.productName || '',
+    category: data.category || '',
+    description: data.description || '',
+    supplier: data.supplier || '',
+    supplierPartNumber: data.supplierPartNumber || '',
+    orderQuantity: data.orderQuantity || '',
+    deliveryTime: data.deliveryTime || '',
+    location: data.location || '',
+    locationColour: data.locationColour || '',
+    binQuantity: data.binQuantity || '',
     picture: { x: 15, y: 15, width: 110, height: 110 },
     qr: { x: 210, y: 15, width: 110, height: 110 },
     meta: {

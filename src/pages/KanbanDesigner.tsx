@@ -23,7 +23,7 @@ import { QRCodeRenderer } from '../components/QRCodeRenderer';
 interface KanbanDesignerProps {
   currentUser: any;
   announce: (message: string) => void;
-  onPrintPreview: (template: KanbanTemplateV2, sampleCard: KanbanCardMaster) => void;
+  onPrintPreview: (template: KanbanTemplateV2, sampleCard: KanbanCardMaster, masterInfo?: MasterInfoType) => void;
 }
 
 export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
@@ -47,14 +47,23 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
 
   const handleUpdateMasterInfo = (key: keyof MasterInfoType, value: any) => {
     setCustomMasterInfo(prev => ({ ...prev, [key]: value }));
-    if (key === 'internalProductNumber' && activeTemplate) {
-      setActiveTemplate(prev => prev ? ({ ...prev, kanbanId: value }) : null);
-    }
-    if (key === 'templateName' && activeTemplate) {
-      setActiveTemplate(prev => prev ? ({ ...prev, templateName: value }) : null);
-    }
-    if (key === 'templateType' && activeTemplate) {
-      setActiveTemplate(prev => prev ? ({ ...prev, paperSize: value as any }) : null);
+    if (activeTemplate) {
+      setActiveTemplate(prev => {
+        if (!prev) return null;
+        const updated = { ...prev };
+        if (key === 'internalProductNumber') updated.kanbanId = value;
+        else if (key === 'templateName') updated.templateName = value;
+        else if (key === 'templateType') updated.paperSize = value as any;
+        else if (key === 'productName') updated.productName = value;
+        else if (key === 'supplier') updated.supplier = value;
+        else if (key === 'supplierPartNumber') updated.supplierPartNumber = value;
+        else if (key === 'orderQuantity') updated.orderQuantity = value;
+        else if (key === 'deliveryTime') updated.deliveryTime = value;
+        else if (key === 'location') updated.location = value;
+        else if (key === 'locationColour') updated.locationColour = value;
+        else if (key === 'binQuantity') updated.binQuantity = value;
+        return updated;
+      });
     }
   };
 
@@ -106,74 +115,64 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
       selectedProductMaster?.internalProductCode || 
       '';
 
-    if (selectedProductMaster) {
-      const locStr = selectedProductMaster.location || 'A-01-B-01';
-      const qtyStr = selectedProductMaster.orderQuantity 
-        ? `${selectedProductMaster.orderQuantity} ${selectedProductMaster.unit || ''}`.trim() 
-        : '100';
-      const binStr = selectedProductMaster.minimumStock 
-        ? `${selectedProductMaster.minimumStock} Min` 
-        : '100';
+    const getVal = (
+      tplVal: string | undefined,
+      customVal: string | undefined,
+      prodVal: string | undefined,
+      defaultVal: string
+    ) => {
+      if (tplVal !== undefined && tplVal !== '') return tplVal;
+      if (customVal !== undefined && customVal !== '') return customVal;
+      if (prodVal !== undefined && prodVal !== '') return prodVal;
+      return defaultVal;
+    };
 
-      const qrUrl = getKanbanMailtoQRCodeUrl({
-        internalProductNumber: currentKanbanId,
-        productName: selectedProductMaster.productName,
-        supplierPartNumber: selectedProductMaster.supplierPartNumber || 'ABC-123',
-        supplier: selectedProductMaster.supplier || 'Sample Supplier',
-        orderQuantity: qtyStr,
-        binQuantity: binStr,
-        location: locStr,
-        deliveryTime: selectedProductMaster.deliveryTime || '3 Days'
-      });
+    const productName = getVal(activeTemplate?.productName, customMasterInfo.productName, selectedProductMaster?.productName, 'Sample Product');
+    const supplier = getVal(activeTemplate?.supplier, customMasterInfo.supplier, selectedProductMaster?.supplier, 'Sample Supplier');
+    const supplierPartNumber = getVal(activeTemplate?.supplierPartNumber, customMasterInfo.supplierPartNumber, selectedProductMaster?.supplierPartNumber, 'ABC-123');
 
-      base = {
-        productName: selectedProductMaster.productName,
-        supplier: selectedProductMaster.supplier || 'Sample Supplier',
-        supplierPartNumber: selectedProductMaster.supplierPartNumber || 'ABC-123',
-        orderQuantity: qtyStr,
-        deliveryTime: selectedProductMaster.deliveryTime || '3 Days',
-        location: locStr,
-        locationColour: selectedProductMaster.locationColour || 'GREEN',
-        internalProductNumber: currentKanbanId,
-        productImage: selectedProductMaster.productImage || '',
-        qrCode: qrUrl,
-        templateName: activeTemplate?.templateName || '',
-        templateType: activeTemplate?.paperSize || 'A4',
-        binQuantity: binStr,
-        cardColour: selectedProductMaster.cardColour || '#ffffff',
-        status: selectedProductMaster.status === 'Active' ? 'ACTIVE' : 'INACTIVE'
-      };
-    } else {
-      const locStr = 'A-01-B-01';
-      const qrUrl = getKanbanMailtoQRCodeUrl({
-        internalProductNumber: currentKanbanId,
-        productName: activeTemplate?.productName || 'Sample Product',
-        supplierPartNumber: activeTemplate?.supplierPartNumber || 'ABC-123',
-        supplier: activeTemplate?.supplier || 'Sample Supplier',
-        orderQuantity: '100',
-        binQuantity: '100',
-        location: locStr,
-        deliveryTime: '3 Days'
-      });
+    const prodQtyStr = selectedProductMaster?.orderQuantity 
+      ? `${selectedProductMaster.orderQuantity} ${selectedProductMaster.unit || ''}`.trim() 
+      : undefined;
+    const orderQuantity = getVal(activeTemplate?.orderQuantity, customMasterInfo.orderQuantity, prodQtyStr, '100');
 
-      base = {
-        productName: activeTemplate?.productName || 'Sample Product',
-        supplier: activeTemplate?.supplier || 'Sample Supplier',
-        supplierPartNumber: activeTemplate?.supplierPartNumber || 'ABC-123',
-        orderQuantity: '100',
-        deliveryTime: '3 Days',
-        location: locStr,
-        locationColour: 'GREEN',
-        internalProductNumber: currentKanbanId,
-        productImage: 'https://images.unsplash.com/photo-1533090161767-e6ffed986c88?auto=format&fit=crop&q=80&w=200',
-        qrCode: qrUrl,
-        templateName: activeTemplate?.templateName || '',
-        templateType: activeTemplate?.paperSize || 'A4',
-        binQuantity: '100',
-        cardColour: '#ffffff',
-        status: 'ACTIVE'
-      };
-    }
+    const deliveryTime = getVal(activeTemplate?.deliveryTime, customMasterInfo.deliveryTime, selectedProductMaster?.deliveryTime, '3 Days');
+    const location = getVal(activeTemplate?.location, customMasterInfo.location, selectedProductMaster?.location, 'A-01-B-01');
+    const locationColour = getVal(activeTemplate?.locationColour, customMasterInfo.locationColour, selectedProductMaster?.locationColour, 'GREEN');
+
+    const prodBinStr = selectedProductMaster?.minimumStock 
+      ? `${selectedProductMaster.minimumStock} Min` 
+      : undefined;
+    const binQuantity = getVal(activeTemplate?.binQuantity, customMasterInfo.binQuantity, prodBinStr, '100');
+
+    const qrUrl = getKanbanMailtoQRCodeUrl({
+      internalProductNumber: currentKanbanId,
+      productName,
+      supplierPartNumber,
+      supplier,
+      orderQuantity,
+      binQuantity,
+      location,
+      deliveryTime
+    });
+
+    base = {
+      productName,
+      supplier,
+      supplierPartNumber,
+      orderQuantity,
+      deliveryTime,
+      location,
+      locationColour,
+      internalProductNumber: currentKanbanId,
+      productImage: selectedProductMaster?.productImage || 'https://images.unsplash.com/photo-1533090161767-e6ffed986c88?auto=format&fit=crop&q=80&w=200',
+      qrCode: qrUrl,
+      templateName: activeTemplate?.templateName || '',
+      templateType: activeTemplate?.paperSize || 'A4',
+      binQuantity,
+      cardColour: selectedProductMaster?.cardColour || '#ffffff',
+      status: selectedProductMaster ? (selectedProductMaster.status === 'Active' ? 'ACTIVE' : 'INACTIVE') : 'ACTIVE'
+    };
 
     const merged = { ...base, ...customMasterInfo };
     const finalKanbanId = activeTemplate?.kanbanId || merged.internalProductNumber || currentKanbanId;
@@ -190,7 +189,21 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
     });
 
     return { ...merged, internalProductNumber: finalKanbanId, qrCode: currentQr };
-  }, [selectedProductMaster, activeTemplate?.kanbanId, activeTemplate?.templateName, activeTemplate?.paperSize, activeTemplate?.productName, activeTemplate?.supplier, activeTemplate?.supplierPartNumber, customMasterInfo]);
+  }, [
+    selectedProductMaster,
+    activeTemplate?.kanbanId,
+    activeTemplate?.templateName,
+    activeTemplate?.paperSize,
+    activeTemplate?.productName,
+    activeTemplate?.supplier,
+    activeTemplate?.supplierPartNumber,
+    activeTemplate?.orderQuantity,
+    activeTemplate?.deliveryTime,
+    activeTemplate?.location,
+    activeTemplate?.locationColour,
+    activeTemplate?.binQuantity,
+    customMasterInfo
+  ]);
 
   const selectedCard: KanbanCardMaster = useMemo(() => {
     let letter = 'A';
@@ -415,7 +428,15 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
     }
     setActiveTemplate(cloned);
     setCustomMasterInfo({
-      internalProductNumber: cloned.kanbanId
+      internalProductNumber: cloned.kanbanId,
+      orderQuantity: cloned.orderQuantity || '',
+      deliveryTime: cloned.deliveryTime || '',
+      location: cloned.location || '',
+      locationColour: cloned.locationColour || '',
+      binQuantity: cloned.binQuantity || '',
+      supplier: cloned.supplier || '',
+      supplierPartNumber: cloned.supplierPartNumber || '',
+      productName: cloned.productName || ''
     });
     // Auto focus first section
     if (tpl.sections && tpl.sections.length > 0) {
@@ -479,6 +500,11 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
         description: saveDescription.trim(),
         supplier: masterInfo?.supplier || '',
         supplierPartNumber: masterInfo?.supplierPartNumber || '',
+        orderQuantity: masterInfo?.orderQuantity || '',
+        deliveryTime: masterInfo?.deliveryTime || '',
+        location: masterInfo?.location || '',
+        locationColour: masterInfo?.locationColour || '',
+        binQuantity: masterInfo?.binQuantity || '',
         meta: {
           ...activeTemplate.meta,
           lastModifiedDate: new Date().toISOString(),
@@ -961,7 +987,7 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
                   </button>
                 )}
                 <button
-                  onClick={() => onPrintPreview(activeTemplate, selectedCard)}
+                  onClick={() => onPrintPreview(activeTemplate, selectedCard, masterInfo)}
                   className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-xl text-xs font-black uppercase tracking-widest text-white transition-all flex items-center gap-1.5"
                 >
                   <Icon name="printer" size={13} /> PDF Print
@@ -1129,7 +1155,7 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
                           setActiveSectionId(sec.id);
                           setSelectedTextElementId('');
                         }}
-                        className={`transition-all duration-150 backdrop-blur-[1px] flex flex-col justify-between ${sec.id === 'kanban_pulled' ? 'overflow-visible' : 'overflow-hidden'} cursor-grab active:cursor-grabbing ${
+                        className={`transition-all duration-150 backdrop-blur-[1px] flex flex-col justify-between overflow-hidden cursor-grab active:cursor-grabbing ${
                           isSelected
                             ? 'ring-4 ring-offset-2 ring-purple-600 shadow-2xl z-40 scale-[1.005]'
                             : 'z-20 hover:scale-[1.002] border border-transparent hover:border-purple-400/50'
@@ -1141,7 +1167,7 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
                         }}
                       >
                         {/* Interactive Card Section Outer Component wrapper */}
-                        <div className={`w-full ${sec.id === 'kanban_pulled' ? 'min-h-full h-auto' : 'h-full'} relative group`}>
+                        <div className="w-full h-full relative group">
                           {renderSectionContent(sec)}
 
                           {/* Interactive overlay layer to indicate section label and bounds inside designer */}
