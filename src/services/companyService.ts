@@ -70,6 +70,14 @@ export const DEFAULT_BRANCHES: Branch[] = [
 
 export const DEFAULT_VERSIONS: ApplicationVersion[] = [
   {
+    id: 'VER-1020',
+    version: '1.0.0.020',
+    releaseDate: '2026-08-05',
+    description: 'Kanban QR Scanner Engine Fix: Fixed mirrored camera feed (removed global transform scaleX(-1)), enlarged live camera preview to full panel layout, implemented 2s scan debouncing, complete callback trace logging, and immediate scanned success dialog popup with [Next Scan] and [Finish] actions.',
+    createdAt: '2026-08-05T03:55:00.000Z',
+    updatedAt: '2026-08-05T03:55:00.000Z'
+  },
+  {
     id: 'VER-1019',
     version: '1.0.0.019',
     releaseDate: '2026-08-05',

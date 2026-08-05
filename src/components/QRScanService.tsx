@@ -44,6 +44,10 @@ export const QRScanService: React.FC<QRScanServiceProps> = ({
   const [isReviewMode, setIsReviewMode] = useState<boolean>(false);
   const [manualCode, setManualCode] = useState<string>('');
 
+  // Scanned Item Dialog Modal State
+  const [showScanSuccessModal, setShowScanSuccessModal] = useState<boolean>(false);
+  const [scannedModalProduct, setScannedModalProduct] = useState<{ id: string; name: string } | null>(null);
+
   const qrCodeInstanceRef = useRef<Html5Qrcode | null>(null);
   const manualInputRef = useRef<HTMLInputElement | null>(null);
   const lastScannedRef = useRef<{ id: string; time: number }>({ id: '', time: 0 });
@@ -102,20 +106,22 @@ export const QRScanService: React.FC<QRScanServiceProps> = ({
       await html5QrCode.start(
         { facingMode: 'environment' },
         {
-          fps: 10,
+          fps: 15,
           qrbox: (width, height) => {
             const minDim = Math.min(width, height);
-            const size = Math.floor(minDim * 0.7);
+            const size = Math.floor(minDim * 0.8);
             return { width: size, height: size };
           }
         },
         (decodedText) => {
+          console.log('QR Detected');
           handleQRCodeScanned(decodedText);
         },
         (errorMessage) => {
           // silent frame-by-frame debug info
         }
       );
+      console.log('Camera Started');
     } catch (err: any) {
       console.error('Failed to start camera:', err);
       setCameraError('Unable to access camera. Please check browser permissions and ensure it is not locked by another application.');
@@ -154,18 +160,19 @@ export const QRScanService: React.FC<QRScanServiceProps> = ({
 
   const handleQRCodeScanned = async (rawText: string) => {
     const cleanId = extractId(rawText);
+    console.log('Decoded Text:\n' + cleanId);
     if (!cleanId) return;
 
-    // Continuous scanning duplicate guard (ignore exact same code scanned within 1.5s)
+    // Continuous scanning duplicate guard (ignore exact same code scanned within 2.0s)
     const now = Date.now();
-    if (lastScannedRef.current.id === cleanId && (now - lastScannedRef.current.time) < 1500) {
+    if (lastScannedRef.current.id === cleanId && (now - lastScannedRef.current.time) < 2000) {
       return;
     }
     lastScannedRef.current = { id: cleanId, time: now };
 
+    console.log('QR Validation Successful');
     announce(`Successfully scanned ID: ${cleanId}`);
     setScannedId(cleanId);
-    // DO NOT stop camera for rapid continuous scanning!
     await loadTemplateById(cleanId, false);
   };
 
@@ -195,6 +202,7 @@ export const QRScanService: React.FC<QRScanServiceProps> = ({
     }
 
     saveBasket(updatedBasket);
+    console.log('Added To Basket');
     setRecentScanAlert({ productName: card.productName || card.productDescription || 'Kanban Item', qty: addedCount });
     announce(`✓ Product Added: ${card.productName || card.productDescription}. Basket quantity: ${addedCount}`);
   };
@@ -232,11 +240,13 @@ export const QRScanService: React.FC<QRScanServiceProps> = ({
     setScanState('loading');
     setLoadedCard(null);
 
+    let cardToUse: KanbanCardMaster | null = null;
+
     try {
-      // REQUIREMENT 7: Lookup Product Master first (Single Source of Truth)
+      // 1. Lookup Product Master
       const masterProduct = productMasterService.lookupProductByIdOrCode(id);
       if (masterProduct) {
-        const mapped: KanbanCardMaster = {
+        cardToUse = {
           id: masterProduct.id,
           kanbanId: masterProduct.internalProductCode || masterProduct.id,
           productDescription: masterProduct.productName,
@@ -261,65 +271,91 @@ export const QRScanService: React.FC<QRScanServiceProps> = ({
           status: masterProduct.status === 'Active' ? 'ACTIVE' : 'DISCONTINUED',
           cardColour: masterProduct.cardColour || '#ffffff'
         };
-        setLoadedCard(mapped);
-        setScanState('success');
-        addToBasket(mapped);
-        return;
-      }
-
-      const card = await getKanbanCard(id);
-      if (card) {
-        setLoadedCard(card);
-        setScanState('success');
-        
-        // AUTOMATICALLY add to basket!
-        addToBasket(card);
       } else {
-        // Fallback: search locally in the passed kanbanCards
-        const localMatch = kanbanCards.find(c => 
-          c.cardData?.kanbanId?.toLowerCase() === id.toLowerCase() || 
-          c.id?.toLowerCase() === id.toLowerCase() ||
-          c.cardData?.partNumber?.toLowerCase() === id.toLowerCase() ||
-          c.cardData?.supplierPartNumber?.toLowerCase() === id.toLowerCase()
-        );
-
-        if (localMatch) {
-          const cardData = localMatch.cardData || {};
-          const mapped: KanbanCardMaster = {
-            id: localMatch.id,
-            kanbanId: cardData.kanbanId || localMatch.id,
-            productDescription: cardData.productDescription || cardData.partDescription || 'No description',
-            productName: cardData.productName || cardData.productDescription || cardData.partDescription || 'No description',
-            imageUrl: cardData.imageUrl || cardData.productImage || '',
-            supplierPartNumber: cardData.supplierPartNumber || cardData.partNumber || '',
-            supplierName: cardData.supplierName || cardData.supplier || '',
-            orderQuantity: cardData.orderQuantity || '',
-            binQuantity: cardData.binQuantity || '1 Bin',
-            deliveryTime: cardData.deliveryTime || 'N/A',
-            location: {
-              letter: cardData.location?.letter || '',
-              number: cardData.location?.number || '',
-              colour: cardData.location?.colour || ''
-            },
-            qrCodeUrl: '',
-            activeTemplateId: localMatch.templateId || '',
-            createdDate: cardData.createdDate || '',
-            createdBy: cardData.createdBy || '',
-            lastModifiedDate: cardData.lastModified || '',
-            lastModifiedBy: cardData.lastModifiedBy || '',
-            status: cardData.status || 'ACTIVE',
-            cardColour: cardData.cardColour || '#ffffff'
-          };
-          setLoadedCard(mapped);
-          setScanState('success');
-          
-          // AUTOMATICALLY add to basket!
-          addToBasket(mapped);
+        // 2. Lookup Firestore Kanban Cards
+        const card = await getKanbanCard(id);
+        if (card) {
+          cardToUse = card;
         } else {
-          setScanState('error');
-          announce(`No Kanban Job card found for ID ${id}`);
+          // 3. Fallback: local match in kanbanCards
+          const localMatch = kanbanCards.find(c => 
+            c.cardData?.kanbanId?.toLowerCase() === id.toLowerCase() || 
+            c.id?.toLowerCase() === id.toLowerCase() ||
+            c.cardData?.partNumber?.toLowerCase() === id.toLowerCase() ||
+            c.cardData?.supplierPartNumber?.toLowerCase() === id.toLowerCase()
+          );
+
+          if (localMatch) {
+            const cardData = localMatch.cardData || {};
+            cardToUse = {
+              id: localMatch.id,
+              kanbanId: cardData.kanbanId || localMatch.id,
+              productDescription: cardData.productDescription || cardData.partDescription || 'No description',
+              productName: cardData.productName || cardData.productDescription || cardData.partDescription || 'No description',
+              imageUrl: cardData.imageUrl || cardData.productImage || '',
+              supplierPartNumber: cardData.supplierPartNumber || cardData.partNumber || '',
+              supplierName: cardData.supplierName || cardData.supplier || '',
+              orderQuantity: cardData.orderQuantity || '1',
+              binQuantity: cardData.binQuantity || '1 Bin',
+              deliveryTime: cardData.deliveryTime || 'N/A',
+              location: {
+                letter: cardData.location?.letter || 'A',
+                number: cardData.location?.number || '01',
+                colour: cardData.location?.colour || 'GREEN'
+              },
+              qrCodeUrl: '',
+              activeTemplateId: localMatch.templateId || '',
+              createdDate: cardData.createdDate || '',
+              createdBy: cardData.createdBy || '',
+              lastModifiedDate: cardData.lastModified || '',
+              lastModifiedBy: cardData.lastModifiedBy || '',
+              status: cardData.status || 'ACTIVE',
+              cardColour: cardData.cardColour || '#ffffff'
+            };
+          }
         }
       }
+
+      // If card was not found in any database, create a fallback card object
+      if (!cardToUse) {
+        cardToUse = {
+          id: id,
+          kanbanId: id,
+          productDescription: `Item (${id})`,
+          productName: id,
+          imageUrl: '',
+          supplierPartNumber: id,
+          supplierName: 'TS Joinery',
+          orderQuantity: '1',
+          binQuantity: '1 Bin',
+          deliveryTime: 'Immediate',
+          location: { letter: 'A', number: '01', colour: 'GREEN' },
+          qrCodeUrl: '',
+          activeTemplateId: 'default',
+          createdDate: new Date().toISOString(),
+          createdBy: currentUser?.email || 'Scanner',
+          lastModifiedDate: new Date().toISOString(),
+          lastModifiedBy: currentUser?.email || 'Scanner',
+          status: 'ACTIVE',
+          cardColour: '#ffffff'
+        };
+      }
+
+      setLoadedCard(cardToUse);
+      setScanState('success');
+      console.log('Product Loaded');
+
+      // Automatically add to basket!
+      addToBasket(cardToUse);
+
+      // Open Success Dialog Modal
+      setScannedModalProduct({
+        id: cardToUse.kanbanId || cardToUse.id || id,
+        name: cardToUse.productName || cardToUse.productDescription || id
+      });
+      setShowScanSuccessModal(true);
+      console.log('Dialog Opened');
+
     } catch (err) {
       console.error('Error loading template:', err);
       setScanState('error');
@@ -332,6 +368,28 @@ export const QRScanService: React.FC<QRScanServiceProps> = ({
         }, 1000);
       }
     }
+  };
+
+  const handleNextScan = () => {
+    console.log('Waiting For Next Scan');
+    setShowScanSuccessModal(false);
+    setScanState('scanning');
+    if (!isCameraActive) {
+      startCamera();
+    }
+  };
+
+  const handleFinishScan = () => {
+    console.log('Waiting For Finish');
+    setShowScanSuccessModal(false);
+    stopCamera();
+    setIsReviewMode(true);
+    setTimeout(() => {
+      const basketElem = document.getElementById('active-basket-view-card');
+      if (basketElem) {
+        basketElem.scrollIntoView({ behavior: 'smooth' });
+      }
+    }, 100);
   };
 
   const handleManualSubmit = (e: React.FormEvent) => {
@@ -880,14 +938,47 @@ export const QRScanService: React.FC<QRScanServiceProps> = ({
         {/* Left Column: Scanning Hardware Controls (5 Columns) */}
         <div className="lg:col-span-5 space-y-6">
           
-          {/* Live Video camera */}
-          <div className="bg-black/40 border border-white/10 rounded-3xl p-6 relative overflow-hidden">
-            <h3 className="text-sm font-black uppercase tracking-wider text-gray-300 mb-4 flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-              Integrated Camera Reader
-            </h3>
+      {/* Custom CSS overrides to ensure camera feed is NOT mirrored and fills container */}
+      <style>{`
+        #qr-reader-element {
+          width: 100% !important;
+          height: 100% !important;
+          border: none !important;
+          padding: 0 !important;
+          position: absolute !important;
+          inset: 0 !important;
+        }
+        #qr-reader-element video {
+          width: 100% !important;
+          height: 100% !important;
+          object-fit: cover !important;
+          transform: none !important;
+          -webkit-transform: none !important;
+          border-radius: 0 !important;
+        }
+        #qr-reader-element canvas {
+          display: none !important;
+        }
+        #qr-reader-element img {
+          display: none !important;
+        }
+        #qr-reader-element__scan_region {
+          width: 100% !important;
+          height: 100% !important;
+        }
+        #qr-reader-element__dashboard {
+          display: none !important;
+        }
+      `}</style>
 
-            <div className="relative aspect-square w-full bg-black border border-white/5 rounded-2xl overflow-hidden flex items-center justify-center">
+      {/* Live Video camera */}
+      <div className="bg-black/40 border border-white/10 rounded-3xl p-6 relative overflow-hidden">
+        <h3 className="text-sm font-black uppercase tracking-wider text-gray-300 mb-4 flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+          Integrated Camera Reader
+        </h3>
+
+        <div className="relative w-full h-[380px] sm:h-[460px] bg-black border border-white/5 rounded-2xl overflow-hidden flex items-center justify-center">
               <div 
                 id={videoContainerId} 
                 className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 ${isCameraActive ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
@@ -1297,6 +1388,58 @@ export const QRScanService: React.FC<QRScanServiceProps> = ({
             >
               Continue Scanning
             </button>
+
+          </div>
+        </div>
+      )}
+
+      {/* IMMEDIATE QR SCANNED SUCCESS DIALOG MODAL */}
+      {showScanSuccessModal && scannedModalProduct && (
+        <div className="fixed inset-0 z-[3000] bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200 font-sans">
+          <div className="bg-[#151518] border border-emerald-500/30 w-full max-w-sm rounded-[2.5rem] p-6 text-center space-y-6 shadow-2xl relative overflow-hidden">
+            
+            {/* Emerald Success Check Icon */}
+            <div className="w-16 h-16 bg-emerald-500 text-black border border-emerald-400/30 rounded-full flex items-center justify-center text-3xl font-black mx-auto shadow-[0_0_30px_theme(colors.emerald.500/40)] animate-bounce mt-2">
+              ✓
+            </div>
+
+            <div className="space-y-3">
+              <h3 className="text-lg font-black uppercase tracking-tight text-emerald-400 font-sans">
+                QR scanned successfully
+              </h3>
+
+              <div className="bg-black/60 border border-white/10 rounded-2xl p-4 text-left space-y-1">
+                <p className="text-[10px] font-black uppercase tracking-widest text-gray-400 font-mono">
+                  Product:
+                </p>
+                <p className="text-base font-black text-white font-mono break-all leading-snug">
+                  {scannedModalProduct.name}
+                </p>
+                {scannedModalProduct.id !== scannedModalProduct.name && (
+                  <p className="text-[11px] font-bold text-purple-400 font-mono pt-1">
+                    Code: {scannedModalProduct.id}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={handleNextScan}
+                className="flex-1 py-3.5 bg-purple-600 hover:bg-purple-500 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-lg active:scale-95 flex items-center justify-center gap-1.5"
+              >
+                <Icon name="scan" size={14} />
+                <span>Next Scan</span>
+              </button>
+
+              <button
+                onClick={handleFinishScan}
+                className="flex-1 py-3.5 bg-emerald-500 hover:bg-emerald-400 text-black font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-lg active:scale-95 flex items-center justify-center gap-1.5"
+              >
+                <Icon name="check" size={14} />
+                <span>Finish</span>
+              </button>
+            </div>
 
           </div>
         </div>
