@@ -73,13 +73,13 @@ export const WarehouseIdentification: React.FC<WarehouseIdentificationProps> = (
   const subTitleFontSize = Math.max(5, Math.min(10, 6.5 * scale));
   const badgeFontSize = Math.max(8, Math.min(18, 11 * scale));
 
-  // Cap dynamic padding so it doesn't take too much height in narrow boxes
-  const finalPadding = height ? Math.max(1, Math.min(padding, height * 0.12)) : padding;
+  const finalPadding = padding ?? 5;
+  const hasBorder = borderStyle && borderStyle !== 'none' && (borderWidth || 0) > 0;
 
   const containerStyle: React.CSSProperties = {
-    border: borderStyle !== 'none' ? `${borderWidth}mm ${borderStyle} ${borderColor}` : 'none',
-    backgroundColor: backgroundColor,
-    borderRadius: `${cornerRadius}mm`,
+    border: hasBorder ? `${borderWidth}mm ${borderStyle} ${borderColor || '#000000'}` : 'none',
+    backgroundColor: backgroundColor || '#f3f4f6',
+    borderRadius: `${cornerRadius ?? 4}mm`,
     padding: `${finalPadding}mm`,
     width: '100%',
     height: '100%',

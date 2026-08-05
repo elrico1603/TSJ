@@ -70,6 +70,14 @@ export const DEFAULT_BRANCHES: Branch[] = [
 
 export const DEFAULT_VERSIONS: ApplicationVersion[] = [
   {
+    id: 'VER-1019',
+    version: '1.0.0.019',
+    releaseDate: '2026-08-05',
+    description: 'Complete Layout Property Audit & Repair: Fully audited and repaired all editable section layout properties (Position, Dimensions, Background Colour, Border Colour/Width/Radius, Solid/Dashed/None Border Styles, Padding, Typography/Text Settings, Rotation). Verified immediate WYSIWYG synchronization across Designer, Print Preview, and PDF rendering.',
+    createdAt: '2026-08-05T00:45:00.000Z',
+    updatedAt: '2026-08-05T00:45:00.000Z'
+  },
+  {
     id: 'VER-1018',
     version: '1.0.0.018',
     releaseDate: '2026-08-05',

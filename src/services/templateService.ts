@@ -5,6 +5,7 @@ export interface TextCustomizationSettings {
   fontFamily?: string;
   fontWeight?: string;
   fontStyle?: 'normal' | 'italic';
+  textDecoration?: 'none' | 'underline' | 'line-through';
   letterSpacing?: string;
   lineHeight?: string;
   color?: string;

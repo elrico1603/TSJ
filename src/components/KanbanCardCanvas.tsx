@@ -166,7 +166,7 @@ export const KanbanCardCanvas: React.FC<KanbanCardCanvasProps> = ({
             transform: sec.rotation ? `rotate(${sec.rotation}deg)` : undefined,
             borderRadius: `${(sec.cornerRadius || 0) * scaleFactor}px`
           }}
-          className={`overflow-hidden ${sec.borderStyle && sec.borderStyle !== 'none' ? `border-${sec.borderWidth} ${sec.borderStyle}` : ''}`}
+          className="overflow-hidden"
         >
           {renderSectionContent(sec, effectiveMasterInfo, cardData)}
         </div>

@@ -2089,6 +2089,20 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
                         </select>
                       </div>
 
+                      {/* Text Decoration */}
+                      <div className="space-y-1 font-sans">
+                        <label className="text-[9px] text-gray-400 font-bold uppercase">Text Decoration</label>
+                        <select
+                          value={(activeSection.textSettings?.[currentElementId]?.textDecoration ?? 'none')}
+                          onChange={(e) => updateTextSettingProperty(activeSectionId, currentElementId, 'textDecoration', e.target.value as any)}
+                          className="w-full bg-black text-white text-xs px-2.5 py-1.5 border border-white/10 rounded-xl focus:outline-none"
+                        >
+                          <option value="none">None</option>
+                          <option value="underline">Underline</option>
+                          <option value="line-through">Line Through</option>
+                        </select>
+                      </div>
+
                       {/* Letter Spacing */}
                       <div className="space-y-1 font-sans">
                         <label className="text-[9px] text-gray-400 font-bold uppercase">Letter Spacing</label>

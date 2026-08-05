@@ -28,6 +28,9 @@ export function applyTextSettings(
   if (settings.fontStyle) {
     styles.fontStyle = settings.fontStyle;
   }
+  if (settings.textDecoration) {
+    styles.textDecoration = settings.textDecoration;
+  }
   if (settings.letterSpacing !== undefined) {
     styles.letterSpacing = settings.letterSpacing;
   }

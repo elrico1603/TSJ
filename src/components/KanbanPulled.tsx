@@ -97,13 +97,13 @@ export const KanbanPulled: React.FC<KanbanPulledProps> = ({
   const binValFontSize = textSettings?.binQtyValue?.fontSize ?? Math.max(7.5, 9.5 * scale);
   const badgeFontSize = textSettings?.locationBadge?.fontSize ?? Math.max(8, Math.min(18, 11 * scale));
 
-  // Cap dynamic padding so it doesn't take too much height in narrow boxes
-  const finalPadding = height ? Math.max(1, Math.min(padding, height * 0.12)) : padding;
+  const finalPadding = padding ?? 5;
+  const hasBorder = borderStyle && borderStyle !== 'none' && (borderWidth || 0) > 0;
 
   const containerStyle: React.CSSProperties = {
-    border: (borderStyle && borderStyle !== 'none') ? `${borderWidth ?? 0.5}mm ${borderStyle} ${borderColor || '#000000'}` : `${borderWidth ?? 0.5}mm solid ${borderColor || '#000000'}`,
+    border: hasBorder ? `${borderWidth ?? 0.5}mm ${borderStyle} ${borderColor || '#000000'}` : 'none',
     backgroundColor: finalBgColor,
-    borderRadius: `${cornerRadius ?? 2}mm`,
+    borderRadius: `${cornerRadius ?? 4}mm`,
     padding: `${finalPadding}mm`,
     width: '100%',
     height: '100%',
