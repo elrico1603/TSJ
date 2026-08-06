@@ -70,6 +70,14 @@ export const DEFAULT_BRANCHES: Branch[] = [
 
 export const DEFAULT_VERSIONS: ApplicationVersion[] = [
   {
+    id: 'VER-1021',
+    version: '1.0.0.021',
+    releaseDate: '2026-08-05',
+    description: 'Procurement & Dispatch Workflow Phase 3: Permanent delete buttons for master records, mobile Dispatch & Receiving access, automatic supplier grouping on PO creation, autocomplete product search, parcel counts, courier tracking links, separate Receiving workflow with mandatory photo uploads, and independent Google Drive storage folders.',
+    createdAt: '2026-08-05T05:00:00.000Z',
+    updatedAt: '2026-08-05T05:00:00.000Z'
+  },
+  {
     id: 'VER-1020',
     version: '1.0.0.020',
     releaseDate: '2026-08-05',

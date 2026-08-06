@@ -2,7 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { Icon } from './Icon';
 import { googleDriveService, DriveFileInfo, DriveFolderInfo } from '../services/googleDriveService';
 import { DispatchPhotoUploader } from './DispatchPhotoUploader';
-import { DispatchRecord } from './DispatchDetails';
+import { DispatchRecord, DispatchItem } from './DispatchDetails';
+import { productMasterService } from '../services/productMasterService';
+import { ProductMaster } from '../types';
 
 interface DispatchWizardProps {
   initialDispatch?: DispatchRecord | null;
@@ -31,8 +33,86 @@ export const DispatchWizard: React.FC<DispatchWizardProps> = ({
   const [destinationBranch, setDestinationBranch] = useState(initialDispatch?.destinationBranch || 'Cape Town');
   const [installer, setInstaller] = useState(initialDispatch?.installer || '');
   const [courier, setCourier] = useState(initialDispatch?.courier || '');
+  const [courierCompany, setCourierCompany] = useState(initialDispatch?.courierCompany || 'The Courier Guy');
   const [trackingNumber, setTrackingNumber] = useState(initialDispatch?.trackingNumber || '');
+  const [parcelCount, setParcelCount] = useState(initialDispatch?.parcelCount || '1 Parcel');
   const [notes, setNotes] = useState(initialDispatch?.notes || '');
+
+  // Dispatch Items & Product Autocomplete
+  const [items, setItems] = useState<DispatchItem[]>(initialDispatch?.items || []);
+  const [allProducts, setAllProducts] = useState<ProductMaster[]>([]);
+  const [productQuery, setProductQuery] = useState('');
+  const [matchingProducts, setMatchingProducts] = useState<ProductMaster[]>([]);
+  const [showProductDropdown, setShowProductDropdown] = useState(false);
+  const [itemQuantity, setItemQuantity] = useState(1);
+  const [isCustomProduct, setIsCustomProduct] = useState(false);
+  const [customItemName, setCustomItemName] = useState('');
+  const [customItemCode, setCustomItemCode] = useState('');
+
+  // Fetch products for autocomplete
+  useEffect(() => {
+    const prods = productMasterService.getLocalProducts();
+    setAllProducts(prods);
+  }, []);
+
+  // Filter products when typing query
+  useEffect(() => {
+    if (!productQuery.trim()) {
+      setMatchingProducts([]);
+      setShowProductDropdown(false);
+      return;
+    }
+    const q = productQuery.toLowerCase();
+    const filtered = allProducts.filter(p =>
+      p.productName.toLowerCase().includes(q) ||
+      p.internalProductCode.toLowerCase().includes(q) ||
+      (p.category && p.category.toLowerCase().includes(q))
+    ).slice(0, 8);
+    setMatchingProducts(filtered);
+    setShowProductDropdown(true);
+  }, [productQuery, allProducts]);
+
+  const handleSelectMasterProduct = (prod: ProductMaster) => {
+    const newItem: DispatchItem = {
+      id: `item_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+      productId: prod.id,
+      internalProductCode: prod.internalProductCode,
+      productName: prod.productName,
+      supplier: prod.supplier,
+      supplierPartNumber: prod.supplierPartNumber,
+      baseOrderQuantity: prod.orderQuantity ? String(prod.orderQuantity) : '1',
+      location: prod.location,
+      deliveryTime: prod.deliveryTime,
+      category: prod.category,
+      quantity: itemQuantity,
+      isCustom: false
+    };
+
+    setItems(prev => [...prev, newItem]);
+    setProductQuery('');
+    setShowProductDropdown(false);
+    setItemQuantity(1);
+  };
+
+  const handleAddCustomProduct = () => {
+    if (!customItemName.trim()) return;
+    const newItem: DispatchItem = {
+      id: `item_custom_${Date.now()}`,
+      internalProductCode: customItemCode || `CUST-${Math.floor(100 + Math.random() * 900)}`,
+      productName: customItemName,
+      quantity: itemQuantity,
+      isCustom: true
+    };
+    setItems(prev => [...prev, newItem]);
+    setCustomItemName('');
+    setCustomItemCode('');
+    setIsCustomProduct(false);
+    setItemQuantity(1);
+  };
+
+  const handleRemoveItem = (itemId: string) => {
+    setItems(prev => prev.filter(i => i.id !== itemId));
+  };
 
   // Google Drive State
   const [driveFolder, setDriveFolder] = useState<DriveFolderInfo | null>(
@@ -102,14 +182,34 @@ export const DispatchWizard: React.FC<DispatchWizardProps> = ({
         });
       }
 
+      let trackingUrl = '';
+      if (trackingNumber.trim()) {
+        const trk = trackingNumber.trim();
+        if (courierCompany === 'The Courier Guy') {
+          trackingUrl = `https://portal.thecourierguy.co.za/track?tracking_number=${encodeURIComponent(trk)}`;
+        } else if (courierCompany === 'RAM Hand-to-Hand') {
+          trackingUrl = `https://www.ram.co.za/Tracking?trackingNumber=${encodeURIComponent(trk)}`;
+        } else if (courierCompany === 'DHL Express') {
+          trackingUrl = `https://www.dhl.com/en/express/tracking.html?AWB=${encodeURIComponent(trk)}`;
+        } else if (courierCompany === 'FedEx') {
+          trackingUrl = `https://www.fedex.com/fedextrack/?trknbr=${encodeURIComponent(trk)}`;
+        } else {
+          trackingUrl = trk.startsWith('http') ? trk : `https://www.google.com/search?q=${encodeURIComponent(courierCompany + ' ' + trk)}`;
+        }
+      }
+
       const payload: Partial<DispatchRecord> = {
         dispatchNumber,
         customer,
         project,
         destinationBranch,
         installer,
-        courier,
+        courier: courier || courierCompany,
+        courierCompany,
         trackingNumber,
+        trackingUrl,
+        parcelCount,
+        items,
         notes,
         status: targetStatus,
         googleDriveFolderId: finalFolder.folderId,
@@ -282,18 +382,38 @@ export const DispatchWizard: React.FC<DispatchWizardProps> = ({
 
                 <div>
                   <label className="text-[10px] font-black uppercase text-gray-400 tracking-wider block mb-1.5">
-                    Courier Service
+                    Courier Company
+                  </label>
+                  <select
+                    value={courierCompany}
+                    onChange={(e) => {
+                      setCourierCompany(e.target.value);
+                      if (e.target.value !== 'Other') setCourier(e.target.value);
+                    }}
+                    className="bg-black border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white w-full outline-none focus:border-[#ff8c00]"
+                  >
+                    <option value="The Courier Guy">The Courier Guy</option>
+                    <option value="RAM Hand-to-Hand">RAM Hand-to-Hand Couriers</option>
+                    <option value="DHL Express">DHL Express</option>
+                    <option value="FedEx">FedEx Express</option>
+                    <option value="Other">Custom Courier Service</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-black uppercase text-gray-400 tracking-wider block mb-1.5">
+                    Courier Service Name
                   </label>
                   <input
                     type="text"
                     value={courier}
                     onChange={(e) => setCourier(e.target.value)}
-                    placeholder="e.g. RAM Hand-to-Hand / Courier Guy"
+                    placeholder="e.g. RAM Hand-to-Hand / Overnight"
                     className="bg-black border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white w-full outline-none focus:border-[#ff8c00]"
                   />
                 </div>
 
-                <div className="md:col-span-2">
+                <div>
                   <label className="text-[10px] font-black uppercase text-gray-400 tracking-wider block mb-1.5">
                     Courier Tracking Number
                   </label>
@@ -304,6 +424,145 @@ export const DispatchWizard: React.FC<DispatchWizardProps> = ({
                     placeholder="e.g. TRK-9908123-ZA"
                     className="bg-black border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white font-mono w-full outline-none focus:border-[#ff8c00]"
                   />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-black uppercase text-gray-400 tracking-wider block mb-1.5">
+                    Total Parcels / Box Count
+                  </label>
+                  <input
+                    type="text"
+                    value={parcelCount}
+                    onChange={(e) => setParcelCount(e.target.value)}
+                    placeholder="e.g. 4 Parcels, 2 Boxes, 1 Pallet"
+                    className="bg-black border border-white/10 rounded-xl px-4 py-2.5 text-xs text-purple-300 font-mono font-bold w-full outline-none focus:border-[#ff8c00]"
+                  />
+                </div>
+
+                {/* Product Autocomplete Search Section */}
+                <div className="md:col-span-2 bg-white/5 border border-white/10 p-4 rounded-2xl space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+                      <Icon name="search" size={14} />
+                      Dispatched Products & Kanban Items Autocomplete
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setIsCustomProduct(!isCustomProduct)}
+                      className="text-[10px] font-mono text-cyan-400 hover:underline font-bold"
+                    >
+                      {isCustomProduct ? '← Search Master Products' : '+ Add Custom Product'}
+                    </button>
+                  </div>
+
+                  {!isCustomProduct ? (
+                    <div className="relative">
+                      <div className="flex gap-2">
+                        <div className="relative flex-1">
+                          <input
+                            type="text"
+                            value={productQuery}
+                            onChange={(e) => setProductQuery(e.target.value)}
+                            placeholder="Type Product Name or Internal Code to search Kanban products..."
+                            className="bg-black border border-white/10 rounded-xl pl-9 pr-4 py-2 text-xs text-white w-full outline-none focus:border-amber-400 font-sans"
+                          />
+                          <Icon name="search" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                        </div>
+
+                        <input
+                          type="number"
+                          min={1}
+                          value={itemQuantity}
+                          onChange={(e) => setItemQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+                          className="w-20 bg-black border border-white/10 rounded-xl px-2 text-center text-xs text-white font-mono"
+                          title="Quantity"
+                        />
+                      </div>
+
+                      {/* Autocomplete Dropdown */}
+                      {showProductDropdown && matchingProducts.length > 0 && (
+                        <div className="absolute left-0 right-0 top-full mt-1 bg-[#18181c] border border-amber-500/40 rounded-xl shadow-2xl z-30 max-h-48 overflow-y-auto divide-y divide-white/5">
+                          {matchingProducts.map(prod => (
+                            <button
+                              key={prod.id}
+                              type="button"
+                              onClick={() => handleSelectMasterProduct(prod)}
+                              className="w-full text-left p-2.5 hover:bg-amber-500/10 transition-all flex items-center justify-between text-xs"
+                            >
+                              <div>
+                                <span className="font-bold text-white block">{prod.productName}</span>
+                                <span className="text-[10px] text-gray-400 font-mono">
+                                  {prod.internalProductCode} • Supplier: {prod.supplier || 'N/A'} • Loc: {prod.location || 'N/A'}
+                                </span>
+                              </div>
+                              <span className="text-[10px] font-mono font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                                Select
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2 bg-black/40 p-3 rounded-xl border border-white/5">
+                      <input
+                        type="text"
+                        value={customItemName}
+                        onChange={(e) => setCustomItemName(e.target.value)}
+                        placeholder="Custom Product Name"
+                        className="bg-black border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white outline-none focus:border-cyan-400"
+                      />
+                      <input
+                        type="text"
+                        value={customItemCode}
+                        onChange={(e) => setCustomItemCode(e.target.value)}
+                        placeholder="Internal Code (Optional)"
+                        className="bg-black border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white font-mono outline-none focus:border-cyan-400"
+                      />
+                      <div className="flex gap-2">
+                        <input
+                          type="number"
+                          min={1}
+                          value={itemQuantity}
+                          onChange={(e) => setItemQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+                          className="w-16 bg-black border border-white/10 rounded-lg px-2 text-center text-xs text-white font-mono"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleAddCustomProduct}
+                          className="flex-1 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs font-black uppercase"
+                        >
+                          Add Custom
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Items List Table */}
+                  {items.length > 0 && (
+                    <div className="border border-white/10 rounded-xl overflow-hidden divide-y divide-white/5 bg-black/50 text-xs font-mono">
+                      {items.map(item => (
+                        <div key={item.id} className="p-2.5 flex items-center justify-between text-gray-300 hover:bg-white/[0.02]">
+                          <div>
+                            <span className="font-bold text-white block">{item.productName}</span>
+                            <span className="text-[10px] text-gray-500">
+                              {item.internalProductCode} • {item.supplier ? `Supplier: ${item.supplier}` : 'Custom Item'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className="text-emerald-400 font-bold">{item.quantity} Qty</span>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveItem(item.id)}
+                              className="text-gray-500 hover:text-red-400 p-1"
+                            >
+                              <Icon name="trash-2" size={14} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <div className="md:col-span-2">

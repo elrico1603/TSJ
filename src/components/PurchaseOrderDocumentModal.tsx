@@ -274,12 +274,18 @@ export const PurchaseOrderDocumentModal: React.FC<PurchaseOrderDocumentModalProp
                       <tr key={item.id || idx} className="hover:bg-slate-50 font-medium">
                         <td className="p-3 text-center text-slate-500 font-mono font-bold">{idx + 1}</td>
                         <td className="p-3">
-                          <p className="font-bold text-slate-900 uppercase">{item.productName}</p>
-                          {item.location && <p className="text-[10px] text-slate-500">Bin Location: {item.location}</p>}
+                          <div>
+                            <span className="text-[9px] font-bold text-slate-500 uppercase block font-mono">Product:</span>
+                            <p className="font-bold text-slate-900 uppercase text-xs">{item.productName}</p>
+                            {item.location && <p className="text-[10px] text-slate-500">Bin Location: {item.location}</p>}
+                          </div>
                         </td>
                         <td className="p-3 font-mono text-slate-700">
-                          <p className="font-bold text-purple-800">{item.internalProductCode}</p>
-                          {item.supplierPartNumber && <p className="text-[10px] text-slate-500">Supplier: {item.supplierPartNumber}</p>}
+                          <div>
+                            <span className="text-[9px] font-bold text-slate-500 uppercase block font-mono">Code:</span>
+                            <p className="font-bold text-purple-800 text-xs">{item.internalProductCode || item.productId}</p>
+                            {item.supplierPartNumber && <p className="text-[10px] text-slate-500">Supplier Part: {item.supplierPartNumber}</p>}
+                          </div>
                         </td>
                         <td className="p-3 text-center uppercase text-slate-600 font-bold">{item.unit}</td>
                         <td className="p-3 text-right font-black font-mono text-slate-900 text-sm">{item.orderQuantity}</td>

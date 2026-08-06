@@ -441,23 +441,53 @@ export const ProductMasterHub: React.FC<ProductMasterHubProps> = ({
                       </div>
 
                       {p.status === 'Active' ? (
-                        <button
-                          onClick={() => setArchiveConfirm({ type: 'product', id: p.id, name: p.productName })}
-                          className="p-1.5 text-gray-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all"
-                          title="Archive Product"
-                        >
-                          <Icon name="archive" size={16} />
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => setArchiveConfirm({ type: 'product', id: p.id, name: p.productName })}
+                            className="p-1.5 text-gray-500 hover:text-amber-400 hover:bg-amber-500/10 rounded-lg transition-all"
+                            title="Archive Product"
+                          >
+                            <Icon name="archive" size={16} />
+                          </button>
+                          <button
+                            onClick={async () => {
+                              if (confirm(`PERMANENT DELETE: Delete product "${p.productName}" permanently?`)) {
+                                const username = currentUser?.name || currentUser?.email || 'Admin User';
+                                await productMasterService.deleteProduct(p.id, username);
+                                if (announce) announce(`Deleted product ${p.productName}`);
+                              }
+                            }}
+                            className="p-1.5 text-gray-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
+                            title="Permanently Delete Product"
+                          >
+                            <Icon name="trash-2" size={16} />
+                          </button>
+                        </div>
                       ) : (
-                        <button
-                          onClick={async () => {
-                            const username = currentUser?.name || currentUser?.email || 'Admin User';
-                            await productMasterService.restoreProduct(p.id, username, 'Restored by user');
-                          }}
-                          className="px-2 py-1 bg-emerald-500/20 text-emerald-400 rounded text-xs font-bold uppercase"
-                        >
-                          Restore
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={async () => {
+                              const username = currentUser?.name || currentUser?.email || 'Admin User';
+                              await productMasterService.restoreProduct(p.id, username, 'Restored by user');
+                            }}
+                            className="px-2 py-1 bg-emerald-500/20 text-emerald-400 rounded text-xs font-bold uppercase"
+                          >
+                            Restore
+                          </button>
+                          <button
+                            onClick={async () => {
+                              if (confirm(`PERMANENT DELETE: Delete product "${p.productName}" permanently?`)) {
+                                const username = currentUser?.name || currentUser?.email || 'Admin User';
+                                await productMasterService.deleteProduct(p.id, username);
+                                if (announce) announce(`Deleted product ${p.productName}`);
+                              }
+                            }}
+                            className="p-1.5 text-gray-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
+                            title="Permanently Delete Product"
+                          >
+                            <Icon name="trash-2" size={16} />
+                          </button>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -513,10 +543,23 @@ export const ProductMasterHub: React.FC<ProductMasterHubProps> = ({
                     </button>
                     <button
                       onClick={() => setArchiveConfirm({ type: 'category', id: c.id, name: c.name })}
-                      className="p-1.5 text-gray-500 hover:text-red-400 rounded-lg"
+                      className="p-1.5 text-gray-500 hover:text-amber-400 hover:bg-amber-500/10 rounded-lg transition-all"
                       title="Archive Category"
                     >
                       <Icon name="archive" size={16} />
+                    </button>
+                    <button
+                      onClick={async () => {
+                        if (confirm(`PERMANENT DELETE: Delete category "${c.name}" permanently?`)) {
+                          const username = currentUser?.name || currentUser?.email || 'Admin User';
+                          await productMasterService.deleteCategory(c.id, username);
+                          if (announce) announce(`Deleted category ${c.name}`);
+                        }
+                      }}
+                      className="p-1.5 text-gray-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
+                      title="Permanently Delete Category"
+                    >
+                      <Icon name="trash-2" size={16} />
                     </button>
                   </div>
                 </div>
@@ -591,9 +634,23 @@ export const ProductMasterHub: React.FC<ProductMasterHubProps> = ({
                       </button>
                       <button
                         onClick={() => setArchiveConfirm({ type: 'supplier', id: s.id, name: s.supplierName })}
-                        className="p-1.5 text-gray-500 hover:text-red-400 rounded-lg"
+                        className="p-1.5 text-gray-500 hover:text-amber-400 hover:bg-amber-500/10 rounded-lg transition-all"
+                        title="Archive Supplier"
                       >
                         <Icon name="archive" size={16} />
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (confirm(`PERMANENT DELETE: Delete supplier "${s.supplierName}" permanently?`)) {
+                            const username = currentUser?.name || currentUser?.email || 'Admin User';
+                            await productMasterService.deleteSupplier(s.id, username);
+                            if (announce) announce(`Deleted supplier ${s.supplierName}`);
+                          }
+                        }}
+                        className="p-1.5 text-gray-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
+                        title="Permanently Delete Supplier"
+                      >
+                        <Icon name="trash-2" size={16} />
                       </button>
                     </div>
                   </div>
@@ -646,9 +703,23 @@ export const ProductMasterHub: React.FC<ProductMasterHubProps> = ({
                   </button>
                   <button
                     onClick={() => setArchiveConfirm({ type: 'location', id: l.id, name: l.locationCode })}
-                    className="p-1.5 text-gray-500 hover:text-red-400 rounded-lg"
+                    className="p-1.5 text-gray-500 hover:text-amber-400 hover:bg-amber-500/10 rounded-lg transition-all"
+                    title="Archive Location"
                   >
                     <Icon name="archive" size={16} />
+                  </button>
+                  <button
+                    onClick={async () => {
+                      if (confirm(`PERMANENT DELETE: Delete location "${l.locationCode}" permanently?`)) {
+                        const username = currentUser?.name || currentUser?.email || 'Admin User';
+                        await productMasterService.deleteWarehouseLocation(l.id, username);
+                        if (announce) announce(`Deleted location ${l.locationCode}`);
+                      }
+                    }}
+                    className="p-1.5 text-gray-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
+                    title="Permanently Delete Location"
+                  >
+                    <Icon name="trash-2" size={16} />
                   </button>
                 </div>
               </div>

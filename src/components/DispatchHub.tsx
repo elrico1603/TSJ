@@ -4,6 +4,7 @@ import { collection, getDocs, doc, setDoc, deleteDoc, query, orderBy } from 'fir
 import { DispatchList } from './DispatchList';
 import { DispatchWizard } from './DispatchWizard';
 import { DispatchDetails, DispatchRecord } from './DispatchDetails';
+import { ReceivingWizard } from './ReceivingWizard';
 import { Icon } from './Icon';
 
 const LOCAL_DISPATCHES_KEY = 'tsj_dispatches_v1';
@@ -98,7 +99,7 @@ export const DispatchHub: React.FC<DispatchHubProps> = ({ currentUser, announce 
   const [isLoading, setIsLoading] = useState(true);
 
   // Active modal/wizard view
-  const [activeView, setActiveView] = useState<'list' | 'wizard' | 'details'>('list');
+  const [activeView, setActiveView] = useState<'list' | 'wizard' | 'details' | 'receiving'>('list');
   const [selectedDispatch, setSelectedDispatch] = useState<DispatchRecord | null>(null);
 
   // User permissions
@@ -270,6 +271,28 @@ export const DispatchHub: React.FC<DispatchHubProps> = ({ currentUser, announce 
     announce?.(`Shipment ${dispatch.dispatchNumber} marked as Dispatched!`);
   };
 
+  const handleSaveReceiving = async (
+    updatedRecord: DispatchRecord,
+    newStatus: 'Received' | 'Partially Received' | 'Issue Logged'
+  ) => {
+    const updatedList = dispatches.map((d) => (d.id === updatedRecord.id ? updatedRecord : d));
+    setDispatches(updatedList);
+    saveToLocalCache(updatedList);
+
+    if (db) {
+      try {
+        const docRef = doc(db, 'dispatches', updatedRecord.id);
+        await setDoc(docRef, updatedRecord, { merge: true });
+      } catch (e) {
+        console.warn('Firestore receiving update error:', e);
+      }
+    }
+
+    setActiveView('list');
+    setSelectedDispatch(null);
+    announce?.(`Receiving completed for ${updatedRecord.dispatchNumber} as ${newStatus}`);
+  };
+
   if (isLoading) {
     return (
       <div className="p-12 text-center bg-black/40 border border-white/10 rounded-3xl space-y-3 font-sans">
@@ -294,6 +317,10 @@ export const DispatchHub: React.FC<DispatchHubProps> = ({ currentUser, announce 
         }}
         onDelete={handleDeleteDispatch}
         onDispatchShipment={handleDispatchShipment}
+        onReceive={(item) => {
+          setSelectedDispatch(item);
+          setActiveView('receiving');
+        }}
         onNewDispatch={() => {
           setSelectedDispatch(null);
           setActiveView('wizard');
@@ -330,6 +357,20 @@ export const DispatchHub: React.FC<DispatchHubProps> = ({ currentUser, announce 
           }}
           onDispatchShipment={handleDispatchShipment}
           canEdit={canCreateOrEdit}
+        />
+      )}
+
+      {/* Receiving Wizard Modal */}
+      {activeView === 'receiving' && selectedDispatch && (
+        <ReceivingWizard
+          dispatch={selectedDispatch}
+          onSaveReceiving={handleSaveReceiving}
+          onCancel={() => {
+            setActiveView('list');
+            setSelectedDispatch(null);
+          }}
+          currentUser={currentUser}
+          announce={announce}
         />
       )}
     </div>

@@ -35,7 +35,20 @@ export const QRScanService: React.FC<QRScanServiceProps> = ({
   const [isCameraActive, setIsCameraActive] = useState<boolean>(false);
   
   // Basket State & local storage sync
-  const [basket, setBasket] = useState<BasketItem[]>([]);
+  const [basket, setBasket] = useState<BasketItem[]>(() => {
+    try {
+      const stored = localStorage.getItem('ts_joinery_kanban_basket');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load initial basket from localStorage:', err);
+    }
+    return [];
+  });
   const [recentScanAlert, setRecentScanAlert] = useState<{ productName: string; qty: number } | null>(null);
   
   // Order Confirmation Modal
@@ -53,31 +66,25 @@ export const QRScanService: React.FC<QRScanServiceProps> = ({
   const lastScannedRef = useRef<{ id: string; time: number }>({ id: '', time: 0 });
   const videoContainerId = 'qr-reader-element';
 
-  // Load basket from local storage on mount and display recovery notification
+  // Announce basket recovery on initial load if items present
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem('ts_joinery_kanban_basket');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setBasket(parsed);
-          const totalItems = parsed.reduce((sum: number, item: BasketItem) => sum + (item.basketQty || 1), 0);
-          announce(`Recovered previous basket (${totalItems} items).`);
-        }
-      }
-    } catch (err) {
-      console.error('Failed to load basket from localStorage:', err);
+    if (basket.length > 0) {
+      const totalItems = basket.reduce((sum: number, item: BasketItem) => sum + (item.basketQty || 1), 0);
+      announce(`Recovered previous basket (${totalItems} items).`);
     }
   }, []);
 
-  // Save basket to local storage whenever it changes
-  const saveBasket = (newBasket: BasketItem[]) => {
-    setBasket(newBasket);
-    try {
-      localStorage.setItem('ts_joinery_kanban_basket', JSON.stringify(newBasket));
-    } catch (err) {
-      console.error('Failed to save basket to localStorage:', err);
-    }
+  // Save basket to local storage whenever it changes (accepts value or functional updater)
+  const saveBasket = (updater: BasketItem[] | ((prev: BasketItem[]) => BasketItem[])) => {
+    setBasket(prev => {
+      const nextBasket = typeof updater === 'function' ? updater(prev) : updater;
+      try {
+        localStorage.setItem('ts_joinery_kanban_basket', JSON.stringify(nextBasket));
+      } catch (err) {
+        console.error('Failed to save basket to localStorage:', err);
+      }
+      return nextBasket;
+    });
   };
 
   // Cleans up camera on unmount
@@ -178,54 +185,66 @@ export const QRScanService: React.FC<QRScanServiceProps> = ({
 
   const addToBasket = (card: KanbanCardMaster) => {
     const itemId = (card.kanbanId || card.id || 'N/A').trim();
-    const existingIndex = basket.findIndex(item => item.id.trim().toLowerCase() === itemId.toLowerCase());
-
-    let updatedBasket = [...basket];
     let addedCount = 1;
+    const prodName = card.productName || card.productDescription || 'Kanban Item';
 
-    if (existingIndex > -1) {
-      // Increment existing item count
-      updatedBasket[existingIndex] = {
-        ...updatedBasket[existingIndex],
-        basketQty: updatedBasket[existingIndex].basketQty + 1,
-        addedAt: new Date().toISOString()
-      };
-      addedCount = updatedBasket[existingIndex].basketQty;
-    } else {
-      // Add new item
-      updatedBasket.push({
-        id: itemId,
-        card,
-        basketQty: 1,
-        addedAt: new Date().toISOString()
-      });
-    }
+    saveBasket((currentBasket) => {
+      const existingIndex = currentBasket.findIndex(item => item.id.trim().toLowerCase() === itemId.toLowerCase());
+      const updatedBasket = [...currentBasket];
 
-    saveBasket(updatedBasket);
-    console.log('Added To Basket');
-    setRecentScanAlert({ productName: card.productName || card.productDescription || 'Kanban Item', qty: addedCount });
-    announce(`✓ Product Added: ${card.productName || card.productDescription}. Basket quantity: ${addedCount}`);
+      if (existingIndex > -1) {
+        // Increment existing item count
+        addedCount = (updatedBasket[existingIndex].basketQty || 1) + 1;
+        updatedBasket[existingIndex] = {
+          ...updatedBasket[existingIndex],
+          card: {
+            ...updatedBasket[existingIndex].card,
+            ...card,
+            productName: card.productName || card.productDescription || updatedBasket[existingIndex].card.productName
+          },
+          basketQty: addedCount,
+          addedAt: new Date().toISOString()
+        };
+      } else {
+        // Add new item
+        addedCount = 1;
+        updatedBasket.push({
+          id: itemId,
+          card,
+          basketQty: 1,
+          addedAt: new Date().toISOString()
+        });
+      }
+      return updatedBasket;
+    });
+
+    console.log('Added To Basket:', itemId, 'Count:', addedCount);
+    setRecentScanAlert({ productName: prodName, qty: addedCount });
+    announce(`✓ Product Added: ${prodName}. Basket quantity: ${addedCount}`);
   };
 
   const updateBasketItemQty = (id: string, delta: number) => {
-    const updated = basket.map(item => {
-      if (item.id === id) {
-        const nextQty = Math.max(1, item.basketQty + delta);
-        return { ...item, basketQty: nextQty };
-      }
-      return item;
+    saveBasket((currentBasket) => {
+      return currentBasket.map(item => {
+        if (item.id === id) {
+          const nextQty = Math.max(1, item.basketQty + delta);
+          return { ...item, basketQty: nextQty };
+        }
+        return item;
+      });
     });
-    saveBasket(updated);
     announce(`Updated order quantity for ${id}`);
   };
 
   const removeBasketItem = (id: string) => {
-    const updated = basket.filter(item => item.id !== id);
-    saveBasket(updated);
+    saveBasket((currentBasket) => {
+      const updated = currentBasket.filter(item => item.id !== id);
+      if (updated.length === 0) {
+        setRecentScanAlert(null);
+      }
+      return updated;
+    });
     announce(`Removed ${id} from order basket.`);
-    if (basket.length === 1) {
-      setRecentScanAlert(null);
-    }
   };
 
   const clearBasket = () => {

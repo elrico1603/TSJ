@@ -124,11 +124,12 @@ export const stockRequestService = {
 
     // 3. Trigger ONE notification for the whole request
     try {
+      const itemSummaries = params.items.map(i => `Product: ${i.productName} (Code: ${i.productId})`).join(' | ');
       await notificationService.addNotification({
         category: 'stock_order',
         categoryLabel: 'Stock Request',
         title: `New Stock Request: ${requestNumber}`,
-        description: `${totalProducts} Products (${totalQuantity} items total) submitted by ${newRequest.requestedByName}.`,
+        description: `${totalProducts} Products (${totalQuantity} items): ${itemSummaries}. Submitted by ${newRequest.requestedByName}.`,
         date: new Date().toISOString().split('T')[0],
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         priority: 'high',
@@ -398,5 +399,30 @@ export const stockRequestService = {
 
   getStockRequests(): StockRequest[] {
     return this.getLocalRequests();
+  },
+
+  async deleteStockRequest(requestId: string): Promise<boolean> {
+    const current = this.getLocalRequests();
+    const filtered = current.filter(r => r.id !== requestId && r.requestNumber !== requestId);
+    this.saveLocalRequests(filtered);
+    notifyListeners(filtered);
+
+    if (db && APP_ID_PATH) {
+      try {
+        await db.collection('artifacts')
+          .doc(APP_ID_PATH)
+          .collection('public')
+          .doc('data')
+          .collection('stockRequests')
+          .doc(requestId)
+          .delete();
+
+        await db.collection('stockRequests').doc(requestId).delete().catch(() => {});
+      } catch (e) {
+        console.warn('Failed to delete stock request in Firebase:', e);
+      }
+    }
+
+    return true;
   }
 };

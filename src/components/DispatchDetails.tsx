@@ -2,6 +2,32 @@ import React from 'react';
 import { Icon } from './Icon';
 import { DriveFileInfo } from '../services/googleDriveService';
 
+export interface DispatchItem {
+  id: string;
+  productId?: string;
+  internalProductCode: string;
+  productName: string;
+  supplier?: string;
+  supplierPartNumber?: string;
+  baseOrderQuantity?: string;
+  binQuantity?: string;
+  location?: string;
+  deliveryTime?: string;
+  category?: string;
+  quantity: number;
+  unitCost?: number;
+  isCustom?: boolean;
+}
+
+export interface ReceivingPhoto {
+  id: string;
+  category: 'delivery_note' | 'parcel_condition' | 'unpacked_items';
+  name: string;
+  url: string;
+  uploadedAt: string;
+  size: number;
+}
+
 export interface DispatchRecord {
   id: string;
   dispatchNumber: string;
@@ -10,17 +36,39 @@ export interface DispatchRecord {
   destinationBranch: string;
   installer?: string;
   courier?: string;
+  courierCompany?: string;
   trackingNumber?: string;
+  trackingUrl?: string;
+  parcelCount?: string;
   notes?: string;
-  status: 'Draft' | 'Ready for Dispatch' | 'Dispatched';
+  status: 'Draft' | 'Ready for Dispatch' | 'Dispatched' | 'In Transit' | 'Received' | 'Partially Received' | 'Issue Logged';
+  items?: DispatchItem[];
   googleDriveFolderId?: string;
   googleDriveFolderName?: string;
   googleDriveFolderUrl?: string;
+  googleDriveReceivingFolderId?: string;
+  googleDriveReceivingFolderUrl?: string;
   photoCount?: number;
   photos?: DriveFileInfo[];
+  receivingPhotos?: ReceivingPhoto[];
+  receivingChecklist?: {
+    packagingIntact: boolean;
+    parcelCountMatches: boolean;
+    correctProducts: boolean;
+    qualityChecked: boolean;
+  };
+  receivingNotes?: string;
+  receivedBy?: string;
+  receivedAt?: string;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+  history?: Array<{
+    action: string;
+    user: string;
+    timestamp: string;
+    notes?: string;
+  }>;
 }
 
 interface DispatchDetailsProps {
@@ -40,11 +88,33 @@ export const DispatchDetails: React.FC<DispatchDetailsProps> = ({
 }) => {
   const getStatusBadge = (status: DispatchRecord['status']) => {
     switch (status) {
-      case 'Dispatched':
+      case 'Received':
         return (
           <span className="px-3 py-1 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-xl text-xs font-mono font-bold flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-            DISPATCHED
+            RECEIVED
+          </span>
+        );
+      case 'Partially Received':
+        return (
+          <span className="px-3 py-1 bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-xl text-xs font-mono font-bold flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+            PARTIALLY RECEIVED
+          </span>
+        );
+      case 'Issue Logged':
+        return (
+          <span className="px-3 py-1 bg-red-500/20 text-red-400 border border-red-500/30 rounded-xl text-xs font-mono font-bold flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-red-400"></span>
+            ISSUE LOGGED
+          </span>
+        );
+      case 'Dispatched':
+      case 'In Transit':
+        return (
+          <span className="px-3 py-1 bg-blue-500/20 text-blue-400 border border-blue-500/30 rounded-xl text-xs font-mono font-bold flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></span>
+            {status.toUpperCase()}
           </span>
         );
       case 'Ready for Dispatch':
@@ -57,8 +127,8 @@ export const DispatchDetails: React.FC<DispatchDetailsProps> = ({
       case 'Draft':
       default:
         return (
-          <span className="px-3 py-1 bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-xl text-xs font-mono font-bold flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+          <span className="px-3 py-1 bg-gray-500/20 text-gray-400 border border-gray-500/30 rounded-xl text-xs font-mono font-bold flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-gray-400"></span>
             DRAFT
           </span>
         );

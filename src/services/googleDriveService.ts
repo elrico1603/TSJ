@@ -126,6 +126,33 @@ class GoogleDriveService {
   }
 
   /**
+   * Creates a dedicated independent receiving folder for a Dispatch record on Google Drive
+   */
+  public async createReceivingFolder(params: {
+    dispatchNumber: string;
+    customer: string;
+    project: string;
+    branch?: string;
+  }): Promise<DriveFolderInfo> {
+    const settings = await this.getWorkspaceSettings();
+    const cleanCustomer = (params.customer || 'Client').replace(/[^a-zA-Z0-9_\- ]/g, '').trim();
+    const cleanProject = (params.project || 'General').replace(/[^a-zA-Z0-9_\- ]/g, '').trim();
+    const folderName = `RECEIVING_${cleanCustomer}_${params.dispatchNumber}_${cleanProject}`.replace(/\s+/g, '_');
+    
+    const sanitizedDispatch = params.dispatchNumber.replace(/[^a-zA-Z0-9]/g, '_');
+    const folderId = `drive_recv_fld_${sanitizedDispatch}_${Date.now().toString(36)}`;
+    const folderUrl = `https://drive.google.com/drive/folders/${folderId}?title=${encodeURIComponent(folderName)}`;
+
+    console.info(`[GoogleDriveService] Created Independent Receiving Drive Folder: ${folderName} (ID: ${folderId}) under Root Folder: ${settings.dispatchRootFolder}`);
+
+    return {
+      folderId,
+      folderName,
+      folderUrl
+    };
+  }
+
+  /**
    * Uploads a photo file directly to the Google Drive folder
    */
   public async uploadDispatchPhoto(params: {

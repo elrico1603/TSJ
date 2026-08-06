@@ -844,17 +844,17 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({
                             <button
                               onClick={async () => {
                                 const username = currentUser?.name || currentUser?.email || 'Janah (Procurement Manager)';
-                                const newPO = await purchaseOrderService.createPOFromStockRequest(req, undefined, username);
+                                const createdPOs = await purchaseOrderService.createPOGroupFromStockRequest(req, username);
                                 if (req.status === 'Pending') {
                                   await handlePerformTransition(req, 'Ordered');
                                 }
-                                announce(`Generated Purchase Order ${newPO.poNumber} for Request ${req.requestNumber}`);
-                                alert(`Purchase Order ${newPO.poNumber} generated successfully!\n\nAccess it under the "Purchase Orders" module.`);
+                                announce(`Generated ${createdPOs.length} Purchase Order(s) for Request ${req.requestNumber}`);
+                                alert(`Generated ${createdPOs.length} Purchase Order(s) automatically grouped by supplier:\n\n` + createdPOs.map(p => `• ${p.poNumber} (${p.supplierName}): ${p.totalProducts} item(s)`).join('\n') + `\n\nAccess them under the "Purchase Orders" module.`);
                               }}
                               className="px-3.5 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-lg flex items-center gap-1.5"
                             >
                               <Icon name="box" size={14} />
-                              <span>Generate PO</span>
+                              <span>Generate POs</span>
                             </button>
                           )}
 
@@ -901,6 +901,20 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({
                               <span>Cancel</span>
                             </button>
                           )}
+
+                          {/* Permanent Delete Button */}
+                          <button
+                            onClick={async () => {
+                              if (confirm(`PERMANENT DELETE: Are you sure you want to permanently delete Stock Request ${req.requestNumber}?`)) {
+                                await stockRequestService.deleteStockRequest(req.id);
+                                if (announce) announce(`Stock Request ${req.requestNumber} deleted permanently.`);
+                              }
+                            }}
+                            className="p-2 text-gray-500 hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-all"
+                            title="Permanently Delete Stock Request"
+                          >
+                            <Icon name="trash-2" size={16} />
+                          </button>
                         </div>
                       )}
                     </div>
@@ -1232,7 +1246,16 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({
                                 )}
                               </div>
                             </td>
-                            <td className="p-3 font-bold text-white">{item.productName}</td>
+                            <td className="p-3">
+                              <div>
+                                <span className="text-[9px] font-black uppercase text-gray-400 block font-mono">Product:</span>
+                                <span className="font-bold text-white text-xs block">{item.productName}</span>
+                              </div>
+                              <div className="mt-1">
+                                <span className="text-[9px] font-black uppercase text-gray-400 block font-mono">Code:</span>
+                                <span className="font-mono text-purple-400 text-xs font-bold block">{item.productId}</span>
+                              </div>
+                            </td>
                             <td className="p-3 text-gray-400">{item.supplier}</td>
                             <td className="p-3 font-mono text-gray-400">{item.supplierPartNumber}</td>
                             <td className="p-3 font-mono text-gray-300">{item.location}</td>

@@ -359,6 +359,20 @@ export const PurchaseOrderHub: React.FC<PurchaseOrderHubProps> = ({
                           <Icon name="archive" size={16} />
                         </button>
                       )}
+
+                      <button
+                        onClick={async e => {
+                          e.stopPropagation();
+                          if (window.confirm(`PERMANENT DELETE: Delete Purchase Order ${po.poNumber} permanently?`)) {
+                            await purchaseOrderService.deletePurchaseOrder(po.id);
+                            if (announce) announce(`Purchase Order ${po.poNumber} deleted permanently.`);
+                          }
+                        }}
+                        className="p-2 text-gray-500 hover:text-red-500 rounded-xl hover:bg-red-500/10 transition-all"
+                        title="Permanently Delete PO"
+                      >
+                        <Icon name="trash-2" size={16} />
+                      </button>
                     </div>
                   </div>
                 </div>

@@ -441,6 +441,106 @@ export const productMasterService = {
     await this.updateProduct(id, { status: 'Active' }, user, reason || 'Product restored from archive');
   },
 
+  async deleteProduct(id: string, user: string): Promise<boolean> {
+    const current = this.getLocalProducts();
+    const prod = current.find(p => p.id === id);
+    const filtered = current.filter(p => p.id !== id);
+    this.saveLocalProducts(filtered);
+
+    if (prod) {
+      await this.logMasterAction({
+        entityType: 'Product',
+        entityId: id,
+        entityName: prod.productName,
+        action: 'Deleted',
+        user,
+        reason: 'Permanently deleted product'
+      });
+    }
+
+    try {
+      await getMasterDocRef().collection('products').doc(id).delete();
+    } catch (e) {
+      console.warn('Firestore product delete failed:', e);
+    }
+    return true;
+  },
+
+  async deleteSupplier(id: string, user: string): Promise<boolean> {
+    const current = this.getLocalSuppliers();
+    const supp = current.find(s => s.id === id);
+    const filtered = current.filter(s => s.id !== id);
+    this.saveLocalSuppliers(filtered);
+
+    if (supp) {
+      await this.logMasterAction({
+        entityType: 'Supplier',
+        entityId: id,
+        entityName: supp.supplierName,
+        action: 'Deleted',
+        user,
+        reason: 'Permanently deleted supplier'
+      });
+    }
+
+    try {
+      await getMasterDocRef().collection('suppliers').doc(id).delete();
+    } catch (e) {
+      console.warn('Firestore supplier delete failed:', e);
+    }
+    return true;
+  },
+
+  async deleteCategory(id: string, user: string): Promise<boolean> {
+    const current = this.getLocalCategories();
+    const cat = current.find(c => c.id === id);
+    const filtered = current.filter(c => c.id !== id);
+    this.saveLocalCategories(filtered);
+
+    if (cat) {
+      await this.logMasterAction({
+        entityType: 'Category',
+        entityId: id,
+        entityName: cat.name,
+        action: 'Deleted',
+        user,
+        reason: 'Permanently deleted category'
+      });
+    }
+
+    try {
+      await getMasterDocRef().collection('categories').doc(id).delete();
+    } catch (e) {
+      console.warn('Firestore category delete failed:', e);
+    }
+    return true;
+  },
+
+  async deleteWarehouseLocation(id: string, user: string): Promise<boolean> {
+    const current = this.getLocalLocations();
+    const loc = current.find(l => l.id === id);
+    const filtered = current.filter(l => l.id !== id);
+    this.saveLocalLocations(filtered);
+
+    if (loc) {
+      await this.logMasterAction({
+        entityType: 'WarehouseLocation',
+        entityId: id,
+        entityName: loc.locationCode,
+        action: 'Deleted',
+        user,
+        reason: 'Permanently deleted location'
+      });
+    }
+
+    try {
+      await getMasterDocRef().collection('warehouseLocations').doc(id).delete();
+    } catch (e) {
+      console.warn('Firestore location delete failed:', e);
+    }
+    return true;
+  },
+
   async duplicateProduct(id: string, user: string): Promise<ProductMaster> {
     const currentList = this.getLocalProducts();
     const target = currentList.find(p => p.id === id);

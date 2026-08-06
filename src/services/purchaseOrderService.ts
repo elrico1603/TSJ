@@ -326,60 +326,108 @@ class PurchaseOrderService {
     return newPO;
   }
 
+  // Convenience helper: Convert a Stock Request directly to Purchase Orders grouped automatically by Supplier
+  public async createPOGroupFromStockRequest(
+    stockRequest: StockRequest,
+    currentUser: string = 'Janah (Procurement Manager)'
+  ): Promise<PurchaseOrder[]> {
+    const suppliers = productMasterService.getSuppliers();
+    const products = productMasterService.getProducts();
+    const requestItems = stockRequest.items || [];
+
+    if (requestItems.length === 0) {
+      const defaultPO = await this.createPOFromStockRequest(stockRequest, undefined, currentUser);
+      return [defaultPO];
+    }
+
+    // Group items by supplier key
+    const groupedMap = new Map<string, { supplier: typeof suppliers[0] | null; supplierName: string; items: StockRequestItem[] }>();
+
+    requestItems.forEach((item) => {
+      const matchedProduct = products.find(p => p.id === item.productId || p.internalProductCode === item.productId || p.productName.toLowerCase() === item.productName.toLowerCase());
+      let matchedSupplier = suppliers.find(s => (item.supplier && s.supplierName.toLowerCase() === item.supplier.toLowerCase()) || (matchedProduct && (s.id === matchedProduct.supplierId || s.supplierName.toLowerCase() === matchedProduct.supplier.toLowerCase())));
+
+      const suppKey = matchedSupplier ? matchedSupplier.id : (item.supplier || matchedProduct?.supplier || 'Unassigned Supplier');
+      const suppName = matchedSupplier ? matchedSupplier.supplierName : (item.supplier || matchedProduct?.supplier || 'Unassigned Supplier');
+
+      if (!groupedMap.has(suppKey)) {
+        groupedMap.set(suppKey, { supplier: matchedSupplier || null, supplierName: suppName, items: [] });
+      }
+      groupedMap.get(suppKey)!.items.push(item);
+    });
+
+    const createdPOs: PurchaseOrder[] = [];
+
+    for (const [_, group] of groupedMap.entries()) {
+      const matchedSupplier = group.supplier;
+      const poItems: PurchaseOrderItem[] = group.items.map((item, idx) => {
+        const matchedProduct = products.find(p => p.id === item.productId || p.internalProductCode === item.productId || p.productName.toLowerCase() === item.productName.toLowerCase());
+        return {
+          id: `poi-${Date.now()}-${idx}-${Math.floor(Math.random() * 1000)}`,
+          productId: matchedProduct?.id || item.productId || `PRD-${idx}`,
+          productName: item.productName,
+          internalProductCode: matchedProduct?.internalProductCode || item.productId || 'PRD-000',
+          supplierPartNumber: matchedProduct?.supplierPartNumber || item.supplierPartNumber || 'N/A',
+          unit: matchedProduct?.unit || 'ea',
+          orderQuantity: Number(item.quantity) || 1,
+          receivedQuantity: item.receivedQuantity || 0,
+          unitPrice: 0,
+          totalPrice: 0,
+          location: item.location || matchedProduct?.location || 'A-01-A-01',
+          category: matchedProduct?.category || 'General'
+        };
+      });
+
+      const po = await this.createPurchaseOrder({
+        linkedRequestId: stockRequest.id,
+        linkedRequestNumber: stockRequest.requestNumber || stockRequest.id,
+        supplierId: matchedSupplier?.id || '',
+        supplierName: group.supplierName,
+        supplierCode: matchedSupplier?.supplierCode || '',
+        supplierContactPerson: matchedSupplier?.contactPerson || '',
+        supplierTelephone: matchedSupplier?.telephone || '',
+        supplierEmail: matchedSupplier?.email || '',
+        supplierAddress: matchedSupplier?.physicalAddress || '',
+        expectedDeliveryDate: matchedSupplier ? new Date(Date.now() + (matchedSupplier.leadTimeDays || 3) * 24 * 3600 * 1000).toISOString().split('T')[0] : undefined,
+        items: poItems,
+        status: 'Pending Approval'
+      }, currentUser);
+
+      createdPOs.push(po);
+    }
+
+    return createdPOs;
+  }
+
   // Convenience helper: Convert a Stock Request directly to a Purchase Order
   public async createPOFromStockRequest(
     stockRequest: StockRequest,
     supplierId?: string,
     currentUser: string = 'Janah (Procurement Manager)'
   ): Promise<PurchaseOrder> {
-    // Look up supplier details if supplierId provided or from Product Master
-    const suppliers = productMasterService.getSuppliers();
-    const products = productMasterService.getProducts();
+    const createdPOs = await this.createPOGroupFromStockRequest(stockRequest, currentUser);
+    return createdPOs[0];
+  }
 
-    const requestItems = stockRequest.items || [];
-    const firstSupplierName = requestItems[0]?.supplier || '';
+  // Delete Purchase Order permanently
+  public async deletePurchaseOrder(poId: string): Promise<boolean> {
+    const idx = this.localPOs.findIndex(p => p.id === poId || p.poNumber === poId);
+    if (idx === -1) return false;
 
-    let matchedSupplier = suppliers.find(s => s.id === supplierId || (firstSupplierName && s.supplierName.toLowerCase() === firstSupplierName.toLowerCase()));
+    const removed = this.localPOs[idx];
+    this.localPOs.splice(idx, 1);
+    this.saveLocal();
+    this.notify();
 
-    const poItems: PurchaseOrderItem[] = requestItems.map((item, idx) => {
-      const matchedProduct = products.find(p => p.id === item.productId || p.internalProductCode === item.productId || p.productName.toLowerCase() === item.productName.toLowerCase());
-
-      if (!matchedSupplier && matchedProduct) {
-        matchedSupplier = suppliers.find(s => s.id === matchedProduct?.supplierId || s.supplierName === matchedProduct?.supplier);
+    try {
+      if (this.isFirebaseConfigured) {
+        await db.collection(APP_ID_PATH).doc('purchase_orders_data').collection('purchaseOrders').doc(removed.id).delete();
       }
+    } catch (e) {
+      console.warn('Failed to delete PO in Firebase:', e);
+    }
 
-      return {
-        id: `poi-${Date.now()}-${idx}`,
-        productId: matchedProduct?.id || item.productId || `PRD-${idx}`,
-        productName: item.productName,
-        internalProductCode: matchedProduct?.internalProductCode || item.productId || 'PRD-000',
-        supplierPartNumber: matchedProduct?.supplierPartNumber || item.supplierPartNumber || 'N/A',
-        unit: matchedProduct?.unit || 'ea',
-        orderQuantity: Number(item.quantity) || 1,
-        receivedQuantity: item.receivedQuantity || 0,
-        unitPrice: 0,
-        totalPrice: 0,
-        location: item.location || matchedProduct?.location || 'A-01-A-01',
-        category: matchedProduct?.category || 'General'
-      };
-    });
-
-    const supplierName = matchedSupplier?.supplierName || firstSupplierName || 'Selected Supplier';
-
-    return this.createPurchaseOrder({
-      linkedRequestId: stockRequest.id,
-      linkedRequestNumber: stockRequest.requestNumber || stockRequest.id,
-      supplierId: matchedSupplier?.id || '',
-      supplierName: supplierName,
-      supplierCode: matchedSupplier?.supplierCode || '',
-      supplierContactPerson: matchedSupplier?.contactPerson || '',
-      supplierTelephone: matchedSupplier?.telephone || '',
-      supplierEmail: matchedSupplier?.email || '',
-      supplierAddress: matchedSupplier?.physicalAddress || '',
-      expectedDeliveryDate: matchedSupplier ? new Date(Date.now() + (matchedSupplier.leadTimeDays || 3) * 24 * 3600 * 1000).toISOString().split('T')[0] : undefined,
-      items: poItems,
-      status: 'Pending Approval'
-    }, currentUser);
+    return true;
   }
 
   // Approve Purchase Order

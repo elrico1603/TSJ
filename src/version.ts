@@ -17,7 +17,7 @@ export const APP_VERSION: AppVersionInfo = {
   major: 1,
   minor: 0,
   patch: 0,
-  buildNumber: 20,
+  buildNumber: 21,
   buildDate: '2026-08-05',
   appName: 'TS Kanban Management Hub',
   environment: (typeof import.meta !== 'undefined' && (import.meta as any).env?.MODE) || 'production'

@@ -8,6 +8,7 @@ interface DispatchListProps {
   onEdit: (dispatch: DispatchRecord) => void;
   onDelete: (dispatch: DispatchRecord) => void;
   onDispatchShipment: (dispatch: DispatchRecord) => void;
+  onReceive?: (dispatch: DispatchRecord) => void;
   onNewDispatch: () => void;
   canCreateOrEdit: boolean;
   currentUser?: any;
@@ -23,7 +24,7 @@ export const DispatchList: React.FC<DispatchListProps> = ({
   canCreateOrEdit
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedStatusFilter, setSelectedStatusFilter] = useState<'All' | 'Draft' | 'Ready for Dispatch' | 'Dispatched'>('All');
+  const [selectedStatusFilter, setSelectedStatusFilter] = useState<'All' | 'Draft' | 'Ready for Dispatch' | 'Dispatched' | 'Received'>('All');
 
   const filteredDispatches = dispatches.filter((item) => {
     const matchesStatus = selectedStatusFilter === 'All' || item.status === selectedStatusFilter;
