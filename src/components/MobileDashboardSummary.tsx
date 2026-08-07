@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Employee, KanbanCard } from '../types';
 import { Clock, Calendar, ShoppingBag, AlertTriangle, WifiOff, CheckCircle2, ChevronRight, Activity, Users, Layers } from 'lucide-react';
 import { offlineSyncService } from '../services/offlineSyncService';
+import { permissionService } from '../services/permissionService';
 
 interface MobileDashboardSummaryProps {
   currentUser: any;
@@ -18,10 +19,11 @@ export const MobileDashboardSummary: React.FC<MobileDashboardSummaryProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<'attendance' | 'production' | 'activity'>('attendance');
 
-  // Greeting based on time
+  // Greeting based on time & Firestore firstName
+  const userFirstName = currentUser?.firstName || (currentUser?.name ? currentUser.name.split(' ')[0] : 'User');
   const hour = new Date().getHours();
-  const timeGreeting = hour < 12 ? 'Good Morning' : hour < 17 ? 'Good Afternoon' : 'Good Evening';
-  const userName = currentUser?.name || currentUser?.email?.split('@')[0] || 'Janah';
+  const defaultTimeGreeting = hour < 12 ? 'Good Morning' : hour < 17 ? 'Good Afternoon' : 'Good Evening';
+  const greetingText = permissionService?.getGreeting ? permissionService.getGreeting(userFirstName) : `${defaultTimeGreeting}, ${userFirstName}`;
 
   // Metrics calculation
   const activeEmployees = employees.filter(e => !e.isArchived);
@@ -53,7 +55,7 @@ export const MobileDashboardSummary: React.FC<MobileDashboardSummaryProps> = ({
         </div>
 
         <h2 className="text-2xl sm:text-3xl font-black uppercase tracking-tight text-white italic">
-          {timeGreeting}, <span className="text-[#ff8c00]">{userName}</span>
+          {greetingText}
         </h2>
         <p className="text-xs text-gray-400 font-medium mt-1">
           Here is your daily operational summary and workforce status.

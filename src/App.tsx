@@ -50,6 +50,8 @@ import { SplashScreen } from './components/SplashScreen';
 import { PWAInstallModal } from './components/PWAInstallModal';
 import { OfflineSyncStatus } from './components/OfflineSyncStatus';
 import { MobileDashboardSummary } from './components/MobileDashboardSummary';
+import { permissionService } from './services/permissionService';
+import { DedicatedKioskClockingTerminal } from './components/DedicatedKioskClockingTerminal';
 
 const { SUPER_USER_PIN } = SECURITY;
 
@@ -606,9 +608,23 @@ export default function App() {
 
         // Users administration registration listening
         db.collection('artifacts').doc(APP_ID_PATH).collection('private').doc('users').collection('active')
-          .onSnapshot(snap => {
+          .onSnapshot(async snap => {
             if (!snap.empty) {
-              const users = snap.docs.map(d => ({ id: d.id, ...d.data() } as AppUser));
+              const users = snap.docs.map(d => {
+                const data = d.data();
+                return {
+                  id: d.id,
+                  ...data,
+                  firstName: data.firstName || data.name?.split(' ')[0] || 'User',
+                  lastName: data.lastName || data.name?.split(' ').slice(1).join(' ') || '',
+                  email: data.email || '',
+                  role: data.role || 'Employee',
+                  department: data.department || 'Operations',
+                  active: data.active !== undefined ? data.active : true,
+                  pin: data.pin || '1234',
+                  isApproved: data.isApproved !== undefined ? data.isApproved : true
+                } as AppUser;
+              });
               setActiveUsers(users);
               
               // Load custom permission overrides from users directly
@@ -620,7 +636,23 @@ export default function App() {
               });
               setUserPermissions(perms);
             } else {
-              setActiveUsers([]);
+              // Seed default role users if Firestore user collection is empty
+              const defaultAccounts: AppUser[] = [
+                { id: 'usr-admin-elrico', firstName: 'Elrico', lastName: 'Greyvenstein', name: 'Elrico Greyvenstein', email: 'elrico@tsjoinery.co.za', role: 'Administrator', department: 'Management', active: true, pin: '1234', isApproved: true, status: 'active', createdAt: new Date().toISOString() },
+                { id: 'usr-clocking-kiosk', firstName: 'Clocking', lastName: 'Terminal', name: 'Clocking Terminal', email: 'clocking@tsjoinery.co.za', role: 'Clocking Terminal', department: 'Clocking', active: true, pin: '0000', isApproved: true, status: 'active', createdAt: new Date().toISOString() },
+                { id: 'usr-hr-frans', firstName: 'Frans', lastName: 'User', name: 'Frans User', email: 'frans@tsjoinery.co.za', role: 'HR', department: 'Human Resources', active: true, pin: '1234', isApproved: true, status: 'active', createdAt: new Date().toISOString() },
+                { id: 'usr-manager-janah', firstName: 'Janah', lastName: 'User', name: 'Janah User', email: 'janah@tsjoinery.co.za', role: 'Manager', department: 'Management', active: true, pin: '1234', isApproved: true, status: 'active', createdAt: new Date().toISOString() },
+                { id: 'usr-purchasing', firstName: 'Purchasing', lastName: 'User', name: 'Purchasing User', email: 'purchasing@tsjoinery.co.za', role: 'Purchasing', department: 'Procurement', active: true, pin: '1234', isApproved: true, status: 'active', createdAt: new Date().toISOString() },
+                { id: 'usr-employee', firstName: 'Employee', lastName: 'User', name: 'Employee User', email: 'employee@tsjoinery.co.za', role: 'Employee', department: 'Workshop', active: true, pin: '1234', isApproved: true, status: 'active', createdAt: new Date().toISOString() }
+              ];
+              setActiveUsers(defaultAccounts);
+              try {
+                for (const acc of defaultAccounts) {
+                  await db.collection('artifacts').doc(APP_ID_PATH).collection('private').doc('users').collection('active').doc(acc.id).set(acc);
+                }
+              } catch (e) {
+                console.warn('Unable to seed default role accounts:', e);
+              }
             }
             triggerSplashDismiss();
           });
@@ -1057,34 +1089,25 @@ TS Joinery Kanban System`
 
     if (matchedUser) {
       setIsLocked(false);
-      setCurrentUser(matchedUser);
-      auditLogger.log('LOCAL_UNLOCK', matchedUser.email, `Unlocked Management Hub as ${matchedUser.role}`);
+      const normUser: AppUser = {
+        ...matchedUser,
+        firstName: matchedUser.firstName || matchedUser.name?.split(' ')[0] || 'User',
+        lastName: matchedUser.lastName || matchedUser.name?.split(' ').slice(1).join(' ') || '',
+        email: matchedUser.email || '',
+        role: matchedUser.role || 'Employee',
+        department: matchedUser.department || 'Operations',
+        active: matchedUser.active !== undefined ? matchedUser.active : true
+      };
+      setCurrentUser(normUser);
+      auditLogger.log('LOCAL_UNLOCK', normUser.email, `Unlocked Management Hub as ${normUser.role}`);
       
-      // Select appropriate default mode based on user permission overrides
-      const userPerms = userPermissions[matchedUser.id] || {};
-      const canManageUsersOverride = userPerms.canManageUsers !== undefined ? userPerms.canManageUsers : ['Admin', 'Supervisor'].includes(matchedUser.role);
-      const canManageOrdersOverride = userPerms.canManageOrders !== undefined ? userPerms.canManageOrders : ['Admin', 'Supervisor', 'HR'].includes(matchedUser.role);
-      const canViewAnalyticsOverride = userPerms.canViewAnalytics !== undefined ? userPerms.canViewAnalytics : ['Admin', 'Supervisor', 'HR'].includes(matchedUser.role);
-
-      let targetMode = 'admin';
-      if (matchedUser.role === 'Stock Manager') {
-        targetMode = 'qr_scan_service';
-      } else if (canManageUsersOverride) {
-        targetMode = 'admin';
-      } else if (canManageOrdersOverride) {
-        targetMode = 'orders';
-      } else if (canViewAnalyticsOverride) {
-        targetMode = 'analytics';
-      } else {
-        targetMode = 'employee';
-      }
-
-      setAppMode(targetMode);
-      setView('dashboard');
+      const { appMode: initMode, view: initView } = permissionService.getInitialModeAndView(normUser);
+      setAppMode(initMode);
+      setView(initView);
       setShowPinModal(false);
       setUnlockUsername('');
       setUnlockPassword('');
-      announce(`Unlocked as ${matchedUser.name}.`);
+      announce(`Unlocked as ${normUser.firstName}.`);
     } else {
       setAdminPinError(true);
       setTimeout(() => { 
@@ -1157,17 +1180,21 @@ TS Joinery Kanban System`
     if (authView === 'login') {
       const match = authManager.authenticateUser(activeUsers, authForm.email, authForm.pin);
       if (match) {
-        setCurrentUser(match);
+        const normUser: AppUser = {
+          ...match,
+          firstName: match.firstName || match.name?.split(' ')[0] || 'User',
+          lastName: match.lastName || match.name?.split(' ').slice(1).join(' ') || '',
+          email: match.email || '',
+          role: match.role || 'Employee',
+          department: match.department || 'Operations',
+          active: match.active !== undefined ? match.active : true
+        };
+        setCurrentUser(normUser);
         setIsLocked(false);
-        if (match.role === 'Stock Manager') {
-          setAppMode('qr_scan_service');
-        } else if (match.role === 'Artisan') {
-          setAppMode('employee');
-        } else {
-          setAppMode('admin');
-        }
-        setView('dashboard');
-        auditLogger.log('USER_LOGIN', match.email, `Signed in as ${match.role}`);
+        const { appMode: initMode, view: initView } = permissionService.getInitialModeAndView(normUser);
+        setAppMode(initMode);
+        setView(initView);
+        auditLogger.log('USER_LOGIN', normUser.email, `Signed in as ${normUser.role}`);
       } else {
         announce('Authentication failed. Check credentials or approval status.');
       }
@@ -1681,7 +1708,110 @@ TS Joinery Kanban System`
       )}
 
       {/* Primary workshop application layout */}
-      <div className={`h-screen w-full bg-transparent flex flex-col relative overflow-hidden text-white italic ${isExportingPDF || printingItem || printingTemplate ? 'hidden no-print' : ''}`}>
+      {(!currentUser || isLocked) ? (
+        <div className="fixed inset-0 z-[500] bg-[#0c0c0c] flex flex-col items-center justify-center p-4 font-sans text-white select-none overflow-y-auto">
+          <div className="bg-watermark"></div>
+          
+          <div className="relative w-full max-w-md bg-[#141417]/95 border border-white/10 p-8 sm:p-10 rounded-[2.5rem] shadow-[0_25px_60px_rgba(0,0,0,0.8)] backdrop-blur-3xl text-center space-y-6 animate-in fade-in duration-300">
+            
+            {/* Branding & Logo */}
+            <div className="flex flex-col items-center space-y-3">
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[#ff8c00] to-[#b36200] flex items-center justify-center text-black font-black text-3xl shadow-xl shadow-[#ff8c00]/20 italic">
+                TS
+              </div>
+              <div>
+                <h1 className="text-2xl font-black uppercase tracking-tight text-white italic">
+                  TimberSmith <span className="text-[#ff8c00] font-sans">Joinery</span>
+                </h1>
+                <p className="text-xs font-black uppercase tracking-widest text-[#ff8c00] mt-0.5">
+                  TS Hub Login
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-gray-400 font-medium">
+              Enter your authorized system credentials to sign in
+            </p>
+
+            {/* Login Form */}
+            <form onSubmit={handleAuthSubmit} className="space-y-4 text-left font-sans">
+              <div>
+                <label className="text-[10px] font-black uppercase text-gray-400 ml-2 tracking-wider">Email Address</label>
+                <input 
+                  required 
+                  type="email" 
+                  className="w-full bg-black/60 border border-white/10 rounded-2xl p-4 text-sm text-white mt-1 outline-none focus:border-[#ff8c00] font-bold transition-all placeholder-gray-600" 
+                  value={authForm.email} 
+                  onChange={e => setAuthForm({...authForm, email: e.target.value})} 
+                  placeholder="elrico@tsjoinery.co.za" 
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black uppercase text-gray-400 ml-2 tracking-wider">Security Key / PIN</label>
+                <input 
+                  required 
+                  type="password" 
+                  className="w-full bg-black/60 border border-white/10 rounded-2xl p-4 text-white mt-1 outline-none focus:border-[#ff8c00] text-center tracking-[0.5em] text-xl font-bold transition-all placeholder-gray-600" 
+                  value={authForm.pin} 
+                  onChange={e => setAuthForm({...authForm, pin: e.target.value})} 
+                  placeholder="••••" 
+                />
+              </div>
+
+              <button 
+                type="submit" 
+                className="w-full py-4 bg-[#ff8c00] hover:bg-[#e07b00] active:scale-[0.98] text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl transition-all min-h-[48px]"
+              >
+                Authenticate Login
+              </button>
+            </form>
+
+            {/* Quick Select Accounts */}
+            <div className="pt-4 border-t border-white/10 space-y-2">
+              <p className="text-[10px] font-black uppercase text-gray-500 tracking-wider">Quick Accounts (Click to Fill):</p>
+              <div className="flex flex-wrap gap-1.5 justify-center">
+                {[
+                  { label: 'Admin', email: 'elrico@tsjoinery.co.za', pin: '1234' },
+                  { label: 'Clocking Kiosk', email: 'clocking@tsjoinery.co.za', pin: '0000' },
+                  { label: 'HR', email: 'frans@tsjoinery.co.za', pin: '1234' },
+                  { label: 'Manager', email: 'janah@tsjoinery.co.za', pin: '1234' },
+                  { label: 'Purchasing', email: 'purchasing@tsjoinery.co.za', pin: '1234' },
+                ].map(acc => (
+                  <button
+                    key={acc.email}
+                    type="button"
+                    onClick={() => setAuthForm({ ...authForm, email: acc.email, pin: acc.pin })}
+                    className="px-2.5 py-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[10px] font-mono text-gray-300 hover:text-white transition-colors"
+                  >
+                    {acc.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="text-[10px] font-mono text-gray-600">
+              v{systemVersion} • TimberSmith Joinery (Pty) Ltd
+            </div>
+          </div>
+        </div>
+      ) : (permissionService.isClockingTerminalUser(currentUser) || appMode === 'clocking_terminal') ? (
+        <DedicatedKioskClockingTerminal
+          employees={employees}
+          setSelectedEmployee={setSelectedEmployee}
+          setPendingAction={setPendingAction}
+          setView={setView}
+          onSignOut={() => {
+            setCurrentUser(null);
+            setAppMode('clocking_terminal');
+            setIsLocked(true);
+          }}
+          announce={announce}
+          currentUser={currentUser}
+          setAppMode={setAppMode}
+        />
+      ) : (
+        <div className={`h-screen w-full bg-transparent flex flex-col relative overflow-hidden text-white italic ${isExportingPDF || printingItem || printingTemplate ? 'hidden no-print' : ''}`}>
         <div className="bg-watermark"></div>
         <canvas ref={canvasRef} className="hidden" />
 
@@ -1869,72 +1999,72 @@ TS Joinery Kanban System`
                     </div>
                     <div className="space-y-2 font-sans font-sans">
                       <button 
-                        disabled={isLocked}
+                        disabled={isLocked || !permissionService.canAccessMode(currentUser?.role, 'product_master')}
                         onClick={() => { setAppMode('product_master'); }} 
-                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${isLocked ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'product_master' ? 'bg-cyan-600/10 border border-cyan-500/30 text-cyan-400' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${(isLocked || !permissionService.canAccessMode(currentUser?.role, 'product_master')) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'product_master' ? 'bg-cyan-600/10 border border-cyan-500/30 text-cyan-400' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
                       >
                         <Icon name="box" size={18} />
                         <span className="font-black uppercase text-xs tracking-wider">Product Master</span>
                       </button>
 
                       <button 
-                        disabled={isLocked}
+                        disabled={isLocked || !permissionService.canAccessMode(currentUser?.role, 'purchase_orders')}
                         onClick={() => { setAppMode('purchase_orders'); }} 
-                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${isLocked ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'purchase_orders' ? 'bg-cyan-600/10 border border-cyan-500/30 text-cyan-400' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${(isLocked || !permissionService.canAccessMode(currentUser?.role, 'purchase_orders')) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'purchase_orders' ? 'bg-cyan-600/10 border border-cyan-500/30 text-cyan-400' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
                       >
                         <Icon name="file-text" size={18} />
                         <span className="font-black uppercase text-xs tracking-wider">Purchase Orders</span>
                       </button>
 
                       <button 
-                        disabled={isLocked}
+                        disabled={isLocked || !permissionService.canAccessMode(currentUser?.role, 'dispatch')}
                         onClick={() => { setAppMode('dispatch'); }} 
-                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${isLocked ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'dispatch' ? 'bg-amber-600/10 border border-amber-500/30 text-amber-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${(isLocked || !permissionService.canAccessMode(currentUser?.role, 'dispatch')) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'dispatch' ? 'bg-amber-600/10 border border-amber-500/30 text-amber-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
                       >
                         <Icon name="truck" size={18} />
                         <span className="font-black uppercase text-xs tracking-wider">Dispatch & Receiving</span>
                       </button>
 
                       <button 
-                        disabled={isLocked || !canManageUsers}
+                        disabled={isLocked || !permissionService.canAccessMode(currentUser?.role, 'template_designer')}
                         onClick={() => { setAppMode('template_designer'); }} 
-                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${(isLocked || !canManageUsers) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'template_designer' ? 'bg-purple-600/10 border border-purple-500/30 text-purple-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${(isLocked || !permissionService.canAccessMode(currentUser?.role, 'template_designer')) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'template_designer' ? 'bg-purple-600/10 border border-purple-500/30 text-purple-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
                       >
                         <Icon name="layout-template" size={18} />
                         <span className="font-black uppercase text-xs tracking-wider">Kanban Designer</span>
                       </button>
 
                       <button 
-                        disabled={isLocked || (!canManageOrders && !isStockManager)}
+                        disabled={isLocked || !permissionService.canAccessMode(currentUser?.role, 'orders')}
                         onClick={() => { setAppMode('orders'); }} 
-                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${(isLocked || (!canManageOrders && !isStockManager)) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'orders' ? 'bg-[#ff8c00]/10 border border-[#ff8c00]/30 text-[#ff8c00]' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${(isLocked || !permissionService.canAccessMode(currentUser?.role, 'orders')) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'orders' ? 'bg-[#ff8c00]/10 border border-[#ff8c00]/30 text-[#ff8c00]' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
                       >
                         <Icon name="banknote" size={18} />
                         <span className="font-black uppercase text-xs tracking-wider">Procurement & Orders</span>
                       </button>
 
                       <button 
-                        disabled={isLocked || !canManageUsers}
+                        disabled={isLocked || !permissionService.canAccessMode(currentUser?.role, 'admin')}
                         onClick={() => { setAppMode('admin'); setView('dashboard'); }} 
-                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${(isLocked || !canManageUsers) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'admin' ? 'bg-blue-600/10 border border-blue-500/30 text-blue-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${(isLocked || !permissionService.canAccessMode(currentUser?.role, 'admin')) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'admin' ? 'bg-blue-600/10 border border-blue-500/30 text-blue-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
                       >
                         <Icon name="users" size={18} />
-                        <span className="font-black uppercase text-xs tracking-wider">Employer Registration</span>
+                        <span className="font-black uppercase text-xs tracking-wider font-sans">Employer Registration</span>
                       </button>
 
                       <button 
-                        disabled={isLocked || !canViewAnalytics}
+                        disabled={isLocked || !permissionService.canAccessMode(currentUser?.role, 'analytics')}
                         onClick={() => { setAppMode('analytics'); setView('dashboard'); }} 
-                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${(isLocked || !canViewAnalytics) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'analytics' ? 'bg-emerald-600/10 border border-emerald-500/30 text-emerald-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${(isLocked || !permissionService.canAccessMode(currentUser?.role, 'analytics')) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'analytics' ? 'bg-emerald-600/10 border border-emerald-500/30 text-emerald-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
                       >
                         <Icon name="bar-chart-3" size={18} />
-                        <span className="font-black uppercase text-xs tracking-wider">Work Analytics</span>
+                        <span className="font-black uppercase text-xs tracking-wider font-sans">Work Analytics</span>
                       </button>
 
                       <button 
-                        disabled={isLocked}
+                        disabled={isLocked || !permissionService.canAccessMode(currentUser?.role, 'leave')}
                         onClick={() => { setAppMode('leave'); setView('dashboard'); }} 
-                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${isLocked ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'leave' ? 'bg-amber-600/10 border border-amber-500/30 text-amber-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${(isLocked || !permissionService.canAccessMode(currentUser?.role, 'leave')) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'leave' ? 'bg-amber-600/10 border border-amber-500/30 text-amber-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
                       >
                         <Icon name="calendar" size={18} />
                         <div className="flex items-center justify-between w-full">
@@ -2230,11 +2360,13 @@ TS Joinery Kanban System`
                         {authView === 'register' && (
                           <div>
                             <label className="text-[10px] font-black uppercase text-gray-500 ml-3">Desired Access Role</label>
-                            <select className="w-full bg-black border border-white/10 rounded-2xl p-4 text-white mt-1.5 outline-none focus:border-blue-500 appearance-none cursor-pointer text-sm" value={authForm.role} onChange={e => setAuthForm({...authForm, role: e.target.value})}>
-                              <option value="Artisan">Artisan (Clock Only)</option>
+                            <select className="w-full bg-black border border-white/10 rounded-2xl p-4 text-white mt-1.5 outline-none focus:border-blue-500 appearance-none cursor-pointer text-sm font-bold" value={authForm.role} onChange={e => setAuthForm({...authForm, role: e.target.value})}>
+                              <option value="Administrator">Administrator</option>
+                              <option value="Manager">Manager</option>
                               <option value="HR">HR Controller</option>
-                              <option value="Supervisor">Supervisor</option>
-                              <option value="Admin">System Administrator</option>
+                              <option value="Purchasing">Purchasing & Stock</option>
+                              <option value="Clocking">Clocking Terminal Kiosk</option>
+                              <option value="Employee">Employee / Artisan</option>
                             </select>
                           </div>
                         )}
@@ -2298,6 +2430,7 @@ TS Joinery Kanban System`
           </div>
         </div>
       </div>
+      )}
 
       {/* VIEW SCANNING PROFILE CAMERA PREVIEW */}
       {view === 'scanning' && selectedEmployee && (

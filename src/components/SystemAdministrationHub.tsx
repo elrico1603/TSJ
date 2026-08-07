@@ -501,7 +501,7 @@ export const SystemAdministrationHub: React.FC<SystemAdministrationHubProps> = (
                             }}
                             className="bg-black border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none w-full disabled:opacity-50"
                           >
-                            {['Artisan', 'Supervisor', 'HR', 'Admin', 'Stock Manager'].map(r => (
+                            {['Administrator', 'Manager', 'HR', 'Purchasing', 'Clocking Terminal', 'Stock Manager', 'Supervisor', 'Artisan', 'Employee'].map(r => (
                               <option key={r} value={r}>{r}</option>
                             ))}
                           </select>

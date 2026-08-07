@@ -1,7 +1,7 @@
 import { db, APP_ID_PATH } from './firebase';
 import { auditLogger } from './audit';
 
-export const USER_ROLES = ['Artisan', 'Stock Manager', 'Supervisor', 'HR', 'Admin'] as const;
+export const USER_ROLES = ['Administrator', 'Manager', 'HR', 'Purchasing', 'Clocking Terminal', 'Stock Manager', 'Supervisor', 'Employee'] as const;
 export type UserRole = typeof USER_ROLES[number];
 
 export const SECURITY = {
@@ -9,20 +9,24 @@ export const SECURITY = {
 };
 
 export const rolePermissions = {
-  canManageUsers: (role: string) => ['Admin', 'Supervisor'].includes(role),
-  canApproveUsers: (role: string) => role === 'Admin',
-  canManageOrders: (role: string) => ['Admin', 'Supervisor', 'HR'].includes(role),
-  canViewAnalytics: (role: string) => ['Admin', 'Supervisor', 'HR'].includes(role),
-  canAccessMobile: (role: string) => ['Admin', 'Supervisor', 'HR', 'Artisan', 'Stock Manager'].includes(role),
-  canClock: (role: string) => ['Artisan', 'Supervisor', 'HR', 'Admin'].includes(role),
-  isStockManager: (role: string) => role === 'Stock Manager'
+  canManageUsers: (role: string) => ['Administrator', 'Admin', 'HR'].includes(role),
+  canApproveUsers: (role: string) => ['Administrator', 'Admin'].includes(role),
+  canManageOrders: (role: string) => ['Administrator', 'Admin', 'Manager', 'Purchasing'].includes(role),
+  canViewAnalytics: (role: string) => ['Administrator', 'Admin', 'Manager'].includes(role),
+  canAccessMobile: (role: string) => ['Administrator', 'Admin', 'Manager', 'HR', 'Purchasing', 'Employee'].includes(role),
+  canClock: (role: string) => true,
+  isStockManager: (role: string) => role === 'Purchasing' || role === 'Stock Manager'
 };
 
 export interface AppUser {
   id: string;
+  firstName?: string;
+  lastName?: string;
   name: string;
   email: string;
   role: string;
+  department?: string;
+  active?: boolean;
   pin: string;
   isApproved: boolean;
   status: string;

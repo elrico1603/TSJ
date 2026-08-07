@@ -177,6 +177,15 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
     isSystemDefault: true
   },
   {
+    id: 'ROLE-CLOCKING-TERMINAL',
+    roleName: 'Clocking Terminal',
+    description: 'Shared reception/locker-room terminal account with access restricted strictly to Clocking Terminal, Employee Search, Leave Application, and QR Scanner.',
+    status: 'active',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    isSystemDefault: true
+  },
+  {
     id: 'ROLE-EMPLOYEE',
     roleName: 'Employee',
     description: 'Standard employee account for viewing dashboard, time clocking, and leave requests.',
@@ -202,6 +211,16 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, RolePermissions> = {
     roleId: 'ROLE-ADMIN',
     roleName: 'Administrator',
     permissions: fullAccessMatrix(),
+    updatedAt: new Date().toISOString(),
+    updatedBy: 'System'
+  },
+  'ROLE-CLOCKING-TERMINAL': {
+    roleId: 'ROLE-CLOCKING-TERMINAL',
+    roleName: 'Clocking Terminal',
+    permissions: customMatrix(
+      ['Clocking', 'Leave Management', 'Employer Registration', 'QR Scan Service'],
+      ['View', 'Create']
+    ),
     updatedAt: new Date().toISOString(),
     updatedBy: 'System'
   },
@@ -813,5 +832,98 @@ export const permissionService = {
     }
 
     return () => {};
+  },
+
+  // ================= TS HUB PHASE 2 ROLE & PERMISSION HELPERS =================
+  isClockingTerminalUser(user: any): boolean {
+    if (!user) return false;
+    const role = (user.role || '').trim();
+    const email = (user.email || '').trim().toLowerCase();
+    return role === 'Clocking Terminal' || role === 'Clocking' || email === 'clocking@tsjoinery.co.za';
+  },
+
+  getGreeting(firstName?: string, date: Date = new Date()): string {
+    const hour = date.getHours();
+    const timeGreeting = hour < 12 ? 'Good Morning' : hour < 17 ? 'Good Afternoon' : 'Good Evening';
+    const name = (firstName || '').trim() || 'User';
+    return `${timeGreeting}, ${name}`;
+  },
+
+  canAccessMode(role: string, mode: string): boolean {
+    const normRole = (role || '').trim();
+    if (normRole === 'Administrator' || normRole === 'Admin') return true;
+    if (normRole === 'Clocking Terminal' || normRole === 'Clocking') {
+      return ['clocking_terminal', 'employee', 'leave', 'qr_scan_service'].includes(mode);
+    }
+
+    switch (normRole) {
+      case 'Manager':
+        return ['clocking_terminal', 'admin', 'employee', 'analytics', 'leave', 'qr_scan_service', 'orders'].includes(mode);
+      case 'HR':
+        return ['clocking_terminal', 'admin', 'employee', 'leave'].includes(mode);
+      case 'Purchasing':
+        return ['clocking_terminal', 'purchase_orders', 'orders', 'product_master', 'kanban', 'dispatch', 'qr_scan_service'].includes(mode);
+      case 'Stock Manager':
+        return ['clocking_terminal', 'product_master', 'purchase_orders', 'dispatch', 'qr_scan_service'].includes(mode);
+      case 'Supervisor':
+        return ['clocking_terminal', 'admin', 'employee', 'analytics', 'leave', 'qr_scan_service'].includes(mode);
+      case 'Employee':
+      case 'Artisan':
+        return ['clocking_terminal', 'employee', 'leave'].includes(mode);
+      default:
+        return false;
+    }
+  },
+
+  canAccessView(role: string, viewName: string): boolean {
+    const normRole = (role || '').trim();
+    if (normRole === 'Administrator' || normRole === 'Admin') return true;
+    if (normRole === 'Clocking Terminal' || normRole === 'Clocking') {
+      return ['clocking', 'employee_search', 'leave', 'qr_scan', 'personal_pin_entry', 'scanning'].includes(viewName);
+    }
+
+    switch (normRole) {
+      case 'Manager':
+        return ['dashboard', 'attendance', 'leave', 'reports', 'notifications', 'clocking', 'employee_status'].includes(viewName);
+      case 'HR':
+        return ['employees', 'attendance', 'leave', 'notifications', 'clocking'].includes(viewName);
+      case 'Purchasing':
+        return ['purchase_orders', 'suppliers', 'qr_ordering', 'warehouse', 'kanban', 'stock_requests', 'product_master', 'notifications'].includes(viewName);
+      case 'Employee':
+      case 'Artisan':
+        return ['emp_home', 'my_profile', 'my_leave', 'clocking_history', 'notifications', 'dashboard', 'clocking'].includes(viewName);
+      default:
+        return false;
+    }
+  },
+
+  getInitialModeAndView(user: any): { appMode: string; view: string } {
+    // PHASE 2.1 Requirements 4 & 8: Default landing page for ALL authenticated users must be the Clocking Terminal immediately after login.
+    return { appMode: 'clocking_terminal', view: 'clocking' };
+  },
+
+  getAllowedModesForRole(role: string): string[] {
+    const normRole = (role || '').trim();
+    if (normRole === 'Administrator' || normRole === 'Admin') {
+      return ['clocking_terminal', 'admin', 'employee', 'kanban', 'orders', 'product_master', 'purchase_orders', 'dispatch', 'analytics', 'leave', 'qr_scan_service', 'template_designer', 'system_admin', 'company_settings', 'mobile'];
+    }
+    if (normRole === 'Clocking Terminal' || normRole === 'Clocking') {
+      return ['clocking_terminal'];
+    }
+    switch (normRole) {
+      case 'Manager':
+        return ['clocking_terminal', 'admin', 'employee', 'analytics', 'leave', 'qr_scan_service', 'orders'];
+      case 'HR':
+        return ['clocking_terminal', 'admin', 'employee', 'leave'];
+      case 'Purchasing':
+        return ['clocking_terminal', 'purchase_orders', 'orders', 'product_master', 'kanban', 'dispatch', 'qr_scan_service'];
+      case 'Employee':
+      case 'Artisan':
+        return ['clocking_terminal', 'employee', 'leave'];
+      default:
+        return ['clocking_terminal', 'employee'];
+    }
   }
 };
+
+export default permissionService;
