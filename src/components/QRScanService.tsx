@@ -87,6 +87,33 @@ export const QRScanService: React.FC<QRScanServiceProps> = ({
     });
   };
 
+  const [isTorchOn, setIsTorchOn] = useState<boolean>(false);
+
+  const toggleTorch = async () => {
+    try {
+      const videoEl = document.querySelector(`#${videoContainerId} video`) as HTMLVideoElement;
+      if (videoEl && videoEl.srcObject) {
+        const stream = videoEl.srcObject as MediaStream;
+        const track = stream.getVideoTracks()[0];
+        if (track) {
+          const capabilities = (track.getCapabilities ? track.getCapabilities() : {}) as any;
+          if (capabilities && 'torch' in capabilities) {
+            const nextState = !isTorchOn;
+            await (track as any).applyConstraints({
+              advanced: [{ torch: nextState }]
+            });
+            setIsTorchOn(nextState);
+            announce(nextState ? 'Flashlight enabled.' : 'Flashlight disabled.');
+          } else {
+            announce('Camera flashlight is not supported on this device.');
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to toggle torch:', err);
+    }
+  };
+
   // Cleans up camera on unmount
   useEffect(() => {
     return () => {
@@ -1030,12 +1057,24 @@ export const QRScanService: React.FC<QRScanServiceProps> = ({
               )}
 
               {isCameraActive && (
-                <button
-                  onClick={stopCamera}
-                  className="absolute bottom-4 right-4 z-20 py-2 px-4 bg-red-600 hover:bg-red-700 text-white text-[10px] font-black uppercase tracking-wider rounded-lg transition-all"
-                >
-                  Stop Camera
-                </button>
+                <div className="absolute bottom-4 right-4 z-20 flex items-center gap-2">
+                  <button
+                    onClick={toggleTorch}
+                    className={`py-2 px-3 text-[10px] font-black uppercase tracking-wider rounded-lg transition-all flex items-center gap-1.5 active:scale-95 ${
+                      isTorchOn ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/30' : 'bg-white/10 hover:bg-white/20 text-white border border-white/10'
+                    }`}
+                    title="Toggle camera flashlight / torch"
+                  >
+                    <Icon name="zap" size={14} />
+                    <span>{isTorchOn ? 'Torch ON' : 'Torch OFF'}</span>
+                  </button>
+                  <button
+                    onClick={stopCamera}
+                    className="py-2 px-4 bg-red-600 hover:bg-red-700 text-white text-[10px] font-black uppercase tracking-wider rounded-lg transition-all active:scale-95"
+                  >
+                    Stop Camera
+                  </button>
+                </div>
               )}
             </div>
 

@@ -1,6 +1,6 @@
 {
-  "name": "TimberSmith Workforce Portal",
-  "description": "Comprehensive workforce, clocking, order management, Kanban design, and Timbersmith Terminal PWA for TimberSmith Joinery.",
+  "name": "TS Hub",
+  "description": "TimberSmith Workforce & Warehouse Management",
   "requestFramePermissions": ["camera"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

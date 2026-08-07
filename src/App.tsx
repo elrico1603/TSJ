@@ -46,6 +46,10 @@ import { companyService } from './services/companyService';
 import { CompanySettingsHub } from './components/CompanySettingsHub';
 import { SystemAdministrationHub } from './components/SystemAdministrationHub';
 import { DispatchHub } from './components/DispatchHub';
+import { SplashScreen } from './components/SplashScreen';
+import { PWAInstallModal } from './components/PWAInstallModal';
+import { OfflineSyncStatus } from './components/OfflineSyncStatus';
+import { MobileDashboardSummary } from './components/MobileDashboardSummary';
 
 const { SUPER_USER_PIN } = SECURITY;
 
@@ -212,6 +216,10 @@ export default function App() {
   const [supervisorApprovalPinInput, setSupervisorApprovalPinInput] = useState('');
   const [supervisorApprovalPinError, setSupervisorApprovalPinError] = useState(false);
   const [adminPinError, setAdminPinError] = useState(false);
+
+  // Splash Screen & Mobile PWA State
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [isSplashFading, setIsSplashFading] = useState(false);
 
   // User Authentication System
   const [currentUser, setCurrentUser] = useState<any>(null); 
@@ -528,6 +536,24 @@ export default function App() {
   // INITIALIZE FIREBASE STREAMS
   // ==========================================
   useEffect(() => {
+    let splashTriggered = false;
+    const triggerSplashDismiss = () => {
+      if (!splashTriggered) {
+        splashTriggered = true;
+        setTimeout(() => {
+          setIsSplashFading(true);
+          setTimeout(() => {
+            setIsInitialLoading(false);
+          }, 700);
+        }, 1000);
+      }
+    };
+
+    // Safety fallback timer so splash screen never hangs
+    const splashFallbackTimer = setTimeout(() => {
+      triggerSplashDismiss();
+    }, 3200);
+
     const unsubAuth = auth.onAuthStateChanged(async (u) => {
       if (u) {
         setIsCloudLive(true);
@@ -543,7 +569,11 @@ export default function App() {
             } else {
               setEmployees(snap.docs.map(d => ({ id: d.id, ...d.data() } as Employee)));
             }
-          }, err => console.error("employees sync error:", err));
+            triggerSplashDismiss();
+          }, err => {
+            console.error("employees sync error:", err);
+            triggerSplashDismiss();
+          });
 
         // Listen to job cards List
         db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('data').collection('kanbanCards')
@@ -553,7 +583,11 @@ export default function App() {
             } else {
               setKanbanCards([]);
             }
-          }, err => console.error("kanbans fetch failure:", err));
+            triggerSplashDismiss();
+          }, err => {
+            console.error("kanbans fetch failure:", err);
+            triggerSplashDismiss();
+          });
 
         // Listen for templates
         db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('data').collection('kanbanTemplates')
@@ -563,9 +597,11 @@ export default function App() {
             } else {
               setKanbanTemplates([DEFAULT_SAMPLE_TEMPLATE]);
             }
+            triggerSplashDismiss();
           }, err => {
             console.error("Templates fail, falling back:", err);
             setKanbanTemplates([DEFAULT_SAMPLE_TEMPLATE]);
+            triggerSplashDismiss();
           });
 
         // Users administration registration listening
@@ -586,6 +622,7 @@ export default function App() {
             } else {
               setActiveUsers([]);
             }
+            triggerSplashDismiss();
           });
 
         db.collection('artifacts').doc(APP_ID_PATH).collection('private').doc('users').collection('pending')
@@ -599,6 +636,7 @@ export default function App() {
 
       } else {
         try { await auth.signInAnonymously(); } catch (e) { console.warn("Anonymous Sign in denied:", e); }
+        triggerSplashDismiss();
       }
     });
 
@@ -606,6 +644,7 @@ export default function App() {
     return () => {
       unsubAuth();
       clearInterval(clockInterval);
+      clearTimeout(splashFallbackTimer);
     };
   }, []);
 
@@ -1596,6 +1635,12 @@ TS Joinery Kanban System`
 
   return (
     <Fragment>
+      {/* Branded Splash Screen */}
+      {isInitialLoading && <SplashScreen isFadingOut={isSplashFading} />}
+
+      {/* PWA Native Install Prompt Modal */}
+      <PWAInstallModal />
+
       {/* Printable template container */}
       {printingEmployee && (
         <ReportPrintTemplate
@@ -1641,7 +1686,7 @@ TS Joinery Kanban System`
         <canvas ref={canvasRef} className="hidden" />
 
         {/* Global header bar - Fixed Header (never scrolls) */}
-        <header className="px-4 sm:px-6 lg:px-8 py-3.5 border-b border-white/10 bg-[#0c0c0c]/80 backdrop-blur-2xl sticky top-0 z-50 flex justify-between items-center select-none font-sans shrink-0">
+        <header className="px-4 sm:px-6 lg:px-8 py-3.5 pt-[calc(0.875rem+env(safe-area-inset-top,0px))] pl-[calc(1rem+env(safe-area-inset-left,0px))] pr-[calc(1rem+env(safe-area-inset-right,0px))] border-b border-white/10 bg-[#0c0c0c]/90 backdrop-blur-2xl sticky top-0 z-50 flex justify-between items-center select-none font-sans shrink-0">
           <div className="flex items-center space-x-3 lg:space-x-5">
             <div className="p-2.5 lg:p-3 rounded-2xl bg-[#ff8c00]/10 text-[#ff8c00] shadow-[0_0_20px_rgba(255,140,0,0.15)] shrink-0">
               <Icon name="hard-hat" size={24} className="lg:w-7 lg:h-7" />
@@ -1651,8 +1696,7 @@ TS Joinery Kanban System`
                 TimberSmith <span className="text-[#ff8c00] font-sans">Joinery</span>
               </h1>
               <div className="flex items-center gap-2 mt-1 font-sans">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 font-sans">System Online</p>
+                <OfflineSyncStatus announce={announce} />
               </div>
             </div>
           </div>
@@ -2001,12 +2045,23 @@ TS Joinery Kanban System`
                 )}
 
                 {appMode === 'employee' && view === 'dashboard' && (
-                  <ClockingTerminal 
-                    employees={employees}
-                    setSelectedEmployee={setSelectedEmployee}
-                    setPendingAction={setPendingAction}
-                    setView={setView}
-                  />
+                  <div className="space-y-6">
+                    <MobileDashboardSummary
+                      currentUser={currentUser}
+                      employees={employees}
+                      kanbanCards={kanbanCards}
+                      onNavigate={(mode, targetView) => {
+                        setAppMode(mode);
+                        if (targetView) setView(targetView);
+                      }}
+                    />
+                    <ClockingTerminal 
+                      employees={employees}
+                      setSelectedEmployee={setSelectedEmployee}
+                      setPendingAction={setPendingAction}
+                      setView={setView}
+                    />
+                  </div>
                 )}
 
                 {appMode === 'kanban' && (
@@ -3372,9 +3427,9 @@ TS Joinery Kanban System`
         onSuccess={() => {}}
       />
 
-      {/* Dynamic Phone Layout Bottom Navigation Bar */}
-      {layoutMode === 'phone' && (
-        <nav className="fixed bottom-0 inset-x-0 z-50 bg-black/95 backdrop-blur-2xl border-t border-white/10 px-4 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] flex items-center justify-around shadow-2xl">
+      {/* Dynamic Mobile / Phone Bottom Navigation Bar */}
+      {(layoutMode === 'phone' || window.innerWidth < 768) && (
+        <nav className="fixed bottom-0 inset-x-0 z-50 bg-[#0c0c0c]/95 backdrop-blur-2xl border-t border-white/10 px-3 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] flex items-center justify-around shadow-[0_-10px_30px_rgba(0,0,0,0.8)] md:hidden">
           {(() => {
             const role = currentUser?.role || (isLocked ? 'Artisan' : 'Admin');
             const basketCount = (() => {
@@ -3558,14 +3613,16 @@ TS Joinery Kanban System`
               <button
                 key={item.id}
                 onClick={item.onClick}
-                className={`relative flex flex-col items-center gap-1 py-1 px-3 rounded-2xl transition-all ${
-                  item.isActive ? 'text-[#ff8c00] font-black scale-105' : 'text-gray-400 hover:text-white'
+                className={`relative flex flex-col items-center justify-center gap-1 min-h-[48px] min-w-[48px] px-3 py-1.5 rounded-2xl transition-all duration-150 active:scale-95 touch-manipulation ${
+                  item.isActive 
+                    ? 'text-[#ff8c00] font-black bg-[#ff8c00]/15 border border-[#ff8c00]/30 shadow-lg shadow-[#ff8c00]/10' 
+                    : 'text-gray-400 hover:text-white hover:bg-white/5'
                 }`}
               >
                 <Icon name={item.icon} size={20} />
-                <span className="text-[10px] uppercase font-bold tracking-wider">{item.label}</span>
+                <span className="text-[10px] uppercase font-black tracking-wider leading-none">{item.label}</span>
                 {item.badge !== undefined && item.badge > 0 && (
-                  <span className="absolute -top-1 -right-1 px-1.5 py-0.5 bg-red-500 text-white font-mono text-[9px] font-black rounded-full shadow">
+                  <span className="absolute -top-1 -right-1 px-1.5 py-0.5 bg-red-500 text-white font-mono text-[9px] font-black rounded-full shadow-lg animate-pulse">
                     {item.badge}
                   </span>
                 )}
