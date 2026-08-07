@@ -62,6 +62,10 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
         else if (key === 'location') updated.location = value;
         else if (key === 'locationColour') updated.locationColour = value;
         else if (key === 'binQuantity') updated.binQuantity = value;
+        else if (key === 'productImage') {
+          updated.productImage = value;
+          updated.imageUrl = value;
+        }
         return updated;
       });
     }
@@ -145,6 +149,13 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
       : undefined;
     const binQuantity = getVal(activeTemplate?.binQuantity, customMasterInfo.binQuantity, prodBinStr, '100');
 
+    const productImage = getVal(
+      customMasterInfo.productImage,
+      (activeTemplate as any)?.productImage || (activeTemplate as any)?.imageUrl,
+      selectedProductMaster?.productImage,
+      'https://images.unsplash.com/photo-1533090161767-e6ffed986c88?auto=format&fit=crop&q=80&w=200'
+    );
+
     const qrUrl = getKanbanMailtoQRCodeUrl({
       internalProductNumber: currentKanbanId,
       productName,
@@ -165,7 +176,7 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
       location,
       locationColour,
       internalProductNumber: currentKanbanId,
-      productImage: selectedProductMaster?.productImage || 'https://images.unsplash.com/photo-1533090161767-e6ffed986c88?auto=format&fit=crop&q=80&w=200',
+      productImage,
       qrCode: qrUrl,
       templateName: activeTemplate?.templateName || '',
       templateType: activeTemplate?.paperSize || 'A4',
@@ -202,6 +213,8 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
     activeTemplate?.location,
     activeTemplate?.locationColour,
     activeTemplate?.binQuantity,
+    (activeTemplate as any)?.imageUrl,
+    (activeTemplate as any)?.productImage,
     customMasterInfo
   ]);
 
@@ -429,6 +442,7 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
     setActiveTemplate(cloned);
     setCustomMasterInfo({
       internalProductNumber: cloned.kanbanId,
+      productImage: cloned.productImage || cloned.imageUrl || '',
       orderQuantity: cloned.orderQuantity || '',
       deliveryTime: cloned.deliveryTime || '',
       location: cloned.location || '',
@@ -491,7 +505,11 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
     try {
       const kanbanIdToSave = activeTemplate.kanbanId || customMasterInfo.internalProductNumber || generateNextKanbanNumber();
 
-      const updatedTemplate: KanbanTemplateV2 = {
+      const imageToSave = customMasterInfo.productImage !== undefined && customMasterInfo.productImage !== ''
+        ? customMasterInfo.productImage
+        : (masterInfo?.productImage || (activeTemplate as any)?.productImage || (activeTemplate as any)?.imageUrl || '');
+
+      const updatedTemplate: KanbanTemplateV2 & { imageUrl?: string; productImage?: string } = {
         ...activeTemplate,
         kanbanId: kanbanIdToSave,
         templateName: saveTemplateName.trim().toUpperCase(),
@@ -505,12 +523,17 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
         location: masterInfo?.location || '',
         locationColour: masterInfo?.locationColour || '',
         binQuantity: masterInfo?.binQuantity || '',
+        imageUrl: imageToSave,
+        productImage: imageToSave,
         meta: {
           ...activeTemplate.meta,
           lastModifiedDate: new Date().toISOString(),
           lastModifiedBy: currentUser?.email || currentUser?.uid || 'elrico@tsjoinery.co.za'
         }
       };
+
+      // Step 1: Log complete template object before saving
+      console.log("Saving Template", updatedTemplate);
 
       const docId = await saveTemplate(updatedTemplate);
       announce(`Template "${updatedTemplate.templateName}" saved successfully.`);
@@ -522,7 +545,7 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
 
       // Update active template
       setActiveTemplate({ ...updatedTemplate, id: docId });
-      setCustomMasterInfo(prev => ({ ...prev, internalProductNumber: kanbanIdToSave }));
+      setCustomMasterInfo(prev => ({ ...prev, internalProductNumber: kanbanIdToSave, productImage: imageToSave }));
     } catch (e) {
       console.error(e);
       announce('Failed to save template layout configuration.');

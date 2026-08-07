@@ -123,7 +123,7 @@ export const KanbanCardCanvas: React.FC<KanbanCardCanvasProps> = ({
     location: template.location || (cardData?.location ? `${cardData.location.letter || ''}${cardData.location.number || ''}` : 'A-01-B-01'),
     locationColour: template.locationColour || cardData?.location?.colour || 'GREEN',
     internalProductNumber: template.kanbanId || cardData?.kanbanId || 'KAN-001',
-    productImage: cardData?.imageUrl || 'https://images.unsplash.com/photo-1533090161767-e6ffed986c88?auto=format&fit=crop&q=80&w=200',
+    productImage: template.productImage || template.imageUrl || cardData?.imageUrl || cardData?.productImage || 'https://images.unsplash.com/photo-1533090161767-e6ffed986c88?auto=format&fit=crop&q=80&w=200',
     qrCode: cardData?.qrCodeUrl || '',
     templateName: template.templateName || '',
     templateType: template.paperSize || 'A4',
@@ -132,6 +132,13 @@ export const KanbanCardCanvas: React.FC<KanbanCardCanvasProps> = ({
     status: 'ACTIVE'
   };
 
+  // Step 5: Log image values before rendering KanbanCardCanvas
+  console.log("Canvas Product Image", {
+    templateProductImage: template.productImage,
+    templateImageUrl: template.imageUrl,
+    masterInfoProductImage: masterInfo?.productImage,
+    effectiveProductImage: effectiveMasterInfo.productImage
+  });
   const cardWidthMm = template.dimensions?.width || (template.paperSize === 'A5' ? 148 : 210);
   const cardHeightMm = template.dimensions?.height || (template.paperSize === 'A5' ? 210 : 297);
 

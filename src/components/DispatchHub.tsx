@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
-import { collection, getDocs, doc, setDoc, deleteDoc, query, orderBy } from 'firebase/firestore';
 import { DispatchList } from './DispatchList';
 import { DispatchWizard } from './DispatchWizard';
 import { DispatchDetails, DispatchRecord } from './DispatchDetails';
@@ -119,9 +118,7 @@ export const DispatchHub: React.FC<DispatchHubProps> = ({ currentUser, announce 
 
       if (db) {
         try {
-          const colRef = collection(db, 'dispatches');
-          const q = query(colRef, orderBy('createdAt', 'desc'));
-          const snap = await getDocs(q);
+          const snap = await db.collection('dispatches').orderBy('createdAt', 'desc').get();
           if (!snap.empty) {
             snap.forEach((docSnap) => {
               loadedData.push({ id: docSnap.id, ...docSnap.data() } as DispatchRecord);
@@ -207,8 +204,7 @@ export const DispatchHub: React.FC<DispatchHubProps> = ({ currentUser, announce 
     // Sync to Firestore
     if (db) {
       try {
-        const docRef = doc(db, 'dispatches', dispatchId);
-        await setDoc(docRef, recordToSave, { merge: true });
+        await db.collection('dispatches').doc(dispatchId).set(recordToSave, { merge: true });
       } catch (err) {
         console.warn('Firestore dispatch save error:', err);
       }
@@ -233,8 +229,7 @@ export const DispatchHub: React.FC<DispatchHubProps> = ({ currentUser, announce 
 
     if (db) {
       try {
-        const docRef = doc(db, 'dispatches', dispatch.id);
-        await deleteDoc(docRef);
+        await db.collection('dispatches').doc(dispatch.id).delete();
       } catch (e) {
         console.warn('Firestore delete error:', e);
       }
@@ -257,8 +252,7 @@ export const DispatchHub: React.FC<DispatchHubProps> = ({ currentUser, announce 
 
     if (db) {
       try {
-        const docRef = doc(db, 'dispatches', dispatch.id);
-        await setDoc(docRef, { status: 'Dispatched', updatedAt: now }, { merge: true });
+        await db.collection('dispatches').doc(dispatch.id).set({ status: 'Dispatched', updatedAt: now }, { merge: true });
       } catch (e) {
         console.warn('Firestore dispatch status error:', e);
       }
@@ -281,8 +275,7 @@ export const DispatchHub: React.FC<DispatchHubProps> = ({ currentUser, announce 
 
     if (db) {
       try {
-        const docRef = doc(db, 'dispatches', updatedRecord.id);
-        await setDoc(docRef, updatedRecord, { merge: true });
+        await db.collection('dispatches').doc(updatedRecord.id).set(updatedRecord, { merge: true });
       } catch (e) {
         console.warn('Firestore receiving update error:', e);
       }

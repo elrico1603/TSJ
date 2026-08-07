@@ -1,5 +1,4 @@
 import { db } from '../firebase';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 export interface GoogleWorkspaceSettings {
   workspaceConnected: boolean;
@@ -58,9 +57,8 @@ class GoogleDriveService {
     const local = this.getLocalWorkspaceSettings();
     if (db) {
       try {
-        const docRef = doc(db, SETTINGS_COLLECTION, SETTINGS_DOC_ID);
-        const snap = await getDoc(docRef);
-        if (snap.exists()) {
+        const snap = await db.collection(SETTINGS_COLLECTION).doc(SETTINGS_DOC_ID).get();
+        if (snap.exists) {
           const remoteData = snap.data() as GoogleWorkspaceSettings;
           this.cachedSettings = remoteData;
           localStorage.setItem(LOCAL_SETTINGS_KEY, JSON.stringify(remoteData));
@@ -86,8 +84,7 @@ class GoogleDriveService {
 
     if (db) {
       try {
-        const docRef = doc(db, SETTINGS_COLLECTION, SETTINGS_DOC_ID);
-        await setDoc(docRef, updated, { merge: true });
+        await db.collection(SETTINGS_COLLECTION).doc(SETTINGS_DOC_ID).set(updated, { merge: true });
       } catch (e) {
         console.warn('Failed to update workspace settings in Firestore:', e);
       }

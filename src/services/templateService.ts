@@ -76,6 +76,8 @@ export interface KanbanTemplateV2 {
   location?: string;
   locationColour?: string;
   binQuantity?: string;
+  imageUrl?: string;
+  productImage?: string;
   picture?: {
     x: number;
     y: number;
@@ -116,7 +118,12 @@ export async function getTemplates(): Promise<KanbanTemplateV2[]> {
   const snapshot = await getTemplatesCollection().orderBy('templateName').get();
   return snapshot.docs.map(doc => {
     const data = doc.data();
-    return mapToTemplateV2(doc.id, data);
+    // Step 3: Log Firestore document before mapping
+    console.log("Firestore Document Raw", { id: doc.id, ...data });
+    const mapped = mapToTemplateV2(doc.id, data);
+    // Step 4: Log mapped template
+    console.log("Mapped Template", mapped);
+    return mapped;
   });
 }
 
@@ -129,13 +136,23 @@ export async function saveTemplate(template: KanbanTemplateV2): Promise<string> 
   delete data.id;
 
   const collectionRef = getTemplatesCollection();
+  let targetId = id;
   if (id) {
     await collectionRef.doc(id).set(data, { merge: true });
-    return id;
   } else {
     const docRef = await collectionRef.add(data);
-    return docRef.id;
+    targetId = docRef.id;
   }
+
+  // Step 2: Immediately read document back from Firestore to verify persistence
+  try {
+    const savedDoc = await collectionRef.doc(targetId).get();
+    console.log("Saved Firestore Document", savedDoc.data());
+  } catch (err) {
+    console.error("Error reading saved Firestore document:", err);
+  }
+
+  return targetId;
 }
 
 /**
@@ -175,6 +192,8 @@ export function mapToTemplateV2(id: string, data: any): KanbanTemplateV2 {
       location: data.location || '',
       locationColour: data.locationColour || '',
       binQuantity: data.binQuantity || '',
+      imageUrl: data.imageUrl || data.productImage || '',
+      productImage: data.productImage || data.imageUrl || '',
       picture: data.picture || { x: 15, y: 15, width: 110, height: 110 },
       qr: data.qr || { x: 210, y: 15, width: 110, height: 110 },
       meta: {
@@ -284,6 +303,8 @@ export function mapToTemplateV2(id: string, data: any): KanbanTemplateV2 {
     location: data.location || '',
     locationColour: data.locationColour || '',
     binQuantity: data.binQuantity || '',
+    imageUrl: data.imageUrl || data.productImage || '',
+    productImage: data.productImage || data.imageUrl || '',
     picture: { x: 15, y: 15, width: 110, height: 110 },
     qr: { x: 210, y: 15, width: 110, height: 110 },
     meta: {
