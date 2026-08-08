@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Employee } from '../types';
-import { Search, Clock, LogIn, LogOut, Coffee, Calendar, Lock, Shield, CheckCircle2, Wifi, RefreshCw } from 'lucide-react';
+import { Search, Clock, LogIn, LogOut, Coffee, Calendar, Lock, Shield, CheckCircle2, Wifi, RefreshCw, Camera } from 'lucide-react';
 import { OfflineSyncStatus } from './OfflineSyncStatus';
 import permissionService from '../services/permissionService';
 
@@ -49,7 +49,7 @@ export const DedicatedKioskClockingTerminal: React.FC<DedicatedKioskClockingTerm
     return matchesSearch;
   });
 
-  const handleCardClick = (emp: Employee, action: string = 'hub_login') => {
+  const handleCardClick = (emp: Employee, action: string = 'clock_toggle') => {
     if ('vibrate' in navigator) {
       try { navigator.vibrate([60, 30, 60]); } catch (e) {}
     }
@@ -227,6 +227,21 @@ export const DedicatedKioskClockingTerminal: React.FC<DedicatedKioskClockingTerm
               <LogOut size={14} />
               Clocked Out ({activeWorkers.length - clockedInCount - onBreakCount})
             </button>
+
+            {/* Facial Scan Trigger */}
+            <button
+              onClick={() => {
+                if (activeWorkers.length > 0) {
+                  setSelectedEmployee(activeWorkers[0]);
+                  setView('scanning');
+                }
+              }}
+              className="px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all min-h-[44px] touch-manipulation flex items-center gap-1.5 bg-blue-500/20 text-blue-300 border border-blue-500/30 hover:bg-blue-500/30 shadow-lg"
+              title="Scan Face for Clocking Verification"
+            >
+              <Camera size={14} />
+              <span>Facial Scan</span>
+            </button>
           </div>
         </div>
 
@@ -239,7 +254,8 @@ export const DedicatedKioskClockingTerminal: React.FC<DedicatedKioskClockingTerm
             return (
               <div
                 key={emp.id}
-                className={`bg-[#16161a] border-2 rounded-[2.5rem] p-6 flex flex-col items-center justify-between shadow-2xl transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] touch-manipulation min-h-[260px] relative overflow-hidden group ${
+                onClick={() => handleCardClick(emp, 'hub_login')}
+                className={`bg-[#16161a] border-2 rounded-[2.5rem] p-6 flex flex-col items-center justify-between shadow-2xl transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] touch-manipulation min-h-[260px] relative overflow-hidden group cursor-pointer ${
                   isIn
                     ? 'border-emerald-500/40 bg-emerald-950/10 hover:border-emerald-500'
                     : isBreak
@@ -265,10 +281,7 @@ export const DedicatedKioskClockingTerminal: React.FC<DedicatedKioskClockingTerm
                 </div>
 
                 {/* Profile Avatar */}
-                <div 
-                  onClick={() => handleCardClick(emp, 'hub_login')}
-                  className="relative my-2 cursor-pointer"
-                >
+                <div className="relative my-2">
                   <div className="w-24 h-24 rounded-full overflow-hidden bg-[#222] border-2 border-white/20 flex items-center justify-center shadow-xl group-hover:scale-105 transition-transform">
                     {emp.photo ? (
                       <img src={emp.photo} alt={emp.name} className="w-full h-full object-cover" />
@@ -295,27 +308,9 @@ export const DedicatedKioskClockingTerminal: React.FC<DedicatedKioskClockingTerm
                   </p>
                 </div>
 
-                {/* Dual Touch Buttons: Clock Action & Leave */}
-                <div className="w-full grid grid-cols-2 gap-2 mt-3">
-                  <button
-                    onClick={() => handleCardClick(emp, 'hub_login')}
-                    className={`py-3 px-3 rounded-2xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all active:scale-95 touch-manipulation ${
-                      isIn
-                        ? 'bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500 hover:text-white'
-                        : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500 hover:text-white'
-                    }`}
-                  >
-                    <span>{isIn ? 'Clock Out' : 'Clock In'}</span>
-                  </button>
-
-                  <button
-                    onClick={() => handleCardClick(emp, 'apply_leave')}
-                    className="py-3 px-3 rounded-2xl text-xs font-black uppercase tracking-wider bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 transition-all flex items-center justify-center gap-1 active:scale-95 touch-manipulation"
-                    title="Apply for Leave"
-                  >
-                    <Calendar size={14} />
-                    <span>Leave</span>
-                  </button>
+                {/* Touch Selection Bar */}
+                <div className="w-full mt-3 py-3 px-3 rounded-2xl text-xs font-black uppercase tracking-wider bg-white/5 text-gray-300 border border-white/10 group-hover:border-[#ff8c00] group-hover:text-white transition-all flex items-center justify-center gap-1.5">
+                  <span>Tap to Select</span>
                 </div>
               </div>
             );

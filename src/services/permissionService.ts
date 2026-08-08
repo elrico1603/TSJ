@@ -839,7 +839,12 @@ export const permissionService = {
     if (!user) return false;
     const role = (user.role || '').trim();
     const email = (user.email || '').trim().toLowerCase();
-    return role === 'Clocking Terminal' || role === 'Clocking' || email === 'clocking@tsjoinery.co.za';
+    return (
+      role === 'Clocking Kiosk' || 
+      role === 'Clocking Terminal' || 
+      role === 'Clocking' || 
+      email === 'clocking@tsjoinery.co.za'
+    );
   },
 
   getGreeting(firstName?: string, date: Date = new Date()): string {
@@ -852,7 +857,7 @@ export const permissionService = {
   canAccessMode(role: string, mode: string): boolean {
     const normRole = (role || '').trim();
     if (normRole === 'Administrator' || normRole === 'Admin') return true;
-    if (normRole === 'Clocking Terminal' || normRole === 'Clocking') {
+    if (normRole === 'Clocking Kiosk' || normRole === 'Clocking Terminal' || normRole === 'Clocking') {
       return ['clocking_terminal', 'employee', 'leave', 'qr_scan_service'].includes(mode);
     }
 
@@ -878,7 +883,7 @@ export const permissionService = {
   canAccessView(role: string, viewName: string): boolean {
     const normRole = (role || '').trim();
     if (normRole === 'Administrator' || normRole === 'Admin') return true;
-    if (normRole === 'Clocking Terminal' || normRole === 'Clocking') {
+    if (normRole === 'Clocking Kiosk' || normRole === 'Clocking Terminal' || normRole === 'Clocking') {
       return ['clocking', 'employee_search', 'leave', 'qr_scan', 'personal_pin_entry', 'scanning'].includes(viewName);
     }
 
@@ -898,8 +903,48 @@ export const permissionService = {
   },
 
   getInitialModeAndView(user: any): { appMode: string; view: string } {
-    // PHASE 2.1 Requirements 4 & 8: Default landing page for ALL authenticated users must be the Clocking Terminal immediately after login.
-    return { appMode: 'clocking_terminal', view: 'clocking' };
+    if (this.isClockingTerminalUser(user)) {
+      const res = { appMode: 'clocking_terminal', view: 'clocking' };
+      console.log('[AUTH ROUTING]', {
+        user: user?.email || user?.name || 'Kiosk',
+        role: user?.role,
+        getInitialModeAndViewResult: res
+      });
+      return res;
+    }
+
+    const role = (user?.role || '').trim();
+    const email = (user?.email || '').trim().toLowerCase();
+
+    // Specific employer email accounts explicitly landing on Clocking Terminal
+    const employerEmails = [
+      'elrico@tsjoinery.co.za',
+      'frans@tsjoinery.co.za',
+      'janah@tsjoinery.co.za',
+      'marietjie@tsjoinery.co.za'
+    ];
+
+    let result = { appMode: 'employee', view: 'dashboard' };
+
+    if (employerEmails.includes(email)) {
+      result = { appMode: 'employee', view: 'dashboard' };
+    } else if (role === 'Administrator' || role === 'Admin' || role === 'Manager' || role === 'HR' || role === 'Supervisor') {
+      result = { appMode: 'employee', view: 'dashboard' };
+    } else if (role === 'Purchasing' || role === 'Stock Manager') {
+      result = { appMode: 'purchase_orders', view: 'purchase_orders' };
+    } else if (role === 'Employee' || role === 'Artisan') {
+      result = { appMode: 'employee', view: 'emp_home' };
+    } else {
+      result = { appMode: 'employee', view: 'dashboard' };
+    }
+
+    console.log('[AUTH ROUTING]', {
+      user: email || user?.name || 'User',
+      role: role,
+      getInitialModeAndViewResult: result
+    });
+
+    return result;
   },
 
   getAllowedModesForRole(role: string): string[] {
@@ -907,7 +952,7 @@ export const permissionService = {
     if (normRole === 'Administrator' || normRole === 'Admin') {
       return ['clocking_terminal', 'admin', 'employee', 'kanban', 'orders', 'product_master', 'purchase_orders', 'dispatch', 'analytics', 'leave', 'qr_scan_service', 'template_designer', 'system_admin', 'company_settings', 'mobile'];
     }
-    if (normRole === 'Clocking Terminal' || normRole === 'Clocking') {
+    if (normRole === 'Clocking Kiosk' || normRole === 'Clocking Terminal' || normRole === 'Clocking') {
       return ['clocking_terminal'];
     }
     switch (normRole) {

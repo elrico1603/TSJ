@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Employee } from '../types';
-import { CheckCircle2, LogIn, LogOut, Coffee, ArrowRight } from 'lucide-react';
+import { CheckCircle2, LogIn, LogOut, Coffee, ArrowRight, Camera, Clock } from 'lucide-react';
 
 interface ClockingTerminalProps {
   employees: Employee[];
@@ -50,6 +50,32 @@ export const ClockingTerminal: React.FC<ClockingTerminalProps> = ({
 
   return (
     <div className="space-y-6 font-sans">
+      {/* Header Banner with Facial Scan option */}
+      <div className="flex flex-wrap items-center justify-between gap-4 bg-[#151518] p-5 rounded-[2.5rem] border border-white/10 shadow-xl">
+        <div className="flex items-center gap-3">
+          <div className="p-3 bg-[#ff8c00]/20 rounded-2xl text-[#ff8c00]">
+            <Clock size={24} />
+          </div>
+          <div>
+            <h3 className="font-black text-base uppercase tracking-tight text-white">Artisan Attendance Terminal</h3>
+            <p className="text-xs text-gray-400 font-medium mt-0.5">Select artisan card to perform verified clocking & leave operations</p>
+          </div>
+        </div>
+
+        <button
+          onClick={() => {
+            if (activeWorkers.length > 0) {
+              setSelectedEmployee(activeWorkers[0]);
+              setView('scanning');
+            }
+          }}
+          className="px-5 py-3 rounded-2xl text-xs font-black uppercase tracking-wider bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border border-blue-500/30 transition-all flex items-center gap-2 active:scale-95 shadow-lg min-h-[44px]"
+        >
+          <Camera size={18} />
+          <span>Facial Scan</span>
+        </button>
+      </div>
+
       {/* Clock event confirmation alert banner */}
       {lastClockEvent && (
         <div className="p-5 rounded-3xl bg-emerald-500/10 border-2 border-emerald-500/40 text-emerald-400 flex items-center justify-between shadow-2xl animate-in slide-in-from-top-4 duration-300">
@@ -132,13 +158,9 @@ export const ClockingTerminal: React.FC<ClockingTerminalProps> = ({
                 </p>
               </div>
 
-              {/* Big Touch-Friendly Action Bar */}
-              <div className={`w-full mt-5 py-3.5 px-4 rounded-2xl font-black text-xs uppercase tracking-wider text-center flex items-center justify-center gap-2 transition-all ${
-                isIn 
-                  ? 'bg-red-500/20 text-red-400 border border-red-500/30 group-hover:bg-red-500 group-hover:text-white' 
-                  : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 group-hover:bg-emerald-500 group-hover:text-white'
-              }`}>
-                <span>{isIn ? 'Tap to Clock Out' : 'Tap to Clock In'}</span>
+              {/* Touch Selection Bar */}
+              <div className="w-full mt-5 py-3.5 px-4 rounded-2xl font-black text-xs uppercase tracking-wider text-center flex items-center justify-center gap-2 bg-white/5 text-gray-300 border border-white/10 group-hover:border-[#ff8c00] group-hover:text-white transition-all">
+                <span>Tap to Select</span>
                 <ArrowRight size={14} />
               </div>
             </div>

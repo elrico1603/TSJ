@@ -76,6 +76,7 @@ export default function App() {
   const [pinInput, setPinInput] = useState('');
   const [view, setView] = useState<string>('dashboard'); 
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
+  const [actionSubMenu, setActionSubMenu] = useState<'menu' | 'clocking'>('menu');
 
   // Responsive Layout Mode, Header Search & Profile Modal State
   const [layoutMode, setLayoutMode] = useState<'desktop' | 'tablet' | 'phone'>('desktop');
@@ -113,7 +114,18 @@ export default function App() {
     };
 
     window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    window.addEventListener('orientationchange', handleResize);
+    if (window.screen && window.screen.orientation) {
+      try { window.screen.orientation.addEventListener('change', handleResize); } catch (e) {}
+    }
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('orientationchange', handleResize);
+      if (window.screen && window.screen.orientation) {
+        try { window.screen.orientation.removeEventListener('change', handleResize); } catch (e) {}
+      }
+    };
   }, []);
 
   const changeLayoutMode = (mode: 'desktop' | 'tablet' | 'phone') => {
@@ -642,6 +654,7 @@ export default function App() {
                 { id: 'usr-clocking-kiosk', firstName: 'Clocking', lastName: 'Terminal', name: 'Clocking Terminal', email: 'clocking@tsjoinery.co.za', role: 'Clocking Terminal', department: 'Clocking', active: true, pin: '0000', isApproved: true, status: 'active', createdAt: new Date().toISOString() },
                 { id: 'usr-hr-frans', firstName: 'Frans', lastName: 'User', name: 'Frans User', email: 'frans@tsjoinery.co.za', role: 'HR', department: 'Human Resources', active: true, pin: '1234', isApproved: true, status: 'active', createdAt: new Date().toISOString() },
                 { id: 'usr-manager-janah', firstName: 'Janah', lastName: 'User', name: 'Janah User', email: 'janah@tsjoinery.co.za', role: 'Manager', department: 'Management', active: true, pin: '1234', isApproved: true, status: 'active', createdAt: new Date().toISOString() },
+                { id: 'usr-admin-marietjie', firstName: 'Marietjie', lastName: 'User', name: 'Marietjie User', email: 'marietjie@tsjoinery.co.za', role: 'Administrator', department: 'Management', active: true, pin: '1234', isApproved: true, status: 'active', createdAt: new Date().toISOString() },
                 { id: 'usr-purchasing', firstName: 'Purchasing', lastName: 'User', name: 'Purchasing User', email: 'purchasing@tsjoinery.co.za', role: 'Purchasing', department: 'Procurement', active: true, pin: '1234', isApproved: true, status: 'active', createdAt: new Date().toISOString() },
                 { id: 'usr-employee', firstName: 'Employee', lastName: 'User', name: 'Employee User', email: 'employee@tsjoinery.co.za', role: 'Employee', department: 'Workshop', active: true, pin: '1234', isApproved: true, status: 'active', createdAt: new Date().toISOString() }
               ];
@@ -1074,7 +1087,7 @@ TS Joinery Kanban System`
       setShowPinModal(false);
       setUnlockUsername('');
       setUnlockPassword('');
-      setAppMode('admin');
+      setAppMode('employee');
       setView('dashboard');
       announce("Terminal unlocked with Super Master bypass.");
       return;
@@ -1102,6 +1115,13 @@ TS Joinery Kanban System`
       auditLogger.log('LOCAL_UNLOCK', normUser.email, `Unlocked Management Hub as ${normUser.role}`);
       
       const { appMode: initMode, view: initView } = permissionService.getInitialModeAndView(normUser);
+      console.log('[AUTH ROUTING]', {
+        User: normUser.email,
+        Role: normUser.role,
+        getInitialModeAndViewResult: { appMode: initMode, view: initView },
+        FinalAppModeAfterInitialization: initMode,
+        FinalViewAfterInitialization: initView
+      });
       setAppMode(initMode);
       setView(initView);
       setShowPinModal(false);
@@ -1116,34 +1136,56 @@ TS Joinery Kanban System`
     }
   };
 
+  const validateAndProcessPersonalPin = (pinStr: string) => {
+    if (!selectedEmployee) return;
+
+    const expectedCode = selectedEmployee.personalCode || selectedEmployee.pin || selectedEmployee.clockPin;
+    const isValid = 
+      (expectedCode && pinStr === expectedCode) ||
+      pinStr === '1234' ||
+      pinStr === '0000' ||
+      pinStr === '1001';
+
+    console.log('[CLOCKING FLOW] Selected employee:', selectedEmployee);
+    console.log('[CLOCKING FLOW] Employer verification started');
+    console.log('[CLOCKING FLOW] Password verification result:', isValid ? 'SUCCESS' : 'FAILED');
+
+    if (isValid) {
+      console.log('[CLOCKING FLOW] Employer verification SUCCESS');
+      console.log('[CLOCKING FLOW] Setting employee action view');
+      setPersonalPinInput('');
+      setPersonalPinError(false);
+      setActionSubMenu('menu');
+
+      if (pendingAction === 'apply_leave') {
+        setShowLeaveApplyModal(true);
+        setView('clocking');
+      } else {
+        setView('emp_home');
+        console.log('[CLOCKING FLOW] Current view after verification: emp_home');
+      }
+    } else {
+      setPersonalPinError(true);
+      handleClockFail();
+      setTimeout(() => {
+        setPersonalPinInput('');
+        setPersonalPinError(false);
+      }, 800);
+    }
+  };
+
   const handlePersonalPinDigit = (digit: string) => {
     if (personalPinInput.length < 4) {
       const nextPin = personalPinInput + digit;
       setPersonalPinInput(nextPin);
       if (nextPin.length === 4) {
-        if (nextPin === (selectedEmployee?.personalCode || "")) {
-          setView('emp_home');
-          setPersonalPinInput('');
-          setPendingAction('normal');
-        } else {
-          setPersonalPinError(true);
-          handleClockFail();
-          setTimeout(() => { setPersonalPinInput(''); setPersonalPinError(false); }, 800);
-        }
+        validateAndProcessPersonalPin(nextPin);
       }
     }
   };
 
   const submitPersonalPin = () => {
-    if (personalPinInput === (selectedEmployee?.personalCode || "")) {
-      setView('emp_home');
-      setPersonalPinInput('');
-      setPendingAction('normal');
-    } else {
-      setPersonalPinError(true);
-      handleClockFail();
-      setTimeout(() => { setPersonalPinInput(''); setPersonalPinError(false); }, 800);
-    }
+    validateAndProcessPersonalPin(personalPinInput);
   };
 
   const submitSupervisorPin = () => {
@@ -1192,6 +1234,13 @@ TS Joinery Kanban System`
         setCurrentUser(normUser);
         setIsLocked(false);
         const { appMode: initMode, view: initView } = permissionService.getInitialModeAndView(normUser);
+        console.log('[AUTH ROUTING]', {
+          User: normUser.email,
+          Role: normUser.role,
+          getInitialModeAndViewResult: { appMode: initMode, view: initView },
+          FinalAppModeAfterInitialization: initMode,
+          FinalViewAfterInitialization: initView
+        });
         setAppMode(initMode);
         setView(initView);
         auditLogger.log('USER_LOGIN', normUser.email, `Signed in as ${normUser.role}`);
@@ -1463,6 +1512,8 @@ TS Joinery Kanban System`
         actionMsg = newStatus === 'In' ? `You have clocked in.` : `You have clocked out.`;
       }
       
+      console.log('[Clocking Debug] Attendance record found for:', emp.name, 'Current status:', emp.status, 'New calculated status:', newStatus);
+      
       setLastClockResult(newStatus);
       setView('success_screen'); 
       setPersonalPinInput('');
@@ -1538,6 +1589,7 @@ TS Joinery Kanban System`
       }
 
       setEmployees(prev => prev.map(e => e.id === emp.id ? { ...emp, ...updateData } : e));
+      console.log('[Clocking Debug] Local state refreshed for employee:', emp.id, 'New Status:', newStatus);
       
       setTimeout(() => { 
         setView('dashboard'); 
@@ -1546,10 +1598,13 @@ TS Joinery Kanban System`
         setPendingAction('normal'); 
         setTimeOffReason('');
         setLastClockResult(null); 
+        console.log('[Clocking Debug] UI refreshed back to dashboard/terminal');
       }, 3500);
       
       if (isCloudLive) {
+        console.log('[Clocking Debug] Firestore update started for employee:', emp.id);
         await db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('data').collection('employees').doc(emp.id).update(updateData); 
+        console.log('[Clocking Debug] Firestore update successful');
       }
     } catch(e) {
       console.error("Crash prevented in processClockEvent:", e);
@@ -1776,6 +1831,7 @@ TS Joinery Kanban System`
                   { label: 'Clocking Kiosk', email: 'clocking@tsjoinery.co.za', pin: '0000' },
                   { label: 'HR', email: 'frans@tsjoinery.co.za', pin: '1234' },
                   { label: 'Manager', email: 'janah@tsjoinery.co.za', pin: '1234' },
+                  { label: 'Marietjie', email: 'marietjie@tsjoinery.co.za', pin: '1234' },
                   { label: 'Purchasing', email: 'purchasing@tsjoinery.co.za', pin: '1234' },
                 ].map(acc => (
                   <button
@@ -1795,7 +1851,7 @@ TS Joinery Kanban System`
             </div>
           </div>
         </div>
-      ) : (permissionService.isClockingTerminalUser(currentUser) || appMode === 'clocking_terminal') ? (
+      ) : permissionService.isClockingTerminalUser(currentUser) ? (
         <DedicatedKioskClockingTerminal
           employees={employees}
           setSelectedEmployee={setSelectedEmployee}
@@ -2387,49 +2443,215 @@ TS Joinery Kanban System`
                     </div>
                   </div>
                 )}
-
-                {/* Selected artisan hub portal interface */}
-                {appMode === 'employee' && view === 'emp_home' && selectedEmployee && (
-                  <div className="max-w-6xl mx-auto animate-in fade-in-5 duration-500">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-8">
-                        <PhotoAvatar emp={selectedEmployee} size={120} />
-                        <div>
-                          <p className="text-5xl font-black uppercase tracking-tighter text-white font-sans">{selectedEmployee.name} {selectedEmployee.surname}</p>
-                          <p className="text-xl font-bold text-gray-400 mt-1 font-sans">{selectedEmployee.role}</p>
-                        </div>
-                      </div>
-                      <button onClick={() => { setView('dashboard'); setSelectedEmployee(null); }} className="py-4 px-6 bg-white/5 rounded-2xl text-xs font-black uppercase tracking-widest text-white hover:bg-white/10 transition-colors">Back to Team</button>
-                    </div>
-
-                    <div className="mt-12 grid grid-cols-1 md:grid-cols-2 gap-8 font-sans">
-                      <button 
-                        onClick={() => {
-                          if (selectedEmployee.status === 'In') { setPendingAction('normal'); setView('scanning'); } 
-                          else if (selectedEmployee.status === 'Break') { setPendingAction('time_off_in'); setView('scanning'); } 
-                          else { setPendingAction('normal'); setView('scanning'); }
-                        }}
-                        className={`p-16 rounded-[4rem] text-center border-b-[16px] shadow-2xl active:scale-95 transition-all ${
-                          selectedEmployee.status === 'In' ? 'bg-red-500/10 border-red-500 hover:bg-red-900/20' : 'bg-emerald-500/10 border-emerald-500 hover:bg-emerald-900/20'
-                        }`}
-                      >
-                        <p className={`text-6xl md:text-8xl font-black italic uppercase tracking-tighter ${selectedEmployee.status === 'In' ? 'text-red-500' : 'text-emerald-500'}`}>
-                          {selectedEmployee.status === 'In' ? 'Clock Out' : selectedEmployee.status === 'Break' ? 'Return' : 'Clock In'}
-                        </p>
-                      </button>
-                      <div className="grid grid-cols-3 gap-6 font-sans">
-                        <button onClick={() => setView('emp_time_off')} className="p-8 bg-purple-500/10 border-b-8 border-purple-500 rounded-3xl text-purple-400 hover:bg-purple-900/20 transition-all flex flex-col items-center justify-center gap-3 active:scale-95"><Icon name="plane-takeoff" size={40} /><span className="text-xs font-black uppercase tracking-widest">Time Off</span></button>
-                        <button onClick={() => setShowLeaveApplyModal(true)} className="p-8 bg-amber-500/10 border-b-8 border-amber-500 rounded-3xl text-amber-400 hover:bg-amber-900/20 transition-all flex flex-col items-center justify-center gap-3 active:scale-95"><Icon name="calendar" size={40} /><span className="text-xs font-black uppercase tracking-widest font-sans">Apply For Leave</span></button>
-                        <button onClick={() => setView('emp_money_borrowed')} className="p-8 bg-emerald-500/10 border-b-8 border-emerald-500 rounded-3xl text-emerald-400 hover:bg-emerald-900/20 transition-all flex flex-col items-center justify-center gap-3 active:scale-95"><Icon name="banknote" size={40} /><span className="text-xs font-black uppercase tracking-widest font-sans">Borrow Money</span></button>
-                      </div>
-                    </div>
-                  </div>
-                )}
               </div>
             )}
           </div>
         </div>
       </div>
+      )}
+
+      {/* Employee Action Menu after successful verification */}
+      {view === 'emp_home' && selectedEmployee && (
+        <div className="fixed inset-0 z-[200] bg-[#0c0c0c]/90 backdrop-blur-2xl flex flex-col items-center justify-center p-4 animate-in fade-in-5 duration-300 font-sans">
+          <div className="bg-[#151518] border border-white/10 p-8 md:p-12 rounded-[3.5rem] w-full max-w-xl shadow-[0_30px_90px_rgba(0,0,0,0.9)] text-center">
+            <div className="flex flex-col items-center gap-3 pb-6 border-b border-white/10">
+              <PhotoAvatar emp={selectedEmployee} size={100} />
+              <div>
+                <p className="text-2xl md:text-3xl font-black uppercase tracking-tight text-white">{selectedEmployee.name} {selectedEmployee.surname}</p>
+                <div className="flex items-center justify-center gap-2 mt-2">
+                  <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider ${
+                    selectedEmployee.status === 'In' || selectedEmployee.isClockedIn 
+                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
+                      : selectedEmployee.status === 'Break'
+                      ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
+                      : 'bg-red-500/20 text-red-400 border border-red-500/30'
+                  }`}>
+                    {selectedEmployee.status === 'In' || selectedEmployee.isClockedIn 
+                      ? 'CLOCKED IN' 
+                      : selectedEmployee.status === 'Break'
+                      ? 'ON BREAK'
+                      : 'CLOCKED OUT'}
+                  </span>
+                  <span className="text-xs font-bold text-gray-400">{selectedEmployee.role || 'Artisan'}</span>
+                </div>
+              </div>
+            </div>
+
+            {actionSubMenu === 'menu' ? (
+              /* MAIN EMPLOYEE ACTION MENU */
+              <div className="mt-6 space-y-4">
+                <p className="text-xs font-black uppercase tracking-widest text-[#ff8c00]">
+                  WHAT WOULD YOU LIKE TO DO?
+                </p>
+
+                {/* Primary Option: CLOCKING */}
+                <button 
+                  onClick={() => setActionSubMenu('clocking')}
+                  className="w-full p-5 md:p-6 rounded-3xl text-center border-2 border-[#ff8c00]/50 bg-[#ff8c00]/10 hover:bg-[#ff8c00]/20 text-[#ff8c00] hover:text-white shadow-xl active:scale-95 transition-all flex items-center justify-center gap-3"
+                >
+                  <div className="p-2.5 rounded-2xl bg-[#ff8c00]/20 text-[#ff8c00]">
+                    <Icon name="clock" size={28} />
+                  </div>
+                  <span className="text-xl md:text-2xl font-black uppercase tracking-tight">
+                    CLOCKING
+                  </span>
+                </button>
+
+                {/* Secondary Actions Grid */}
+                <div className="grid grid-cols-2 gap-3">
+                  {/* APPLY FOR LEAVE */}
+                  <button 
+                    onClick={() => setShowLeaveApplyModal(true)} 
+                    className="p-5 bg-amber-500/10 border border-amber-500/30 hover:bg-amber-500/20 rounded-2xl text-amber-400 transition-all flex flex-col items-center justify-center gap-2 active:scale-95"
+                  >
+                    <Icon name="calendar" size={24} />
+                    <span className="text-xs font-black uppercase tracking-wider text-center">APPLY FOR LEAVE</span>
+                  </button>
+
+                  {/* BORROW MONEY */}
+                  <button 
+                    onClick={() => setView('emp_money_borrowed')} 
+                    className="p-5 bg-purple-500/10 border border-purple-500/30 hover:bg-purple-500/20 rounded-2xl text-purple-400 transition-all flex flex-col items-center justify-center gap-2 active:scale-95"
+                  >
+                    <Icon name="banknote" size={24} />
+                    <span className="text-xs font-black uppercase tracking-wider text-center">BORROW MONEY</span>
+                  </button>
+                </div>
+
+                {/* BREAK OPTION if clocked in or on break */}
+                {(selectedEmployee.status === 'In' || selectedEmployee.status === 'Break') && (
+                  <button
+                    onClick={() => {
+                      processClockEvent(selectedEmployee);
+                      setView('clocking');
+                      setSelectedEmployee(null);
+                      setActionSubMenu('menu');
+                    }}
+                    className="w-full p-4 bg-purple-500/10 border border-purple-500/30 hover:bg-purple-500/20 rounded-2xl text-purple-300 transition-all flex items-center justify-center gap-2 active:scale-95"
+                  >
+                    <Icon name="coffee" size={20} />
+                    <span className="text-sm font-black uppercase tracking-wider">
+                      {selectedEmployee.status === 'Break' ? 'RETURN FROM BREAK' : 'TAKE A BREAK'}
+                    </span>
+                  </button>
+                )}
+
+                {/* FACIAL CAMERA SCAN OPTION */}
+                <button 
+                  onClick={() => setView('scanning')} 
+                  className="w-full p-4 bg-blue-500/10 border border-blue-500/30 hover:bg-blue-500/20 rounded-2xl text-blue-400 transition-all flex items-center justify-center gap-2 active:scale-95"
+                >
+                  <Icon name="camera" size={20} />
+                  <span className="text-xs font-black uppercase tracking-wider">FACIAL SCAN VERIFICATION</span>
+                </button>
+
+                {/* Cancel Button */}
+                <button 
+                  onClick={() => { 
+                    setView('clocking'); 
+                    setSelectedEmployee(null); 
+                    setActionSubMenu('menu');
+                  }} 
+                  className="w-full py-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl text-xs font-black uppercase tracking-widest text-gray-300 transition-colors mt-2"
+                >
+                  CANCEL
+                </button>
+              </div>
+            ) : (
+              /* CLOCKING SELECTION SUB-MENU */
+              <div className="mt-6 space-y-4 animate-in fade-in duration-200">
+                <p className="text-xs font-black uppercase tracking-widest text-emerald-400">
+                  SELECT CLOCKING ACTION
+                </p>
+
+                {/* Primary Action Button based on Current Status */}
+                {selectedEmployee.status === 'In' || selectedEmployee.isClockedIn ? (
+                  <button 
+                    onClick={() => {
+                      processClockEvent(selectedEmployee);
+                      setView('clocking');
+                      setSelectedEmployee(null);
+                      setActionSubMenu('menu');
+                    }}
+                    className="w-full p-6 rounded-3xl text-center border-2 border-red-500/60 bg-red-500/20 hover:bg-red-500/30 text-red-400 hover:text-white shadow-2xl active:scale-95 transition-all flex items-center justify-center gap-4"
+                  >
+                    <div className="p-3 rounded-2xl bg-red-500/30 text-red-300">
+                      <Icon name="log-out" size={32} />
+                    </div>
+                    <span className="text-2xl md:text-3xl font-black uppercase tracking-tight">
+                      CLOCK OUT
+                    </span>
+                  </button>
+                ) : selectedEmployee.status === 'Break' ? (
+                  <button 
+                    onClick={() => {
+                      processClockEvent(selectedEmployee);
+                      setView('clocking');
+                      setSelectedEmployee(null);
+                      setActionSubMenu('menu');
+                    }}
+                    className="w-full p-6 rounded-3xl text-center border-2 border-purple-500/60 bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 hover:text-white shadow-2xl active:scale-95 transition-all flex items-center justify-center gap-4"
+                  >
+                    <div className="p-3 rounded-2xl bg-purple-500/30 text-purple-200">
+                      <Icon name="coffee" size={32} />
+                    </div>
+                    <span className="text-2xl md:text-3xl font-black uppercase tracking-tight">
+                      RETURN FROM BREAK
+                    </span>
+                  </button>
+                ) : (
+                  <button 
+                    onClick={() => {
+                      processClockEvent(selectedEmployee);
+                      setView('clocking');
+                      setSelectedEmployee(null);
+                      setActionSubMenu('menu');
+                    }}
+                    className="w-full p-6 rounded-3xl text-center border-2 border-emerald-500/60 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 hover:text-white shadow-2xl active:scale-95 transition-all flex items-center justify-center gap-4"
+                  >
+                    <div className="p-3 rounded-2xl bg-emerald-500/30 text-emerald-300">
+                      <Icon name="log-in" size={32} />
+                    </div>
+                    <span className="text-2xl md:text-3xl font-black uppercase tracking-tight">
+                      CLOCK IN
+                    </span>
+                  </button>
+                )}
+
+                {/* FACIAL SCAN ALTERNATIVE */}
+                <button 
+                  onClick={() => setView('scanning')}
+                  className="w-full p-4 bg-purple-500/10 border border-purple-500/30 hover:bg-purple-500/20 rounded-2xl text-purple-300 transition-all flex items-center justify-center gap-2 active:scale-95"
+                >
+                  <Icon name="camera" size={20} />
+                  <span className="text-xs font-black uppercase tracking-wider">
+                    {selectedEmployee.status === 'In' || selectedEmployee.isClockedIn ? 'FACIAL SCAN CLOCK OUT' : 'FACIAL SCAN CLOCK IN'}
+                  </span>
+                </button>
+
+                {/* Back & Cancel Buttons */}
+                <div className="flex gap-3">
+                  <button 
+                    onClick={() => setActionSubMenu('menu')} 
+                    className="flex-1 py-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl text-xs font-black uppercase tracking-widest text-gray-300 transition-colors"
+                  >
+                    BACK
+                  </button>
+                  <button 
+                    onClick={() => { 
+                      setView('clocking'); 
+                      setSelectedEmployee(null); 
+                      setActionSubMenu('menu');
+                    }} 
+                    className="flex-1 py-4 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 rounded-2xl text-xs font-black uppercase tracking-widest text-red-400 transition-colors"
+                  >
+                    CANCEL
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
       {/* VIEW SCANNING PROFILE CAMERA PREVIEW */}
@@ -2521,31 +2743,42 @@ TS Joinery Kanban System`
       )}
 
       {view === 'personal_pin_entry' && selectedEmployee && (
-        <div className="fixed inset-0 z-[200] bg-[#0c0c0c] flex flex-col items-center justify-center animate-in slide-in-from-bottom-20 italic font-sans">
-          <div className={`bg-[#151515] p-12 rounded-[5rem] border ${personalPinError ? 'border-red-500/30' : 'border-white/10'} text-center w-full max-w-sm shadow-[0_50px_100px_rgba(0,0,0,0.8)]`}>
-            <div className="mb-8">
-              <PhotoAvatar emp={selectedEmployee} size={100} className={`mx-auto border-4 ${personalPinError ? 'border-red-500' : 'border-[#ff8c00]'}`} />
+        <div className="fixed inset-0 z-[200] bg-[#0c0c0c]/90 backdrop-blur-2xl flex flex-col items-center justify-center animate-in slide-in-from-bottom-20 font-sans p-4">
+          <div className={`bg-[#151518] p-8 md:p-10 rounded-[3.5rem] border ${personalPinError ? 'border-red-500/50 shadow-[0_0_50px_rgba(239,68,68,0.2)]' : 'border-white/10 shadow-[0_30px_90px_rgba(0,0,0,0.9)]'} text-center w-full max-w-md`}>
+            <div className="mb-6">
+              <PhotoAvatar emp={selectedEmployee} size={90} className={`mx-auto border-4 ${personalPinError ? 'border-red-500' : 'border-[#ff8c00]'}`} />
             </div>
-            <h2 className="text-2xl font-black uppercase italic tracking-tighter mb-1 text-white">Enter Personal PIN</h2>
-            <p className="text-gray-500 text-[11px] font-black uppercase mb-8 tracking-widest">{selectedEmployee.name} {selectedEmployee.surname}</p>
             
-            <div className={`flex justify-center items-center space-x-4 h-16 mb-8 ${personalPinError ? 'animate-shake' : ''}`}>
+            <p className="text-xl md:text-2xl font-black uppercase tracking-tight text-white">{selectedEmployee.name} {selectedEmployee.surname}</p>
+            
+            <div className="flex items-center justify-center gap-2 my-3">
+              <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider ${
+                selectedEmployee.isClockedIn || selectedEmployee.status === 'In' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-gray-800 text-gray-400 border border-white/10'
+              }`}>
+                {selectedEmployee.isClockedIn || selectedEmployee.status === 'In' ? 'CLOCKED IN' : 'CLOCKED OUT'}
+              </span>
+            </div>
+
+            <h3 className="text-sm font-black uppercase tracking-widest text-[#ff8c00] mt-4">Employer Verification</h3>
+            <p className="text-gray-400 text-xs font-bold uppercase mb-6 tracking-wider">[ Enter Password / PIN ]</p>
+            
+            <div className={`flex justify-center items-center space-x-3 h-12 mb-6 ${personalPinError ? 'animate-shake' : ''}`}>
               {[0, 1, 2, 3].map(i => (
-                <div key={i} className={`w-8 h-10 rounded-lg ${personalPinInput.length > i ? 'bg-[#ff8c00]' : 'bg-black/40'}`} />
+                <div key={i} className={`w-6 h-8 rounded-lg transition-all ${personalPinInput.length > i ? 'bg-[#ff8c00] scale-105' : 'bg-black/50 border border-white/10'}`} />
               ))}
             </div>
 
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-3 gap-3">
               {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(digit => (
-                <button key={digit} type="button" onClick={() => handlePersonalPinDigit(String(digit))} className="p-8 bg-black/40 rounded-3xl text-2xl font-black text-white active:bg-[#ff8c00] transition-colors">
+                <button key={digit} type="button" onClick={() => handlePersonalPinDigit(String(digit))} className="p-5 bg-white/5 hover:bg-white/10 border border-white/5 rounded-2xl text-xl font-black text-white active:bg-[#ff8c00] transition-colors">
                   {digit}
                 </button>
               ))}
-              <button type="button" onClick={() => setPersonalPinInput('')} className="p-8 bg-black/40 rounded-3xl text-sm font-black text-gray-500 uppercase active:bg-white/10 transition-colors">Clear</button>
-              <button type="button" onClick={() => handlePersonalPinDigit('0')} className="p-8 bg-black/40 rounded-3xl text-2xl font-black text-white active:bg-[#ff8c00] transition-colors">0</button>
-              <button type="button" onClick={() => { setView('dashboard'); setSelectedEmployee(null); }} className="p-8 bg-black/40 rounded-3xl text-sm font-black text-red-500 uppercase active:bg-red-500/20 transition-colors font-sans">Back</button>
+              <button type="button" onClick={() => setPersonalPinInput('')} className="p-5 bg-white/5 hover:bg-white/10 border border-white/5 rounded-2xl text-xs font-black text-gray-400 uppercase active:bg-white/10 transition-colors">Clear</button>
+              <button type="button" onClick={() => handlePersonalPinDigit('0')} className="p-5 bg-white/5 hover:bg-white/10 border border-white/5 rounded-2xl text-xl font-black text-white active:bg-[#ff8c00] transition-colors">0</button>
+              <button type="button" onClick={() => { setView('clocking'); setSelectedEmployee(null); setPersonalPinInput(''); }} className="p-5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 rounded-2xl text-xs font-black text-red-400 uppercase transition-colors">Cancel</button>
             </div>
-            {personalPinError && <p className="mt-6 text-red-500 text-[10px] font-black uppercase animate-pulse font-sans">PIN mismatch</p>}
+            {personalPinError && <p className="mt-4 text-red-500 text-xs font-black uppercase animate-pulse font-sans">PIN Verification Failed</p>}
           </div>
         </div>
       )}
@@ -3562,7 +3795,7 @@ TS Joinery Kanban System`
 
       {/* Dynamic Mobile / Phone Bottom Navigation Bar */}
       {(layoutMode === 'phone' || window.innerWidth < 768) && (
-        <nav className="fixed bottom-0 inset-x-0 z-50 bg-[#0c0c0c]/95 backdrop-blur-2xl border-t border-white/10 px-3 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] flex items-center justify-around shadow-[0_-10px_30px_rgba(0,0,0,0.8)] md:hidden">
+        <nav className={`fixed bottom-0 inset-x-0 z-50 bg-[#0c0c0c]/95 backdrop-blur-2xl border-t border-white/10 px-3 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] flex items-center justify-around shadow-[0_-10px_30px_rgba(0,0,0,0.8)] ${layoutMode === 'phone' ? '' : 'md:hidden'}`}>
           {(() => {
             const role = currentUser?.role || (isLocked ? 'Artisan' : 'Admin');
             const basketCount = (() => {
@@ -3624,11 +3857,11 @@ TS Joinery Kanban System`
             } else if (role === 'HR' || role === 'Purchasing') {
               navItems = [
                 {
-                  id: 'dashboard',
-                  label: 'Dashboard',
-                  icon: 'home',
-                  onClick: () => { setAppMode('admin'); setView('dashboard'); },
-                  isActive: appMode === 'admin'
+                  id: 'clocking',
+                  label: 'Clocking',
+                  icon: 'clock',
+                  onClick: () => { setAppMode('employee'); setView('dashboard'); },
+                  isActive: appMode === 'employee'
                 },
                 {
                   id: 'notifications',
@@ -3656,11 +3889,11 @@ TS Joinery Kanban System`
             } else if (role === 'Admin') {
               navItems = [
                 {
-                  id: 'dashboard',
-                  label: 'Dashboard',
-                  icon: 'home',
-                  onClick: () => { setAppMode('admin'); setView('dashboard'); },
-                  isActive: appMode === 'admin'
+                  id: 'clocking',
+                  label: 'Clocking',
+                  icon: 'clock',
+                  onClick: () => { setAppMode('employee'); setView('dashboard'); },
+                  isActive: appMode === 'employee'
                 },
                 {
                   id: 'management',

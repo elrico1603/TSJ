@@ -271,6 +271,9 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
   const [saveProductName, setSaveProductName] = useState('');
   const [saveCategory, setSaveCategory] = useState('');
   const [saveDescription, setSaveDescription] = useState('');
+  const [isDuplicateDialogOpen, setIsDuplicateDialogOpen] = useState(false);
+  const [duplicateProductName, setDuplicateProductName] = useState('');
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
 
   // Search and Recent Searches states
   const [searchTerm, setSearchTerm] = useState('');
@@ -552,9 +555,6 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
     }
   };
 
-  const [isDuplicateDialogOpen, setIsDuplicateDialogOpen] = useState(false);
-  const [duplicateProductName, setDuplicateProductName] = useState('');
-
   const handleDuplicate = () => {
     if (!activeTemplate) return;
     setDuplicateProductName(`${activeTemplate.productName || activeTemplate.templateName} (COPY)`);
@@ -599,8 +599,6 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
       announce('Failed to duplicate template.');
     }
   };
-
-  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
 
   const handleDelete = () => {
     if (!activeTemplate || !activeTemplate.id) return;
