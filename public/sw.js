@@ -1,4 +1,4 @@
-const CACHE_NAME = 'timbersmith-terminal-v1.0.0.020';
+const CACHE_NAME = 'ts-hub-v2';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -36,7 +36,7 @@ self.addEventListener('install', (event) => {
 
 // Activate Event - Clean old caches & take control immediately
 self.addEventListener('activate', (event) => {
-  console.log('[Service Worker] Activating Timbersmith Terminal SW...');
+  console.log('[Service Worker] Activating Timbersmith Terminal SW...', CACHE_NAME);
   event.waitUntil(
     caches.keys().then((cacheNames) => {
       return Promise.all(
@@ -63,8 +63,16 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Skip browser extension schemes or Firestore live channel streams
-  if (url.hostname.includes('firestore.googleapis.com') || url.hostname.includes('identitytoolkit.googleapis.com')) {
+  // Skip browser extension schemes, API calls, and all Firebase/Firestore authentication & streaming endpoints
+  if (
+    url.hostname.includes('firestore.googleapis.com') ||
+    url.hostname.includes('identitytoolkit.googleapis.com') ||
+    url.hostname.includes('securetoken.googleapis.com') ||
+    url.hostname.includes('firebase.googleapis.com') ||
+    url.hostname.includes('firebaseinstallations.googleapis.com') ||
+    url.hostname.includes('firebaseapp.com') ||
+    url.pathname.startsWith('/api/')
+  ) {
     return;
   }
 

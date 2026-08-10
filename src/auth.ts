@@ -37,12 +37,32 @@ export interface AppUser {
 }
 
 export const authManager = {
-  authenticateUser(activeUsers: AppUser[], email: string, pin: string): AppUser | null {
-    if (!email || !pin) return null;
-    const normalizedEmail = email.trim().toLowerCase();
-    const matched = (activeUsers || []).find(
-      user => user.email?.toLowerCase() === normalizedEmail && user.pin === pin && user.isApproved
-    );
+  authenticateUser(activeUsers: AppUser[], emailOrUsername: string, pin: string): AppUser | null {
+    if (!emailOrUsername || pin === undefined || pin === null || pin === '') return null;
+    const normalizedInput = String(emailOrUsername).trim().toLowerCase();
+    const normalizedPin = String(pin).trim();
+    const emailFormat = normalizedInput.includes('@') ? normalizedInput : `${normalizedInput}@tsjoinery.co.za`;
+
+    const matched = (activeUsers || []).find(user => {
+      if (!user || user.active === false) return false;
+      const userEmail = user.email ? String(user.email).trim().toLowerCase() : '';
+      const userName = user.name ? String(user.name).trim().toLowerCase() : '';
+      const userFirstName = user.firstName ? String(user.firstName).trim().toLowerCase() : (userName.split(' ')[0] || '');
+      const emailPrefix = userEmail ? userEmail.split('@')[0] : '';
+
+      const identifierMatches = 
+        userEmail === normalizedInput ||
+        userEmail === emailFormat ||
+        emailPrefix === normalizedInput ||
+        userName === normalizedInput ||
+        userFirstName === normalizedInput;
+
+      const storedPin = user.pin !== undefined && user.pin !== null ? String(user.pin).trim() : '';
+      const pinMatches = storedPin === normalizedPin;
+
+      return identifierMatches && pinMatches;
+    });
+
     return matched || null;
   },
 

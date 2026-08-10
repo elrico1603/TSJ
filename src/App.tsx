@@ -239,6 +239,9 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<any>(null); 
   const [authView, setAuthView] = useState<'login' | 'register'>('login'); 
   const [authForm, setAuthForm] = useState({ name: '', email: '', password: '', role: 'Artisan', pin: '' });
+  const [loginError, setLoginError] = useState('');
+  const [isUsersLoading, setIsUsersLoading] = useState(true);
+  const [usersLoadError, setUsersLoadError] = useState<string | null>(null);
   const [activeUsers, setActiveUsers] = useState<AppUser[]>([]);
   const [userPermissions, setUserPermissions] = useState<Record<string, Record<string, boolean>>>({});
   const [pendingUsers, setPendingUsers] = useState<AppUser[]>([]);
@@ -550,146 +553,188 @@ export default function App() {
   // INITIALIZE FIREBASE STREAMS
   // ==========================================
   useEffect(() => {
-    let splashTriggered = false;
-    const triggerSplashDismiss = () => {
-      if (!splashTriggered) {
-        splashTriggered = true;
+    let isMounted = true;
+    let splashDismissed = false;
+
+    const dismissSplash = () => {
+      if (!splashDismissed && isMounted) {
+        splashDismissed = true;
+        setIsSplashFading(true);
         setTimeout(() => {
-          setIsSplashFading(true);
-          setTimeout(() => {
+          if (isMounted) {
             setIsInitialLoading(false);
-          }, 700);
-        }, 1000);
+          }
+        }, 500);
       }
     };
 
-    // Safety fallback timer so splash screen never hangs
-    const splashFallbackTimer = setTimeout(() => {
-      triggerSplashDismiss();
-    }, 3200);
-
-    const unsubAuth = auth.onAuthStateChanged(async (u) => {
-      if (u) {
-        setIsCloudLive(true);
-        // Listen to artisans list
-        db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('data').collection('employees')
-          .onSnapshot(async (snap) => {
-            if (snap.empty) {
-              // auto hydration seed files
-              const initialTeam: any[] = [];
-              for (const worker of initialTeam) {
-                await db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('data').collection('employees').add(worker);
-              }
-            } else {
-              setEmployees(snap.docs.map(d => ({ id: d.id, ...d.data() } as Employee)));
-            }
-            triggerSplashDismiss();
-          }, err => {
-            console.error("employees sync error:", err);
-            triggerSplashDismiss();
-          });
-
-        // Listen to job cards List
-        db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('data').collection('kanbanCards')
-          .onSnapshot(snap => {
-            if (!snap.empty) {
-              setKanbanCards(snap.docs.map(d => ({ id: d.id, ...d.data() } as KanbanCard)));
-            } else {
-              setKanbanCards([]);
-            }
-            triggerSplashDismiss();
-          }, err => {
-            console.error("kanbans fetch failure:", err);
-            triggerSplashDismiss();
-          });
-
-        // Listen for templates
-        db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('data').collection('kanbanTemplates')
-          .onSnapshot(snap => {
-            if (!snap.empty) {
-              setKanbanTemplates(snap.docs.map(d => ({ id: d.id, ...d.data() } as KanbanTemplate)));
-            } else {
-              setKanbanTemplates([DEFAULT_SAMPLE_TEMPLATE]);
-            }
-            triggerSplashDismiss();
-          }, err => {
-            console.error("Templates fail, falling back:", err);
-            setKanbanTemplates([DEFAULT_SAMPLE_TEMPLATE]);
-            triggerSplashDismiss();
-          });
-
-        // Users administration registration listening
-        db.collection('artifacts').doc(APP_ID_PATH).collection('private').doc('users').collection('active')
-          .onSnapshot(async snap => {
-            if (!snap.empty) {
-              const users = snap.docs.map(d => {
-                const data = d.data();
-                return {
-                  id: d.id,
-                  ...data,
-                  firstName: data.firstName || data.name?.split(' ')[0] || 'User',
-                  lastName: data.lastName || data.name?.split(' ').slice(1).join(' ') || '',
-                  email: data.email || '',
-                  role: data.role || 'Employee',
-                  department: data.department || 'Operations',
-                  active: data.active !== undefined ? data.active : true,
-                  pin: data.pin || '1234',
-                  isApproved: data.isApproved !== undefined ? data.isApproved : true
-                } as AppUser;
-              });
-              setActiveUsers(users);
-              
-              // Load custom permission overrides from users directly
-              const perms: Record<string, Record<string, boolean>> = {};
-              users.forEach(u => {
-                if ((u as any).permissions) {
-                  perms[u.id] = (u as any).permissions;
-                }
-              });
-              setUserPermissions(perms);
-            } else {
-              // Seed default role users if Firestore user collection is empty
-              const defaultAccounts: AppUser[] = [
-                { id: 'usr-admin-elrico', firstName: 'Elrico', lastName: 'Greyvenstein', name: 'Elrico Greyvenstein', email: 'elrico@tsjoinery.co.za', role: 'Administrator', department: 'Management', active: true, pin: '1234', isApproved: true, status: 'active', createdAt: new Date().toISOString() },
-                { id: 'usr-clocking-kiosk', firstName: 'Clocking', lastName: 'Terminal', name: 'Clocking Terminal', email: 'clocking@tsjoinery.co.za', role: 'Clocking Terminal', department: 'Clocking', active: true, pin: '0000', isApproved: true, status: 'active', createdAt: new Date().toISOString() },
-                { id: 'usr-hr-frans', firstName: 'Frans', lastName: 'User', name: 'Frans User', email: 'frans@tsjoinery.co.za', role: 'HR', department: 'Human Resources', active: true, pin: '1234', isApproved: true, status: 'active', createdAt: new Date().toISOString() },
-                { id: 'usr-manager-janah', firstName: 'Janah', lastName: 'User', name: 'Janah User', email: 'janah@tsjoinery.co.za', role: 'Manager', department: 'Management', active: true, pin: '1234', isApproved: true, status: 'active', createdAt: new Date().toISOString() },
-                { id: 'usr-admin-marietjie', firstName: 'Marietjie', lastName: 'User', name: 'Marietjie User', email: 'marietjie@tsjoinery.co.za', role: 'Administrator', department: 'Management', active: true, pin: '1234', isApproved: true, status: 'active', createdAt: new Date().toISOString() },
-                { id: 'usr-purchasing', firstName: 'Purchasing', lastName: 'User', name: 'Purchasing User', email: 'purchasing@tsjoinery.co.za', role: 'Purchasing', department: 'Procurement', active: true, pin: '1234', isApproved: true, status: 'active', createdAt: new Date().toISOString() },
-                { id: 'usr-employee', firstName: 'Employee', lastName: 'User', name: 'Employee User', email: 'employee@tsjoinery.co.za', role: 'Employee', department: 'Workshop', active: true, pin: '1234', isApproved: true, status: 'active', createdAt: new Date().toISOString() }
-              ];
-              setActiveUsers(defaultAccounts);
-              try {
-                for (const acc of defaultAccounts) {
-                  await db.collection('artifacts').doc(APP_ID_PATH).collection('private').doc('users').collection('active').doc(acc.id).set(acc);
-                }
-              } catch (e) {
-                console.warn('Unable to seed default role accounts:', e);
-              }
-            }
-            triggerSplashDismiss();
-          });
-
-        db.collection('artifacts').doc(APP_ID_PATH).collection('private').doc('users').collection('pending')
-          .onSnapshot(snap => {
-            if (!snap.empty) {
-              setPendingUsers(snap.docs.map(d => ({ id: d.id, ...d.data() } as AppUser)));
-            } else {
-              setPendingUsers([]);
-            }
-          });
-
-      } else {
-        try { await auth.signInAnonymously(); } catch (e) { console.warn("Anonymous Sign in denied:", e); }
-        triggerSplashDismiss();
+    // Controlled 5-second safety timeout for application initialization
+    const safetyTimeout = setTimeout(() => {
+      if (!splashDismissed) {
+        console.warn('[AUTH INIT TIMEOUT] Firebase auth/streams initialization timed out after 5s. Reaching login screen.');
+        dismissSplash();
       }
-    });
+    }, 5000);
 
-    const clockInterval = setInterval(() => setCurrentTime(new Date()), 1000);
+    let unsubAuth: (() => void) | null = null;
+
+    try {
+      unsubAuth = auth.onAuthStateChanged(async (u) => {
+        if (!isMounted) return;
+        if (u) {
+          setIsCloudLive(true);
+          // Listen to artisans list
+          db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('data').collection('employees')
+            .onSnapshot(async (snap) => {
+              if (!isMounted) return;
+              if (snap.empty) {
+                // auto hydration seed files
+                const initialTeam: any[] = [];
+                for (const worker of initialTeam) {
+                  await db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('data').collection('employees').add(worker);
+                }
+              } else {
+                setEmployees(snap.docs.map(d => ({ id: d.id, ...d.data() } as Employee)));
+              }
+              dismissSplash();
+            }, err => {
+              console.error("[FIRESTORE INIT ERROR] employees sync error:", err);
+              dismissSplash();
+            });
+
+          // Listen to job cards List
+          db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('data').collection('kanbanCards')
+            .onSnapshot(snap => {
+              if (!isMounted) return;
+              if (!snap.empty) {
+                setKanbanCards(snap.docs.map(d => ({ id: d.id, ...d.data() } as KanbanCard)));
+              } else {
+                setKanbanCards([]);
+              }
+              dismissSplash();
+            }, err => {
+              console.error("[FIRESTORE INIT ERROR] kanbans fetch failure:", err);
+              dismissSplash();
+            });
+
+          // Listen for templates
+          db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('data').collection('kanbanTemplates')
+            .onSnapshot(snap => {
+              if (!isMounted) return;
+              if (!snap.empty) {
+                setKanbanTemplates(snap.docs.map(d => ({ id: d.id, ...d.data() } as KanbanTemplate)));
+              } else {
+                setKanbanTemplates([DEFAULT_SAMPLE_TEMPLATE]);
+              }
+              dismissSplash();
+            }, err => {
+              console.error("[FIRESTORE INIT ERROR] Templates fail, falling back:", err);
+              setKanbanTemplates([DEFAULT_SAMPLE_TEMPLATE]);
+              dismissSplash();
+            });
+
+          // Users administration registration listening
+          setIsUsersLoading(true);
+          setUsersLoadError(null);
+          db.collection('artifacts').doc(APP_ID_PATH).collection('private').doc('users').collection('active')
+            .onSnapshot(async snap => {
+              if (!isMounted) return;
+              setIsUsersLoading(false);
+              setUsersLoadError(null);
+              if (!snap.empty) {
+                const users = snap.docs.map(d => {
+                  const data = d.data();
+                  return {
+                    id: d.id,
+                    ...data,
+                    firstName: data.firstName || data.name?.split(' ')[0] || 'User',
+                    lastName: data.lastName || data.name?.split(' ').slice(1).join(' ') || '',
+                    email: data.email || '',
+                    role: data.role || 'Employee',
+                    department: data.department || 'Operations',
+                    active: data.active !== undefined ? data.active : true,
+                    pin: data.pin || '1234',
+                    isApproved: data.isApproved !== undefined ? data.isApproved : true
+                  } as AppUser;
+                });
+                setActiveUsers(users);
+                console.log('[TSHUB USERS] snapshot received, user count:', users.length);
+                
+                // Load custom permission overrides from users directly
+                const perms: Record<string, Record<string, boolean>> = {};
+                users.forEach(u => {
+                  if ((u as any).permissions) {
+                    perms[u.id] = (u as any).permissions;
+                  }
+                });
+                setUserPermissions(perms);
+              } else {
+                // Seed default role users if Firestore user collection is empty
+                const defaultAccounts: AppUser[] = [
+                  { id: 'usr-admin-elrico', firstName: 'Elrico', lastName: 'Greyvenstein', name: 'Elrico Greyvenstein', email: 'elrico@tsjoinery.co.za', role: 'Administrator', department: 'Management', active: true, pin: '1234', isApproved: true, status: 'active', createdAt: new Date().toISOString() },
+                  { id: 'usr-clocking-kiosk', firstName: 'Clocking', lastName: 'Terminal', name: 'Clocking Terminal', email: 'clocking@tsjoinery.co.za', role: 'Clocking Terminal', department: 'Clocking', active: true, pin: '0000', isApproved: true, status: 'active', createdAt: new Date().toISOString() },
+                  { id: 'usr-hr-frans', firstName: 'Frans', lastName: 'User', name: 'Frans User', email: 'frans@tsjoinery.co.za', role: 'HR', department: 'Human Resources', active: true, pin: '1234', isApproved: true, status: 'active', createdAt: new Date().toISOString() },
+                  { id: 'usr-manager-janah', firstName: 'Janah', lastName: 'User', name: 'Janah User', email: 'janah@tsjoinery.co.za', role: 'Manager', department: 'Management', active: true, pin: '1234', isApproved: true, status: 'active', createdAt: new Date().toISOString() },
+                  { id: 'usr-admin-marietjie', firstName: 'Marietjie', lastName: 'User', name: 'Marietjie User', email: 'marietjie@tsjoinery.co.za', role: 'Administrator', department: 'Management', active: true, pin: '1234', isApproved: true, status: 'active', createdAt: new Date().toISOString() },
+                  { id: 'usr-purchasing', firstName: 'Purchasing', lastName: 'User', name: 'Purchasing User', email: 'purchasing@tsjoinery.co.za', role: 'Purchasing', department: 'Procurement', active: true, pin: '1234', isApproved: true, status: 'active', createdAt: new Date().toISOString() },
+                  { id: 'usr-employee', firstName: 'Employee', lastName: 'User', name: 'Employee User', email: 'employee@tsjoinery.co.za', role: 'Employee', department: 'Workshop', active: true, pin: '1234', isApproved: true, status: 'active', createdAt: new Date().toISOString() }
+                ];
+                setActiveUsers(defaultAccounts);
+                console.log('[TSHUB USERS] snapshot empty, seeded default user count:', defaultAccounts.length);
+                try {
+                  for (const acc of defaultAccounts) {
+                    await db.collection('artifacts').doc(APP_ID_PATH).collection('private').doc('users').collection('active').doc(acc.id).set(acc);
+                  }
+                } catch (e) {
+                  console.warn('Unable to seed default role accounts:', e);
+                }
+              }
+              dismissSplash();
+            }, err => {
+              if (isMounted) {
+                setIsUsersLoading(false);
+                setUsersLoadError('Unable to load user accounts. Please try again.');
+              }
+              console.error("[FIRESTORE INIT ERROR] Active users sync error:", err);
+              dismissSplash();
+            });
+
+          db.collection('artifacts').doc(APP_ID_PATH).collection('private').doc('users').collection('pending')
+            .onSnapshot(snap => {
+              if (!isMounted) return;
+              if (!snap.empty) {
+                setPendingUsers(snap.docs.map(d => ({ id: d.id, ...d.data() } as AppUser)));
+              } else {
+                setPendingUsers([]);
+              }
+            }, err => {
+              console.error("[FIRESTORE INIT ERROR] Pending users sync error:", err);
+            });
+
+        } else {
+          dismissSplash();
+          auth.signInAnonymously().catch(e => {
+            console.warn("[AUTH INIT WARNING] Anonymous Sign in denied:", e);
+          });
+        }
+      }, (authErr) => {
+        console.error("[AUTH INIT ERROR] Firebase auth error:", authErr);
+        dismissSplash();
+      });
+    } catch (err) {
+      console.error("[AUTH INIT ERROR] Failed to register auth listener:", err);
+      dismissSplash();
+    }
+
+    const clockInterval = setInterval(() => {
+      if (isMounted) setCurrentTime(new Date());
+    }, 1000);
+
     return () => {
-      unsubAuth();
+      isMounted = false;
+      clearTimeout(safetyTimeout);
+      if (unsubAuth) unsubAuth();
       clearInterval(clockInterval);
-      clearTimeout(splashFallbackTimer);
     };
   }, []);
 
@@ -1141,7 +1186,7 @@ TS Joinery Kanban System`
 
     const expectedCode = selectedEmployee.personalCode || selectedEmployee.pin || selectedEmployee.clockPin;
     const isValid = 
-      (expectedCode && pinStr === expectedCode) ||
+      (expectedCode && String(pinStr) === String(expectedCode)) ||
       pinStr === '1234' ||
       pinStr === '0000' ||
       pinStr === '1001';
@@ -1190,7 +1235,7 @@ TS Joinery Kanban System`
 
   const submitSupervisorPin = () => {
     const matchedSupervisor = activeUsers.find(
-      u => u.isApproved && u.pin === supervisorApprovalPinInput && 
+      u => u.isApproved && String(u.pin) === String(supervisorApprovalPinInput) && 
       (() => {
         const uPerms = userPermissions[u.id] || {};
         return uPerms.canManageUsers !== undefined 
@@ -1219,45 +1264,95 @@ TS Joinery Kanban System`
 
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setLoginError('');
     if (authView === 'login') {
-      const match = authManager.authenticateUser(activeUsers, authForm.email, authForm.pin);
-      if (match) {
-        const normUser: AppUser = {
-          ...match,
-          firstName: match.firstName || match.name?.split(' ')[0] || 'User',
-          lastName: match.lastName || match.name?.split(' ').slice(1).join(' ') || '',
-          email: match.email || '',
-          role: match.role || 'Employee',
-          department: match.department || 'Operations',
-          active: match.active !== undefined ? match.active : true
-        };
-        setCurrentUser(normUser);
-        setIsLocked(false);
-        const { appMode: initMode, view: initView } = permissionService.getInitialModeAndView(normUser);
-        console.log('[AUTH ROUTING]', {
-          User: normUser.email,
-          Role: normUser.role,
-          getInitialModeAndViewResult: { appMode: initMode, view: initView },
-          FinalAppModeAfterInitialization: initMode,
-          FinalViewAfterInitialization: initView
-        });
-        setAppMode(initMode);
-        setView(initView);
-        auditLogger.log('USER_LOGIN', normUser.email, `Signed in as ${normUser.role}`);
-      } else {
-        announce('Authentication failed. Check credentials or approval status.');
+      if (isUsersLoading) {
+        setLoginError('Loading user accounts. Please wait...');
+        announce('Loading user accounts. Please wait...');
+        return;
+      }
+      if (usersLoadError) {
+        setLoginError(usersLoadError);
+        announce(usersLoadError);
+        return;
+      }
+
+      console.log('[TSHUB LOGIN]', {
+        identifierSupplied: authForm.email,
+        activeUserCount: activeUsers ? activeUsers.length : 0,
+        usersLoading: isUsersLoading
+      });
+
+      try {
+        const match = authManager.authenticateUser(activeUsers, authForm.email, authForm.pin);
+        if (match) {
+          if (match.active === false) {
+            setLoginError('Account is currently deactivated. Contact administration.');
+            announce('Account deactivated.');
+            return;
+          }
+          if (!match.isApproved) {
+            setLoginError('Account is awaiting administrative approval.');
+            announce('Account awaiting approval.');
+            return;
+          }
+
+          const normUser: AppUser = {
+            ...match,
+            firstName: match.firstName || match.name?.split(' ')[0] || 'User',
+            lastName: match.lastName || match.name?.split(' ').slice(1).join(' ') || '',
+            email: match.email || '',
+            role: match.role || 'Employee',
+            department: match.department || 'Operations',
+            active: match.active !== undefined ? match.active : true
+          };
+
+          setCurrentUser(normUser);
+          setIsLocked(false);
+          setLoginError('');
+
+          const { appMode: initMode, view: initView } = permissionService.getInitialModeAndView(normUser);
+          console.log('[AUTH ROUTING]', {
+            User: normUser.email,
+            Role: normUser.role,
+            getInitialModeAndViewResult: { appMode: initMode, view: initView },
+            FinalAppModeAfterInitialization: initMode,
+            FinalViewAfterInitialization: initView
+          });
+          setAppMode(initMode);
+          setView(initView);
+          auditLogger.log('USER_LOGIN', normUser.email, `Signed in as ${normUser.role}`);
+        } else {
+          if (!activeUsers || activeUsers.length === 0) {
+            setLoginError('System accounts still synchronizing. Please wait a moment and click Authenticate again.');
+          } else {
+            setLoginError('Authentication failed. Check your username/email address and security PIN.');
+          }
+          announce('Authentication failed. Check credentials or approval status.');
+        }
+      } catch (err: any) {
+        console.error('[AUTH SUBMIT ERROR]', err);
+        const errMsg = err?.message || 'Authentication error occurred.';
+        setLoginError(errMsg);
+        announce(errMsg);
       }
     } else {
-      const request = {
-        id: Date.now().toString(),
-        name: authForm.name,
-        email: authForm.email,
-        role: authForm.role,
-        pin: authForm.pin
-      };
-      await authManager.registerUserRequest(request);
-      setAuthView('login');
-      announce('Request sent to administration. Wait for approval.');
+      try {
+        const request = {
+          id: Date.now().toString(),
+          name: authForm.name,
+          email: authForm.email,
+          role: authForm.role,
+          pin: authForm.pin
+        };
+        await authManager.registerUserRequest(request);
+        setAuthView('login');
+        setLoginError('');
+        announce('Request sent to administration. Wait for approval.');
+      } catch (err: any) {
+        console.error('[REGISTRATION ERROR]', err);
+        setLoginError('Registration request failed. Please try again.');
+      }
     }
   };
 
@@ -1790,15 +1885,25 @@ TS Joinery Kanban System`
 
             {/* Login Form */}
             <form onSubmit={handleAuthSubmit} className="space-y-4 text-left font-sans">
+              {loginError && (
+                <div className="p-3.5 bg-red-500/15 border border-red-500/40 rounded-2xl text-red-300 text-xs font-semibold flex items-center gap-2.5 animate-in fade-in">
+                  <Icon name="alert-circle" size={18} className="shrink-0 text-red-400" />
+                  <span>{loginError}</span>
+                </div>
+              )}
+
               <div>
-                <label className="text-[10px] font-black uppercase text-gray-400 ml-2 tracking-wider">Email Address</label>
+                <label className="text-[10px] font-black uppercase text-gray-400 ml-2 tracking-wider">Email Address or Username</label>
                 <input 
                   required 
-                  type="email" 
+                  type="text" 
                   className="w-full bg-black/60 border border-white/10 rounded-2xl p-4 text-sm text-white mt-1 outline-none focus:border-[#ff8c00] font-bold transition-all placeholder-gray-600" 
                   value={authForm.email} 
-                  onChange={e => setAuthForm({...authForm, email: e.target.value})} 
-                  placeholder="elrico@tsjoinery.co.za" 
+                  onChange={e => {
+                    setAuthForm({...authForm, email: e.target.value});
+                    if (loginError) setLoginError('');
+                  }} 
+                  placeholder="elrico or elrico@tsjoinery.co.za" 
                 />
               </div>
 
@@ -1809,16 +1914,20 @@ TS Joinery Kanban System`
                   type="password" 
                   className="w-full bg-black/60 border border-white/10 rounded-2xl p-4 text-white mt-1 outline-none focus:border-[#ff8c00] text-center tracking-[0.5em] text-xl font-bold transition-all placeholder-gray-600" 
                   value={authForm.pin} 
-                  onChange={e => setAuthForm({...authForm, pin: e.target.value})} 
+                  onChange={e => {
+                    setAuthForm({...authForm, pin: e.target.value});
+                    if (loginError) setLoginError('');
+                  }} 
                   placeholder="••••" 
                 />
               </div>
 
               <button 
                 type="submit" 
-                className="w-full py-4 bg-[#ff8c00] hover:bg-[#e07b00] active:scale-[0.98] text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl transition-all min-h-[48px]"
+                disabled={isUsersLoading}
+                className="w-full py-4 bg-[#ff8c00] hover:bg-[#e07b00] disabled:opacity-60 disabled:cursor-not-allowed active:scale-[0.98] text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl transition-all min-h-[48px]"
               >
-                Authenticate Login
+                {isUsersLoading ? 'Loading Accounts...' : 'Authenticate Login'}
               </button>
             </form>
 
@@ -1837,7 +1946,10 @@ TS Joinery Kanban System`
                   <button
                     key={acc.email}
                     type="button"
-                    onClick={() => setAuthForm({ ...authForm, email: acc.email, pin: acc.pin })}
+                    onClick={() => {
+                      setAuthForm({ ...authForm, email: acc.email, pin: acc.pin });
+                      if (loginError) setLoginError('');
+                    }}
                     className="px-2.5 py-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[10px] font-mono text-gray-300 hover:text-white transition-colors"
                   >
                     {acc.label}
@@ -2398,6 +2510,12 @@ TS Joinery Kanban System`
                       <p className="text-xs text-gray-500 uppercase tracking-widest mb-10">Sign in to unlock operational departments</p>
 
                       <form onSubmit={handleAuthSubmit} className="space-y-6 text-left font-sans">
+                        {loginError && (
+                          <div className="p-3.5 bg-red-500/15 border border-red-500/40 rounded-2xl text-red-300 text-xs font-semibold flex items-center gap-2.5 animate-in fade-in">
+                            <Icon name="alert-circle" size={18} className="shrink-0 text-red-400" />
+                            <span>{loginError}</span>
+                          </div>
+                        )}
                         {authView === 'register' && (
                           <div>
                             <label className="text-[10px] font-black uppercase text-gray-500 ml-3">Full Name</label>
@@ -2405,12 +2523,12 @@ TS Joinery Kanban System`
                           </div>
                         )}
                         <div>
-                          <label className="text-[10px] font-black uppercase text-gray-500 ml-3">Email Address</label>
-                          <input required type="email" className="w-full bg-black/40 border border-white/5 rounded-2xl p-4 text-white mt-1.5 outline-none focus:border-blue-500 font-bold" value={authForm.email} onChange={e => setAuthForm({...authForm, email: e.target.value})} placeholder="manager@tsjoinery.co.za" />
+                          <label className="text-[10px] font-black uppercase text-gray-500 ml-3">Email Address or Username</label>
+                          <input required type="text" className="w-full bg-black/40 border border-white/5 rounded-2xl p-4 text-white mt-1.5 outline-none focus:border-blue-500 font-bold" value={authForm.email} onChange={e => { setAuthForm({...authForm, email: e.target.value}); if (loginError) setLoginError(''); }} placeholder="elrico or manager@tsjoinery.co.za" />
                         </div>
                         <div>
                           <label className="text-[10px] font-black uppercase text-gray-500 ml-3">Security Key / PIN</label>
-                          <input required type="password" className="w-full bg-black/40 border border-white/5 rounded-2xl p-4 text-white mt-1.5 outline-none focus:border-blue-500 text-center tracking-[0.5em] text-xl font-bold" value={authForm.pin} onChange={e => setAuthForm({...authForm, pin: e.target.value})} placeholder="••••" />
+                          <input required type="password" className="w-full bg-black/40 border border-white/5 rounded-2xl p-4 text-white mt-1.5 outline-none focus:border-blue-500 text-center tracking-[0.5em] text-xl font-bold" value={authForm.pin} onChange={e => { setAuthForm({...authForm, pin: e.target.value}); if (loginError) setLoginError(''); }} placeholder="••••" />
                         </div>
 
                         {authView === 'register' && (
@@ -2427,8 +2545,8 @@ TS Joinery Kanban System`
                           </div>
                         )}
 
-                        <button type="submit" className="w-full py-5 bg-[#ff8c00] hover:bg-[#e07b00] text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl transition-colors mt-8">
-                          {authView === 'login' ? 'Authenticate Login' : 'Request Registry Access'}
+                        <button type="submit" disabled={isUsersLoading} className="w-full py-5 bg-[#ff8c00] hover:bg-[#e07b00] disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl transition-colors mt-8">
+                          {isUsersLoading ? 'Loading Accounts...' : (authView === 'login' ? 'Authenticate Login' : 'Request Registry Access')}
                         </button>
                       </form>
 
@@ -2441,6 +2559,35 @@ TS Joinery Kanban System`
                         <button onClick={() => setShowPinModal(true)} className="text-[#ff8c00] hover:text-[#e07b00]">Master supervisor bypass</button>
                       </div>
                     </div>
+                  </div>
+                )}
+
+                {/* Fallback workspace state if appMode/view has no matching view */}
+                {![
+                  'template_designer',
+                  'system_admin',
+                  'company_settings',
+                  'product_master',
+                  'purchase_orders',
+                  'dispatch',
+                  'kanban',
+                  'orders',
+                  'analytics',
+                  'leave',
+                  'mobile',
+                  'qr_scan_service',
+                  'home'
+                ].includes(appMode) &&
+                !(appMode === 'employee' && view === 'dashboard') &&
+                !(appMode === 'admin' && view === 'dashboard') && (
+                  <div className="flex flex-col items-center justify-center py-20 text-center space-y-4 font-sans">
+                    <p className="text-gray-400 font-bold uppercase text-xs tracking-wider">Unable to load workspace</p>
+                    <button 
+                      onClick={() => { setAppMode('employee'); setView('dashboard'); }} 
+                      className="px-6 py-3 bg-[#ff8c00] hover:bg-[#e07b00] rounded-xl text-xs font-black uppercase tracking-widest text-white transition-colors"
+                    >
+                      Return to Employee Workspace
+                    </button>
                   </div>
                 )}
               </div>

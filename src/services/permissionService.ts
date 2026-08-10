@@ -933,7 +933,7 @@ export const permissionService = {
     } else if (role === 'Purchasing' || role === 'Stock Manager') {
       result = { appMode: 'purchase_orders', view: 'purchase_orders' };
     } else if (role === 'Employee' || role === 'Artisan') {
-      result = { appMode: 'employee', view: 'emp_home' };
+      result = { appMode: 'employee', view: 'dashboard' };
     } else {
       result = { appMode: 'employee', view: 'dashboard' };
     }
