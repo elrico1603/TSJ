@@ -9,6 +9,7 @@ export interface ShiftRecord {
   clockIn: string;
   clockOut: string;
   hours: number;
+  notes?: string;
 }
 
 export interface BreakRecord {
@@ -67,6 +68,10 @@ export interface Employee {
   shiftStartTime?: string | null;
   currentBreakReason?: string | null;
   lastClock?: string;
+  pin?: string;
+  clockPin?: string;
+  isClockedIn?: boolean;
+  employeeNumber?: string;
 }
 
 export interface KanbanFieldDefinition {
@@ -281,15 +286,22 @@ export interface GlobalNotification {
 }
 
 export interface StockRequestItem {
+  id?: string;
   productId: string;
   productName: string;
   quantity: number;
   receivedQuantity?: number;
   supplier: string;
+  supplierName?: string;
   supplierPartNumber: string;
   location: string;
   imageUrl?: string;
   notes?: string;
+  requestNumber?: string;
+  kanbanId?: string;
+  productDescription?: string;
+  orderQuantity?: number;
+  branchName?: string;
 }
 
 export interface StockRequestHistoryItem {
@@ -618,6 +630,19 @@ export interface RoleAuditLogEntry {
   previousValue: string;
   newValue: string;
 }
+
+// Phase 1 Storage & Evidence Types
+export * from './types/storage';
+export * from './types/storagePath';
+
+// Phase 2 Package-Level Data Model Types & Adapters
+export * from './types/dispatchPackage';
+export { normalizeDispatchRecord, deriveReceivingStatus, sanitizeForFirestore, validateDispatchRecord } from './services/dispatchAdapter';
+export type { DispatchRecord, DispatchItem, ReceivingPhoto } from './components/DispatchDetails';
+
+// Phase 1 Gemini Chat Architecture Types
+export * from './types/chat';
+
 
 
 

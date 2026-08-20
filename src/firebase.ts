@@ -1,6 +1,7 @@
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/auth';
 import 'firebase/compat/firestore';
+import 'firebase/compat/storage';
 
 export const firebaseConfig = {
     apiKey: "AIzaSyA4J1TVcpqNBvBoq242vXWwguAAnh3G6ks",
@@ -17,6 +18,7 @@ if (!firebase.apps.length) {
 
 export const auth = firebase.auth();
 export const db = firebase.firestore();
+export const storage = firebase.storage();
 
 export const APP_ID_PATH = 'timbersmith-terminal-v1';
 export const APP_MOBILE_LINK = 'https://elrico1603.github.io/TSJApp/';

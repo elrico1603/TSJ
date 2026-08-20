@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ts-hub-v2';
+const CACHE_NAME = 'ts-hub-v3-formdata';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -76,9 +76,15 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  event.respondWith(
-    caches.match(req).then((cachedResponse) => {
-      const fetchPromise = fetch(req)
+  const isCodeAsset = req.headers.get('accept')?.includes('text/html') || 
+                      url.pathname.endsWith('.js') || 
+                      url.pathname.endsWith('.tsx') || 
+                      url.pathname.endsWith('.ts') ||
+                      url.pathname === '/';
+
+  if (isCodeAsset) {
+    event.respondWith(
+      fetch(req)
         .then((networkResponse) => {
           if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
             const responseToCache = networkResponse.clone();
@@ -88,25 +94,33 @@ self.addEventListener('fetch', (event) => {
           }
           return networkResponse;
         })
-        .catch((err) => {
-          console.warn('[Service Worker] Network request failed, returning cached version if available:', err);
-          return cachedResponse;
-        });
+        .catch(() => {
+          console.warn('[Service Worker] Network request failed for code asset, returning cached version if available');
+          return caches.match(req).then((cached) => {
+            if (cached) return cached;
+            if (req.headers.get('accept')?.includes('text/html')) {
+              return caches.match('/index.html');
+            }
+            return new Response('Offline', { status: 503, statusText: 'Service Unavailable' });
+          });
+        })
+    );
+    return;
+  }
 
-      // Return cached version immediately if available, otherwise wait for network
+  event.respondWith(
+    caches.match(req).then((cachedResponse) => {
       if (cachedResponse) {
         return cachedResponse;
       }
-
-      return fetchPromise.then((response) => {
-        if (response) return response;
-
-        // If offline and requesting an HTML page, serve cached index.html
-        if (req.headers.get('accept')?.includes('text/html')) {
-          return caches.match('/index.html');
+      return fetch(req).then((networkResponse) => {
+        if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
+          const responseToCache = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(req, responseToCache);
+          });
         }
-
-        return new Response('Offline', { status: 503, statusText: 'Service Unavailable' });
+        return networkResponse;
       });
     })
   );

@@ -65,6 +65,7 @@ export interface KanbanCardMaster {
   productDescription: string;
   productName?: string;
   imageUrl: string; // Stored in Firebase storage, Firestore has URL
+  productImage?: string;
   supplierPartNumber: string;
   supplierName: string;
   orderQuantity: string;
@@ -79,6 +80,7 @@ export interface KanbanCardMaster {
   lastModifiedBy: string;
   status: KanbanStatus;
   cardColour?: string;
+  cardColor?: string;
   picture?: {
     x: number;
     y: number;

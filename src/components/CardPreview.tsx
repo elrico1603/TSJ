@@ -12,7 +12,7 @@ interface StructuredSection1LayoutProps {
     width?: number;
     height?: number;
     picture?: { x: number; y: number; width: number; height: number };
-    qr?: { x: number; y: number; width: number; height: number };
+    qr?: { x: number; y: number; width: number; height: number; rightMargin?: number };
   };
 }
 

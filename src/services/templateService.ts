@@ -65,6 +65,12 @@ export interface KanbanTemplateV2 {
   paperSize: 'A4' | 'A5' | 'A6' | 'Custom';
   orientation: 'Portrait' | 'Landscape';
   margins: number; // in mm
+  dimensions?: {
+    width: number;
+    height: number;
+    margin?: number;
+    sectionGap?: number;
+  };
   sections: KanbanSectionConfig[];
   productName?: string;
   category?: string;

@@ -855,6 +855,7 @@ export const permissionService = {
   },
 
   canAccessMode(role: string, mode: string): boolean {
+    if (mode === 'gemini_chat' || mode === 'ai_assistant' || mode === 'dispatch' || mode === 'dispatches' || mode === 'mobile_dispatches') return true;
     const normRole = (role || '').trim();
     if (normRole === 'Administrator' || normRole === 'Admin') return true;
     if (normRole === 'Clocking Kiosk' || normRole === 'Clocking Terminal' || normRole === 'Clocking') {

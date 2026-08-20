@@ -21,7 +21,7 @@ export const CompanySettingsHub: React.FC<CompanySettingsHubProps> = ({
   onVersionUpdated,
   initialTab = 'info'
 }) => {
-  const isAdmin = currentUser?.role === 'Admin';
+  const isAdmin = currentUser?.role === 'Admin' || currentUser?.role === 'Administrator';
   const isManager = ['Supervisor', 'HR', 'Stock Manager'].includes(currentUser?.role || '');
   const isReadOnly = !isAdmin;
 
@@ -957,7 +957,7 @@ export const CompanySettingsHub: React.FC<CompanySettingsHubProps> = ({
                           <td className="p-4 font-mono text-gray-400">{u.email}</td>
                           <td className="p-4 font-mono font-bold">
                             <span className={`px-2 py-0.5 rounded text-[10px] uppercase ${
-                              u.role === 'Admin' ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' : 'bg-gray-800 text-gray-300'
+                              (u.role === 'Admin' || u.role === 'Administrator') ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' : 'bg-gray-800 text-gray-300'
                             }`}>
                               {u.role}
                             </span>

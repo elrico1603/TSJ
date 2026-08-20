@@ -4,7 +4,9 @@ import { DispatchList } from './DispatchList';
 import { DispatchWizard } from './DispatchWizard';
 import { DispatchDetails, DispatchRecord } from './DispatchDetails';
 import { ReceivingWizard } from './ReceivingWizard';
+import { DispatchArchive } from './DispatchArchive';
 import { Icon } from './Icon';
+import { normalizeDispatchRecord, sanitizeForFirestore } from '../services/dispatchAdapter';
 
 const LOCAL_DISPATCHES_KEY = 'tsj_dispatches_v1';
 
@@ -98,12 +100,12 @@ export const DispatchHub: React.FC<DispatchHubProps> = ({ currentUser, announce 
   const [isLoading, setIsLoading] = useState(true);
 
   // Active modal/wizard view
-  const [activeView, setActiveView] = useState<'list' | 'wizard' | 'details' | 'receiving'>('list');
+  const [activeView, setActiveView] = useState<'list' | 'wizard' | 'details' | 'receiving' | 'archive'>('list');
   const [selectedDispatch, setSelectedDispatch] = useState<DispatchRecord | null>(null);
 
   // User permissions
   const role = currentUser?.role || '';
-  const isAdmin = role === 'Admin';
+  const isAdmin = role === 'Admin' || role === 'Administrator';
   const isManager = ['Supervisor', 'HR', 'Stock Manager'].includes(role);
   const isDispatchOrFactorySupervisor = role.toLowerCase().includes('dispatch') || role.toLowerCase().includes('factory');
   
@@ -121,7 +123,7 @@ export const DispatchHub: React.FC<DispatchHubProps> = ({ currentUser, announce 
           const snap = await db.collection('dispatches').orderBy('createdAt', 'desc').get();
           if (!snap.empty) {
             snap.forEach((docSnap) => {
-              loadedData.push({ id: docSnap.id, ...docSnap.data() } as DispatchRecord);
+              loadedData.push(normalizeDispatchRecord({ id: docSnap.id, ...docSnap.data() }));
             });
           }
         } catch (e) {
@@ -133,13 +135,14 @@ export const DispatchHub: React.FC<DispatchHubProps> = ({ currentUser, announce 
         try {
           const local = localStorage.getItem(LOCAL_DISPATCHES_KEY);
           if (local) {
-            loadedData = JSON.parse(local);
+            const rawList = JSON.parse(local);
+            loadedData = Array.isArray(rawList) ? rawList.map((item) => normalizeDispatchRecord(item)) : [];
           } else {
-            loadedData = INITIAL_MOCK_DISPATCHES;
+            loadedData = INITIAL_MOCK_DISPATCHES.map((item) => normalizeDispatchRecord(item));
             localStorage.setItem(LOCAL_DISPATCHES_KEY, JSON.stringify(loadedData));
           }
         } catch (e) {
-          loadedData = INITIAL_MOCK_DISPATCHES;
+          loadedData = INITIAL_MOCK_DISPATCHES.map((item) => normalizeDispatchRecord(item));
         }
       }
 
@@ -176,18 +179,29 @@ export const DispatchHub: React.FC<DispatchHubProps> = ({ currentUser, announce 
       project: payload.project || 'Project',
       destinationBranch: payload.destinationBranch || 'Cape Town',
       installer: payload.installer || '',
-      courier: payload.courier || '',
+      courier: payload.courier || payload.courierCompany || '',
+      courierCompany: payload.courierCompany || payload.courier || '',
       trackingNumber: payload.trackingNumber || '',
+      trackingUrl: payload.trackingUrl || '',
+      parcelCount: payload.parcelCount || (payload.packages ? `${payload.packages.length} Packages` : '1'),
       notes: payload.notes || '',
       status: finalStatus,
+      items: payload.items || [],
+      packages: payload.packages || [],
       googleDriveFolderId: payload.googleDriveFolderId || '',
       googleDriveFolderName: payload.googleDriveFolderName || '',
       googleDriveFolderUrl: payload.googleDriveFolderUrl || '',
       photoCount: payload.photos?.length || 0,
       photos: payload.photos || [],
-      createdBy: payload.createdBy || currentUser?.fullName || 'Dispatch Supervisor',
+      receivingPhotos: payload.receivingPhotos || selectedDispatch?.receivingPhotos || [],
+      receivingChecklist: payload.receivingChecklist || selectedDispatch?.receivingChecklist,
+      receivingNotes: payload.receivingNotes || selectedDispatch?.receivingNotes,
+      receivedBy: payload.receivedBy || selectedDispatch?.receivedBy,
+      receivedAt: payload.receivedAt || selectedDispatch?.receivedAt,
+      createdBy: payload.createdBy || selectedDispatch?.createdBy || currentUser?.fullName || currentUser?.name || 'Dispatch Supervisor',
       createdAt: selectedDispatch?.createdAt || now,
-      updatedAt: now
+      updatedAt: now,
+      history: payload.history || selectedDispatch?.history || []
     };
 
     // Update local state first
@@ -204,7 +218,7 @@ export const DispatchHub: React.FC<DispatchHubProps> = ({ currentUser, announce 
     // Sync to Firestore
     if (db) {
       try {
-        await db.collection('dispatches').doc(dispatchId).set(recordToSave, { merge: true });
+        await db.collection('dispatches').doc(dispatchId).set(sanitizeForFirestore(recordToSave), { merge: true });
       } catch (err) {
         console.warn('Firestore dispatch save error:', err);
       }
@@ -240,9 +254,28 @@ export const DispatchHub: React.FC<DispatchHubProps> = ({ currentUser, announce 
 
   const handleDispatchShipment = async (dispatch: DispatchRecord) => {
     const now = new Date().toISOString();
+    const currentUserName = currentUser?.fullName || currentUser?.name || currentUser?.email || 'Dispatch Officer';
+
+    // Synchronize package statuses to DISPATCHED
+    const updatedPackages = (dispatch.packages || []).map(pkg => ({
+      ...pkg,
+      status: 'DISPATCHED' as const,
+      dispatchStatus: 'dispatched' as const,
+      updatedAt: now
+    }));
+
+    const historyItem = {
+      action: 'DISPATCHED',
+      user: currentUserName,
+      timestamp: now,
+      notes: `Shipment dispatched via ${dispatch.courierCompany || dispatch.courier || 'courier'}`
+    };
+
     const updatedRecord: DispatchRecord = {
       ...dispatch,
       status: 'Dispatched',
+      packages: updatedPackages,
+      history: [...(dispatch.history || []), historyItem],
       updatedAt: now
     };
 
@@ -252,7 +285,7 @@ export const DispatchHub: React.FC<DispatchHubProps> = ({ currentUser, announce 
 
     if (db) {
       try {
-        await db.collection('dispatches').doc(dispatch.id).set({ status: 'Dispatched', updatedAt: now }, { merge: true });
+        await db.collection('dispatches').doc(dispatch.id).set(sanitizeForFirestore(updatedRecord), { merge: true });
       } catch (e) {
         console.warn('Firestore dispatch status error:', e);
       }
@@ -275,7 +308,7 @@ export const DispatchHub: React.FC<DispatchHubProps> = ({ currentUser, announce 
 
     if (db) {
       try {
-        await db.collection('dispatches').doc(updatedRecord.id).set(updatedRecord, { merge: true });
+        await db.collection('dispatches').doc(updatedRecord.id).set(sanitizeForFirestore(updatedRecord), { merge: true });
       } catch (e) {
         console.warn('Firestore receiving update error:', e);
       }
@@ -297,30 +330,44 @@ export const DispatchHub: React.FC<DispatchHubProps> = ({ currentUser, announce 
 
   return (
     <div className="space-y-6 font-sans">
-      {/* Dispatch List */}
-      <DispatchList
-        dispatches={dispatches}
-        onView={(item) => {
-          setSelectedDispatch(item);
-          setActiveView('details');
-        }}
-        onEdit={(item) => {
-          setSelectedDispatch(item);
-          setActiveView('wizard');
-        }}
-        onDelete={handleDeleteDispatch}
-        onDispatchShipment={handleDispatchShipment}
-        onReceive={(item) => {
-          setSelectedDispatch(item);
-          setActiveView('receiving');
-        }}
-        onNewDispatch={() => {
-          setSelectedDispatch(null);
-          setActiveView('wizard');
-        }}
-        canCreateOrEdit={canCreateOrEdit}
-        currentUser={currentUser}
-      />
+      {/* Archive View */}
+      {activeView === 'archive' ? (
+        <DispatchArchive
+          dispatches={dispatches}
+          onBack={() => setActiveView('list')}
+          onSelectDispatch={(item) => {
+            setSelectedDispatch(item);
+            setActiveView('details');
+          }}
+          currentUser={currentUser}
+        />
+      ) : (
+        /* Dispatch List */
+        <DispatchList
+          dispatches={dispatches}
+          onView={(item) => {
+            setSelectedDispatch(item);
+            setActiveView('details');
+          }}
+          onEdit={(item) => {
+            setSelectedDispatch(item);
+            setActiveView('wizard');
+          }}
+          onDelete={handleDeleteDispatch}
+          onDispatchShipment={handleDispatchShipment}
+          onReceive={(item) => {
+            setSelectedDispatch(item);
+            setActiveView('receiving');
+          }}
+          onNewDispatch={() => {
+            setSelectedDispatch(null);
+            setActiveView('wizard');
+          }}
+          onOpenArchive={() => setActiveView('archive')}
+          canCreateOrEdit={canCreateOrEdit}
+          currentUser={currentUser}
+        />
+      )}
 
       {/* Multi-Step Dispatch Wizard Modal */}
       {activeView === 'wizard' && (

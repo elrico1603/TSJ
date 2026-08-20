@@ -36,15 +36,84 @@ export interface AppUser {
   branchName?: string;
 }
 
+export const DEFAULT_ACCOUNTS: AppUser[] = [
+  { id: 'usr-admin-elrico', firstName: 'Elrico', lastName: 'Greyvenstein', name: 'Elrico Greyvenstein', email: 'elrico@tsjoinery.co.za', role: 'Administrator', department: 'Management', active: true, pin: SECURITY.SUPER_USER_PIN, isApproved: true, status: 'active', createdAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'usr-clocking-kiosk', firstName: 'Clocking', lastName: 'Terminal', name: 'Clocking Terminal', email: 'clocking@tsjoinery.co.za', role: 'Clocking Terminal', department: 'Clocking', active: true, pin: '0000', isApproved: true, status: 'active', createdAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'usr-hr-frans', firstName: 'Frans', lastName: 'User', name: 'Frans User', email: 'frans@tsjoinery.co.za', role: 'HR', department: 'Human Resources', active: true, pin: '1234', isApproved: true, status: 'active', createdAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'usr-manager-janah', firstName: 'Janah', lastName: 'User', name: 'Janah User', email: 'janah@tsjoinery.co.za', role: 'Manager', department: 'Management', active: true, pin: '1234', isApproved: true, status: 'active', createdAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'usr-admin-marietjie', firstName: 'Marietjie', lastName: 'User', name: 'Marietjie User', email: 'marietjie@tsjoinery.co.za', role: 'Administrator', department: 'Management', active: true, pin: '1234', isApproved: true, status: 'active', createdAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'usr-purchasing', firstName: 'Purchasing', lastName: 'User', name: 'Purchasing User', email: 'purchasing@tsjoinery.co.za', role: 'Purchasing', department: 'Procurement', active: true, pin: '1234', isApproved: true, status: 'active', createdAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'usr-employee', firstName: 'Employee', lastName: 'User', name: 'Employee User', email: 'employee@tsjoinery.co.za', role: 'Employee', department: 'Workshop', active: true, pin: '1234', isApproved: true, status: 'active', createdAt: '2026-01-01T00:00:00.000Z' }
+];
+
+let internalUsersPool: AppUser[] = [...DEFAULT_ACCOUNTS];
+
 export const authManager = {
+  setUsers(users: AppUser[]): AppUser[] {
+    const remoteMap = new Map(
+      (users || [])
+        .filter(u => u && u.email)
+        .map(u => [String(u.email).toLowerCase().trim(), u])
+    );
+
+    const mergedUsers = [
+      ...(users || []),
+      ...DEFAULT_ACCOUNTS.filter(
+        def => !remoteMap.has(String(def.email).toLowerCase().trim())
+      )
+    ];
+
+    internalUsersPool = mergedUsers;
+    return mergedUsers;
+  },
+
+  getUsers(): AppUser[] {
+    return internalUsersPool.length > 0 ? internalUsersPool : DEFAULT_ACCOUNTS;
+  },
+
   authenticateUser(activeUsers: AppUser[], emailOrUsername: string, pin: string): AppUser | null {
-    if (!emailOrUsername || pin === undefined || pin === null || pin === '') return null;
+    const emailStateLength = (emailOrUsername || '').length;
+    const emailStateNormalizedLength = (emailOrUsername || '').trim().length;
+    const pinStateLength = (pin || '').length;
+    const pinStateNormalizedLength = (pin || '').trim().length;
+
+    console.log('[AUTHENTICATE USER ARGUMENT TRACE]', {
+      emailStateLength,
+      emailStateNormalizedLength,
+      pinStateLength,
+      pinStateNormalizedLength,
+      identifier: emailOrUsername,
+      pinWasEmpty: !pin || String(pin).trim().length === 0,
+      timestamp: new Date().toISOString()
+    });
+
+    if (!emailOrUsername || pin === undefined || pin === null || pin === '') {
+      console.log('[AUTH TRACE] Early rejection:', {
+        reason: 'Missing identifier or PIN',
+        hasIdentifier: Boolean(emailOrUsername),
+        hasPin: pin !== undefined && pin !== null && pin !== ''
+      });
+      return null;
+    }
+
     const normalizedInput = String(emailOrUsername).trim().toLowerCase();
     const normalizedPin = String(pin).trim();
     const emailFormat = normalizedInput.includes('@') ? normalizedInput : `${normalizedInput}@tsjoinery.co.za`;
 
-    const matched = (activeUsers || []).find(user => {
-      if (!user || user.active === false) return false;
+    const sourceList = (activeUsers && activeUsers.length > 0) ? activeUsers : internalUsersPool;
+    const remoteMap = new Map(
+      sourceList
+        .filter(u => u && u.email)
+        .map(u => [String(u.email).toLowerCase().trim(), u])
+    );
+    const candidateList = [
+      ...sourceList,
+      ...DEFAULT_ACCOUNTS.filter(def => !remoteMap.has(String(def.email).toLowerCase().trim()))
+    ];
+
+    const checkCandidate = (user: AppUser, source: string) => {
+      if (!user) return { isMatch: false, reason: 'Null user object' };
+
       const userEmail = user.email ? String(user.email).trim().toLowerCase() : '';
       const userName = user.name ? String(user.name).trim().toLowerCase() : '';
       const userFirstName = user.firstName ? String(user.firstName).trim().toLowerCase() : (userName.split(' ')[0] || '');
@@ -57,13 +126,83 @@ export const authManager = {
         userName === normalizedInput ||
         userFirstName === normalizedInput;
 
+      if (!identifierMatches) {
+        return { isMatch: false, reason: 'Identifier mismatch' };
+      }
+
       const storedPin = user.pin !== undefined && user.pin !== null ? String(user.pin).trim() : '';
       const pinMatches = storedPin === normalizedPin;
 
-      return identifierMatches && pinMatches;
-    });
+      const candidateTrace = {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        active: user.active,
+        isApproved: user.isApproved,
+        hasPin: user.pin !== undefined && user.pin !== null,
+        pinType: typeof user.pin,
+        storedPinLength: storedPin.length,
+        suppliedPinLength: normalizedPin.length,
+        identifierMatch: true,
+        pinMatch: pinMatches,
+        source
+      };
 
-    return matched || null;
+      if (user.active === false) {
+        console.log('[AUTH TRACE] Candidate rejected:', { ...candidateTrace, rejectionReason: 'User account is deactivated (active === false)' });
+        return { isMatch: false, reason: 'Account deactivated' };
+      }
+
+      if (!pinMatches) {
+        console.log('[AUTH TRACE] Candidate rejected:', { ...candidateTrace, rejectionReason: `PIN mismatch (stored length: ${storedPin.length}, supplied length: ${normalizedPin.length})` });
+        return { isMatch: false, reason: 'PIN mismatch' };
+      }
+
+      console.log('[AUTH TRACE] Candidate MATCHED:', { ...candidateTrace, finalDecision: 'AUTHENTICATED' });
+      return { isMatch: true, user, candidateTrace };
+    };
+
+    // 1. Try candidate list first
+    let matchedUser: AppUser | null = null;
+    let identifierFound = false;
+
+    for (const user of candidateList) {
+      const result = checkCandidate(user, 'candidateList');
+      if (result.reason !== 'Identifier mismatch') {
+        identifierFound = true;
+      }
+      if (result.isMatch && result.user) {
+        matchedUser = result.user;
+        break;
+      }
+    }
+
+    // 2. Fallback to DEFAULT_ACCOUNTS directly if no match found yet
+    if (!matchedUser) {
+      for (const defUser of DEFAULT_ACCOUNTS) {
+        const result = checkCandidate(defUser, 'DEFAULT_ACCOUNTS');
+        if (result.reason !== 'Identifier mismatch') {
+          identifierFound = true;
+        }
+        if (result.isMatch && result.user) {
+          matchedUser = result.user;
+          break;
+        }
+      }
+    }
+
+    if (!matchedUser && !identifierFound) {
+      console.log('[AUTH TRACE] Rejection:', {
+        candidateFound: false,
+        rejectionReason: `No candidate matching identifier '${normalizedInput}' found in pool of ${candidateList.length} users`,
+        candidateCount: candidateList.length,
+        hasElricoInPool: candidateList.some(u => String(u.email).toLowerCase().includes('elrico')),
+        hasJanahInPool: candidateList.some(u => String(u.email).toLowerCase().includes('janah'))
+      });
+    }
+
+    return matchedUser;
   },
 
   async registerUserRequest(request: Omit<AppUser, 'status' | 'isApproved' | 'createdAt'>): Promise<AppUser> {

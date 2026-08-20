@@ -10,6 +10,7 @@ interface DispatchListProps {
   onDispatchShipment: (dispatch: DispatchRecord) => void;
   onReceive?: (dispatch: DispatchRecord) => void;
   onNewDispatch: () => void;
+  onOpenArchive?: () => void;
   canCreateOrEdit: boolean;
   currentUser?: any;
 }
@@ -21,6 +22,7 @@ export const DispatchList: React.FC<DispatchListProps> = ({
   onDelete,
   onDispatchShipment,
   onNewDispatch,
+  onOpenArchive,
   canCreateOrEdit
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -79,15 +81,26 @@ export const DispatchList: React.FC<DispatchListProps> = ({
           <p className="text-xs text-gray-400 mt-0.5">Manage outgoing joinery shipments, courier tracking, and Google Drive photos</p>
         </div>
 
-        {canCreateOrEdit && (
-          <button
-            onClick={onNewDispatch}
-            className="px-4 py-2.5 bg-[#ff8c00] hover:bg-[#e07b00] rounded-xl text-xs font-black uppercase tracking-wider text-white shadow-lg flex items-center justify-center space-x-2 transition-all shrink-0"
-          >
-            <Icon name="plus" size={16} />
-            <span>New Dispatch</span>
-          </button>
-        )}
+        <div className="flex items-center space-x-2">
+          {onOpenArchive && (
+            <button
+              onClick={onOpenArchive}
+              className="px-4 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-xs font-black uppercase tracking-wider text-white shadow flex items-center justify-center space-x-2 transition-all shrink-0"
+            >
+              <Icon name="archive" size={16} className="text-[#ff8c00]" />
+              <span>Archive</span>
+            </button>
+          )}
+          {canCreateOrEdit && (
+            <button
+              onClick={onNewDispatch}
+              className="px-4 py-2.5 bg-[#ff8c00] hover:bg-[#e07b00] rounded-xl text-xs font-black uppercase tracking-wider text-white shadow-lg flex items-center justify-center space-x-2 transition-all shrink-0"
+            >
+              <Icon name="plus" size={16} />
+              <span>New Dispatch</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Filter and Search Bar */}

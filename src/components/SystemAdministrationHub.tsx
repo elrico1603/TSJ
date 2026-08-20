@@ -51,7 +51,7 @@ export const SystemAdministrationHub: React.FC<SystemAdministrationHubProps> = (
   setVoiceEnabled,
   initialTab = 'company_settings'
 }) => {
-  const isAdmin = currentUser?.role === 'Admin';
+  const isAdmin = currentUser?.role === 'Admin' || currentUser?.role === 'Administrator';
   const isManager = ['Supervisor', 'HR', 'Stock Manager'].includes(currentUser?.role || '');
   const hasAccess = isAdmin || isManager;
 

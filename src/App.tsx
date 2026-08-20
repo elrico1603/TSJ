@@ -15,7 +15,8 @@ import {
   SECURITY,
   rolePermissions,
   authManager,
-  AppUser
+  AppUser,
+  DEFAULT_ACCOUNTS
 } from './auth';
 import { auditLogger } from './audit';
 import { Icon } from './components/Icon';
@@ -46,12 +47,14 @@ import { companyService } from './services/companyService';
 import { CompanySettingsHub } from './components/CompanySettingsHub';
 import { SystemAdministrationHub } from './components/SystemAdministrationHub';
 import { DispatchHub } from './components/DispatchHub';
+import { DispatchesView } from './components/DispatchesView';
 import { SplashScreen } from './components/SplashScreen';
 import { PWAInstallModal } from './components/PWAInstallModal';
 import { OfflineSyncStatus } from './components/OfflineSyncStatus';
 import { MobileDashboardSummary } from './components/MobileDashboardSummary';
 import { permissionService } from './services/permissionService';
 import { DedicatedKioskClockingTerminal } from './components/DedicatedKioskClockingTerminal';
+import { GeminiChatHub } from './components/chat/GeminiChatHub';
 
 const { SUPER_USER_PIN } = SECURITY;
 
@@ -79,24 +82,44 @@ export default function App() {
   const [actionSubMenu, setActionSubMenu] = useState<'menu' | 'clocking'>('menu');
 
   // Responsive Layout Mode, Header Search & Profile Modal State
-  const [layoutMode, setLayoutMode] = useState<'desktop' | 'tablet' | 'phone'>('desktop');
-  const [showUserProfileModal, setShowUserProfileModal] = useState<boolean>(false);
-  const [headerSearchQuery, setHeaderSearchQuery] = useState<string>('');
-
   const getAutoLayoutMode = (): 'desktop' | 'tablet' | 'phone' => {
+    if (typeof window === 'undefined') return 'phone';
     const width = window.innerWidth;
-    if (width < 640) return 'phone';
+    if (width < 768) return 'phone';
     if (width < 1024) return 'tablet';
     return 'desktop';
   };
 
+  // Responsive Layout Mode, Header Search & Profile Modal State (defaults to 'phone' on mobile screens)
+  const [layoutMode, setLayoutMode] = useState<'desktop' | 'tablet' | 'phone'>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        if (window.innerWidth < 768) return 'phone';
+        const saved = localStorage.getItem('ts_joinery_layout_mode') as 'desktop' | 'tablet' | 'phone' | null;
+        if (saved && ['desktop', 'tablet', 'phone'].includes(saved)) {
+          return saved;
+        }
+        return window.innerWidth < 1024 ? 'tablet' : 'desktop';
+      } catch (e) {
+        return 'phone';
+      }
+    }
+    return 'phone';
+  });
+  const [showUserProfileModal, setShowUserProfileModal] = useState<boolean>(false);
+  const [headerSearchQuery, setHeaderSearchQuery] = useState<string>('');
+
   useEffect(() => {
     try {
-      const saved = localStorage.getItem('ts_joinery_layout_mode') as 'desktop' | 'tablet' | 'phone' | null;
-      if (saved && ['desktop', 'tablet', 'phone'].includes(saved)) {
-        setLayoutMode(saved);
+      if (window.innerWidth < 768) {
+        setLayoutMode('phone');
       } else {
-        setLayoutMode(getAutoLayoutMode());
+        const saved = localStorage.getItem('ts_joinery_layout_mode') as 'desktop' | 'tablet' | 'phone' | null;
+        if (saved && ['desktop', 'tablet', 'phone'].includes(saved)) {
+          setLayoutMode(saved);
+        } else {
+          setLayoutMode(getAutoLayoutMode());
+        }
       }
     } catch (e) {
       setLayoutMode(getAutoLayoutMode());
@@ -104,9 +127,13 @@ export default function App() {
 
     const handleResize = () => {
       try {
-        const stored = localStorage.getItem('ts_joinery_layout_mode');
-        if (!stored) {
-          setLayoutMode(getAutoLayoutMode());
+        if (window.innerWidth < 768) {
+          setLayoutMode('phone');
+        } else {
+          const stored = localStorage.getItem('ts_joinery_layout_mode');
+          if (!stored) {
+            setLayoutMode(getAutoLayoutMode());
+          }
         }
       } catch (e) {
         setLayoutMode(getAutoLayoutMode());
@@ -240,9 +267,9 @@ export default function App() {
   const [authView, setAuthView] = useState<'login' | 'register'>('login'); 
   const [authForm, setAuthForm] = useState({ name: '', email: '', password: '', role: 'Artisan', pin: '' });
   const [loginError, setLoginError] = useState('');
-  const [isUsersLoading, setIsUsersLoading] = useState(true);
+  const [isUsersLoading, setIsUsersLoading] = useState(false);
   const [usersLoadError, setUsersLoadError] = useState<string | null>(null);
-  const [activeUsers, setActiveUsers] = useState<AppUser[]>([]);
+  const [activeUsers, setActiveUsers] = useState<AppUser[]>(DEFAULT_ACCOUNTS);
   const [userPermissions, setUserPermissions] = useState<Record<string, Record<string, boolean>>>({});
   const [pendingUsers, setPendingUsers] = useState<AppUser[]>([]);
   const [showAddUserModal, setShowAddUserModal] = useState(false);
@@ -644,6 +671,8 @@ export default function App() {
               if (!snap.empty) {
                 const users = snap.docs.map(d => {
                   const data = d.data();
+                  const defaultAcc = DEFAULT_ACCOUNTS.find(def => def.email.toLowerCase() === (data.email || '').toLowerCase());
+                  const fallbackPin = defaultAcc ? defaultAcc.pin : '1234';
                   return {
                     id: d.id,
                     ...data,
@@ -653,16 +682,17 @@ export default function App() {
                     role: data.role || 'Employee',
                     department: data.department || 'Operations',
                     active: data.active !== undefined ? data.active : true,
-                    pin: data.pin || '1234',
+                    pin: data.pin || fallbackPin,
                     isApproved: data.isApproved !== undefined ? data.isApproved : true
                   } as AppUser;
                 });
-                setActiveUsers(users);
-                console.log('[TSHUB USERS] snapshot received, user count:', users.length);
+                const mergedUsers = authManager.setUsers(users);
+                setActiveUsers(mergedUsers);
+                console.log('[TSHUB USERS] snapshot received, merged user count:', mergedUsers.length);
                 
                 // Load custom permission overrides from users directly
                 const perms: Record<string, Record<string, boolean>> = {};
-                users.forEach(u => {
+                mergedUsers.forEach(u => {
                   if ((u as any).permissions) {
                     perms[u.id] = (u as any).permissions;
                   }
@@ -670,15 +700,7 @@ export default function App() {
                 setUserPermissions(perms);
               } else {
                 // Seed default role users if Firestore user collection is empty
-                const defaultAccounts: AppUser[] = [
-                  { id: 'usr-admin-elrico', firstName: 'Elrico', lastName: 'Greyvenstein', name: 'Elrico Greyvenstein', email: 'elrico@tsjoinery.co.za', role: 'Administrator', department: 'Management', active: true, pin: '1234', isApproved: true, status: 'active', createdAt: new Date().toISOString() },
-                  { id: 'usr-clocking-kiosk', firstName: 'Clocking', lastName: 'Terminal', name: 'Clocking Terminal', email: 'clocking@tsjoinery.co.za', role: 'Clocking Terminal', department: 'Clocking', active: true, pin: '0000', isApproved: true, status: 'active', createdAt: new Date().toISOString() },
-                  { id: 'usr-hr-frans', firstName: 'Frans', lastName: 'User', name: 'Frans User', email: 'frans@tsjoinery.co.za', role: 'HR', department: 'Human Resources', active: true, pin: '1234', isApproved: true, status: 'active', createdAt: new Date().toISOString() },
-                  { id: 'usr-manager-janah', firstName: 'Janah', lastName: 'User', name: 'Janah User', email: 'janah@tsjoinery.co.za', role: 'Manager', department: 'Management', active: true, pin: '1234', isApproved: true, status: 'active', createdAt: new Date().toISOString() },
-                  { id: 'usr-admin-marietjie', firstName: 'Marietjie', lastName: 'User', name: 'Marietjie User', email: 'marietjie@tsjoinery.co.za', role: 'Administrator', department: 'Management', active: true, pin: '1234', isApproved: true, status: 'active', createdAt: new Date().toISOString() },
-                  { id: 'usr-purchasing', firstName: 'Purchasing', lastName: 'User', name: 'Purchasing User', email: 'purchasing@tsjoinery.co.za', role: 'Purchasing', department: 'Procurement', active: true, pin: '1234', isApproved: true, status: 'active', createdAt: new Date().toISOString() },
-                  { id: 'usr-employee', firstName: 'Employee', lastName: 'User', name: 'Employee User', email: 'employee@tsjoinery.co.za', role: 'Employee', department: 'Workshop', active: true, pin: '1234', isApproved: true, status: 'active', createdAt: new Date().toISOString() }
-                ];
+                const defaultAccounts = authManager.setUsers([]);
                 setActiveUsers(defaultAccounts);
                 console.log('[TSHUB USERS] snapshot empty, seeded default user count:', defaultAccounts.length);
                 try {
@@ -1266,25 +1288,59 @@ TS Joinery Kanban System`
     e.preventDefault();
     setLoginError('');
     if (authView === 'login') {
-      if (isUsersLoading) {
+      if (isUsersLoading && (!activeUsers || activeUsers.length === 0)) {
         setLoginError('Loading user accounts. Please wait...');
         announce('Loading user accounts. Please wait...');
         return;
       }
-      if (usersLoadError) {
+      if (usersLoadError && (!activeUsers || activeUsers.length === 0)) {
         setLoginError(usersLoadError);
         announce(usersLoadError);
         return;
       }
 
+      // Read directly from DOM submitted form (FormData) first to avoid stale state / autofill discrepancies
+      const formEl = e.currentTarget as HTMLFormElement;
+      let emailInput = authForm.email;
+      let pinInput = authForm.pin;
+
+      if (formEl && formEl instanceof HTMLFormElement) {
+        const formData = new FormData(formEl);
+        const emailFromForm = formData.get('email');
+        const pinFromForm = formData.get('pin');
+        if (typeof emailFromForm === 'string' && emailFromForm.trim().length > 0) {
+          emailInput = emailFromForm;
+        }
+        if (typeof pinFromForm === 'string' && pinFromForm.trim().length > 0) {
+          pinInput = pinFromForm;
+        }
+      }
+
+      const emailStateLength = (authForm.email || '').length;
+      const emailStateNormalizedLength = (authForm.email || '').trim().length;
+      const pinStateLength = (authForm.pin || '').length;
+      const pinStateNormalizedLength = (authForm.pin || '').trim().length;
+
+      console.log('[LOGIN SUBMIT TRACE]', {
+        emailStateLength,
+        emailStateNormalizedLength,
+        pinStateLength,
+        pinStateNormalizedLength,
+        submittedEmailLength: (emailInput || '').length,
+        submittedPinLength: (pinInput || '').trim().length,
+        identifier: emailInput,
+        pinWasEmpty: !pinInput || pinInput.trim().length === 0,
+        timestamp: new Date().toISOString()
+      });
+
       console.log('[TSHUB LOGIN]', {
-        identifierSupplied: authForm.email,
+        identifierSupplied: emailInput,
         activeUserCount: activeUsers ? activeUsers.length : 0,
         usersLoading: isUsersLoading
       });
 
       try {
-        const match = authManager.authenticateUser(activeUsers, authForm.email, authForm.pin);
+        const match = authManager.authenticateUser(activeUsers, emailInput, pinInput);
         if (match) {
           if (match.active === false) {
             setLoginError('Account is currently deactivated. Contact administration.');
@@ -1897,6 +1953,9 @@ TS Joinery Kanban System`
                 <input 
                   required 
                   type="text" 
+                  name="email"
+                  id="login_form_email"
+                  autoComplete="username"
                   className="w-full bg-black/60 border border-white/10 rounded-2xl p-4 text-sm text-white mt-1 outline-none focus:border-[#ff8c00] font-bold transition-all placeholder-gray-600" 
                   value={authForm.email} 
                   onChange={e => {
@@ -1912,6 +1971,9 @@ TS Joinery Kanban System`
                 <input 
                   required 
                   type="password" 
+                  name="pin"
+                  id="login_form_pin"
+                  autoComplete="off"
                   className="w-full bg-black/60 border border-white/10 rounded-2xl p-4 text-white mt-1 outline-none focus:border-[#ff8c00] text-center tracking-[0.5em] text-xl font-bold transition-all placeholder-gray-600" 
                   value={authForm.pin} 
                   onChange={e => {
@@ -1924,10 +1986,10 @@ TS Joinery Kanban System`
 
               <button 
                 type="submit" 
-                disabled={isUsersLoading}
+                disabled={isUsersLoading && (!activeUsers || activeUsers.length === 0)}
                 className="w-full py-4 bg-[#ff8c00] hover:bg-[#e07b00] disabled:opacity-60 disabled:cursor-not-allowed active:scale-[0.98] text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl transition-all min-h-[48px]"
               >
-                {isUsersLoading ? 'Loading Accounts...' : 'Authenticate Login'}
+                {isUsersLoading && (!activeUsers || activeUsers.length === 0) ? 'Loading Accounts...' : 'Authenticate Login'}
               </button>
             </form>
 
@@ -1936,7 +1998,7 @@ TS Joinery Kanban System`
               <p className="text-[10px] font-black uppercase text-gray-500 tracking-wider">Quick Accounts (Click to Fill):</p>
               <div className="flex flex-wrap gap-1.5 justify-center">
                 {[
-                  { label: 'Admin', email: 'elrico@tsjoinery.co.za', pin: '1234' },
+                  { label: 'Admin', email: 'elrico@tsjoinery.co.za', pin: SECURITY.SUPER_USER_PIN },
                   { label: 'Clocking Kiosk', email: 'clocking@tsjoinery.co.za', pin: '0000' },
                   { label: 'HR', email: 'frans@tsjoinery.co.za', pin: '1234' },
                   { label: 'Manager', email: 'janah@tsjoinery.co.za', pin: '1234' },
@@ -1949,6 +2011,10 @@ TS Joinery Kanban System`
                     onClick={() => {
                       setAuthForm({ ...authForm, email: acc.email, pin: acc.pin });
                       if (loginError) setLoginError('');
+                      const emailInputEl = document.getElementById('login_form_email') as HTMLInputElement;
+                      if (emailInputEl) emailInputEl.value = acc.email;
+                      const pinInputEl = document.getElementById('login_form_pin') as HTMLInputElement;
+                      if (pinInputEl) pinInputEl.value = acc.pin;
                     }}
                     className="px-2.5 py-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[10px] font-mono text-gray-300 hover:text-white transition-colors"
                   >
@@ -2114,6 +2180,20 @@ TS Joinery Kanban System`
                   </button>
                 );
               })()}
+              {/* Gemini AI Intelligence Quick Shortcut */}
+              <button 
+                onClick={() => { setAppMode('gemini_chat'); }} 
+                className={`p-2 lg:p-2.5 rounded-xl border transition-all flex items-center gap-1.5 ${
+                  appMode === 'gemini_chat'
+                    ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50 shadow-lg shadow-cyan-500/20'
+                    : 'bg-white/5 hover:bg-white/10 text-cyan-400 hover:text-cyan-300 border-white/10'
+                }`} 
+                title="TimberSmith Gemini AI Assistant"
+              >
+                <Icon name="bot" size={18} />
+                <span className="hidden sm:inline text-[10px] font-mono font-bold uppercase tracking-wider text-cyan-300">Gemini AI</span>
+              </button>
+
               {canManageUsers && (
                 <button 
                   onClick={() => { setAppMode('system_admin'); setView('dashboard'); }} 
@@ -2132,10 +2212,10 @@ TS Joinery Kanban System`
         </header>
 
         {/* Workspace lateral layouts */}
-        <div className="flex-1 flex overflow-hidden">
-          {/* Main lateral application routing sidebar (Hidden in Phone layout mode) */}
+        <div className="flex-1 flex overflow-hidden w-full relative">
+          {/* Main lateral application routing sidebar (Hidden by default on mobile screens < 768px) */}
           {layoutMode !== 'phone' && (
-            <aside className="w-72 xl:w-80 bg-black/60 backdrop-blur-2xl border-r border-white/10 p-4 xl:p-6 flex flex-col justify-between h-full overflow-y-auto custom-scrollbar shrink-0 select-none">
+            <aside className="hidden md:flex w-72 xl:w-80 bg-black/60 backdrop-blur-2xl border-r border-white/10 p-4 xl:p-6 flex-col justify-between h-full overflow-y-auto custom-scrollbar shrink-0 select-none">
               <div className="space-y-6 xl:space-y-8 font-sans flex-1 overflow-y-auto custom-scrollbar pr-1">
                 <div>
                   <p className="text-[10px] font-black uppercase text-gray-500 tracking-[0.2em] mb-3 xl:mb-4">Artisan Terminal</p>
@@ -2156,6 +2236,25 @@ TS Joinery Kanban System`
                       <span className="font-black uppercase text-xs tracking-wider font-sans">QR Scan Service</span>
                     </button>
                   </div>
+                </div>
+
+                {/* Gemini AI Hub Navigation Section */}
+                <div>
+                  <p className="text-[10px] font-black uppercase text-cyan-400 tracking-[0.2em] mb-3 xl:mb-4 flex items-center gap-1.5">
+                    <Icon name="sparkles" size={12} className="text-cyan-400" />
+                    <span>AI Intelligence</span>
+                  </p>
+                  <button 
+                    disabled={isLocked}
+                    onClick={() => { setAppMode('gemini_chat'); }} 
+                    className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${isLocked ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'gemini_chat' ? 'bg-gradient-to-r from-cyan-950/50 to-blue-950/50 border border-cyan-500/40 text-cyan-300 shadow-lg shadow-cyan-500/10' : 'hover:bg-white/5 text-gray-300 hover:text-white'}`}
+                  >
+                    <Icon name="bot" size={18} className="text-cyan-400 shrink-0" />
+                    <div className="flex items-center justify-between w-full">
+                      <span className="font-black uppercase text-xs tracking-wider">Gemini AI Hub</span>
+                      <span className="px-2 py-0.5 bg-cyan-500/20 border border-cyan-500/30 text-cyan-300 text-[9px] font-mono font-black rounded-full">3.7</span>
+                    </div>
+                  </button>
                 </div>
 
                 {/* Hide Management Hub completely for Stock Manager role */}
@@ -2291,7 +2390,7 @@ TS Joinery Kanban System`
           )}
 
           {/* Workspace view wrapper */}
-          <div className={`flex-1 overflow-y-auto custom-scrollbar relative ${layoutMode === 'phone' ? 'pb-24' : ''}`}>
+          <div className={`w-full flex-1 overflow-y-auto custom-scrollbar relative ${layoutMode === 'phone' ? 'pb-24' : ''}`}>
             {appMode === 'template_designer' && !showCardEditor ? (
               <KanbanDesigner 
                 currentUser={currentUser}
@@ -2301,7 +2400,7 @@ TS Joinery Kanban System`
                 }}
               />
             ) : (
-              <div className="p-12 pb-36 font-sans">
+              <div className="w-full max-w-full p-3 sm:p-6 md:p-8 lg:p-12 pb-28 md:pb-36 font-sans">
                 {(appMode === 'system_admin' || appMode === 'company_settings') && (
                   <SystemAdministrationHub 
                     currentUser={currentUser}
@@ -2335,11 +2434,22 @@ TS Joinery Kanban System`
                   />
                 )}
 
-                {appMode === 'dispatch' && (
-                  <DispatchHub 
-                    currentUser={currentUser}
-                    announce={announce}
-                  />
+                {(appMode === 'dispatch' || appMode === 'dispatches' || appMode === 'mobile_dispatches') && (
+                  <div className="animate-in fade-in duration-300">
+                    <DispatchesView 
+                      currentUser={currentUser}
+                      announce={announce}
+                      onBackToDashboard={() => { setAppMode('employee'); setView('dashboard'); }}
+                    />
+                  </div>
+                )}
+
+                {appMode === 'gemini_chat' && (
+                  <div className="animate-in fade-in duration-300">
+                    <GeminiChatHub 
+                      currentUser={currentUser}
+                    />
+                  </div>
                 )}
 
                 {appMode === 'employee' && view === 'dashboard' && (
@@ -2524,11 +2634,11 @@ TS Joinery Kanban System`
                         )}
                         <div>
                           <label className="text-[10px] font-black uppercase text-gray-500 ml-3">Email Address or Username</label>
-                          <input required type="text" className="w-full bg-black/40 border border-white/5 rounded-2xl p-4 text-white mt-1.5 outline-none focus:border-blue-500 font-bold" value={authForm.email} onChange={e => { setAuthForm({...authForm, email: e.target.value}); if (loginError) setLoginError(''); }} placeholder="elrico or manager@tsjoinery.co.za" />
+                          <input required type="text" name="email" autoComplete="username" className="w-full bg-black/40 border border-white/5 rounded-2xl p-4 text-white mt-1.5 outline-none focus:border-blue-500 font-bold" value={authForm.email} onChange={e => { setAuthForm({...authForm, email: e.target.value}); if (loginError) setLoginError(''); }} placeholder="elrico or manager@tsjoinery.co.za" />
                         </div>
                         <div>
                           <label className="text-[10px] font-black uppercase text-gray-500 ml-3">Security Key / PIN</label>
-                          <input required type="password" className="w-full bg-black/40 border border-white/5 rounded-2xl p-4 text-white mt-1.5 outline-none focus:border-blue-500 text-center tracking-[0.5em] text-xl font-bold" value={authForm.pin} onChange={e => { setAuthForm({...authForm, pin: e.target.value}); if (loginError) setLoginError(''); }} placeholder="••••" />
+                          <input required type="password" name="pin" autoComplete="off" className="w-full bg-black/40 border border-white/5 rounded-2xl p-4 text-white mt-1.5 outline-none focus:border-blue-500 text-center tracking-[0.5em] text-xl font-bold" value={authForm.pin} onChange={e => { setAuthForm({...authForm, pin: e.target.value}); if (loginError) setLoginError(''); }} placeholder="••••" />
                         </div>
 
                         {authView === 'register' && (
@@ -2545,8 +2655,8 @@ TS Joinery Kanban System`
                           </div>
                         )}
 
-                        <button type="submit" disabled={isUsersLoading} className="w-full py-5 bg-[#ff8c00] hover:bg-[#e07b00] disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl transition-colors mt-8">
-                          {isUsersLoading ? 'Loading Accounts...' : (authView === 'login' ? 'Authenticate Login' : 'Request Registry Access')}
+                        <button type="submit" disabled={isUsersLoading && (!activeUsers || activeUsers.length === 0)} className="w-full py-5 bg-[#ff8c00] hover:bg-[#e07b00] disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl transition-colors mt-8">
+                          {isUsersLoading && (!activeUsers || activeUsers.length === 0) ? 'Loading Accounts...' : (authView === 'login' ? 'Authenticate Login' : 'Request Registry Access')}
                         </button>
                       </form>
 
@@ -2576,6 +2686,7 @@ TS Joinery Kanban System`
                   'leave',
                   'mobile',
                   'qr_scan_service',
+                  'gemini_chat',
                   'home'
                 ].includes(appMode) &&
                 !(appMode === 'employee' && view === 'dashboard') &&
@@ -2991,7 +3102,7 @@ TS Joinery Kanban System`
             lastClockResult === 'Break' ? 'border-purple-500 shadow-purple-500/30' : 
             'border-red-500 shadow-red-500/30'
           }`}>
-            <PhotoAvatar emp={selectedEmployee} size="100%" className="border-0 rounded-full shadow-none w-full h-full" />
+            <PhotoAvatar emp={selectedEmployee} size={256} className="border-0 rounded-full shadow-none w-full h-full" />
           </div>
           <h2 className="text-6xl md:text-8xl font-black italic uppercase tracking-tighter text-white mb-4 leading-none">
             {lastClockResult === 'HR_Request' ? 'PAYMENT REGISTERED' : lastClockResult === 'Archive' ? 'PROFILE ARCHIVED' : 'IDENTITY VERIFIED'}
@@ -4071,21 +4182,28 @@ TS Joinery Kanban System`
                   label: 'Clocking',
                   icon: 'clock',
                   onClick: () => { setAppMode('employee'); setView('dashboard'); },
-                  isActive: appMode === 'employee'
+                  isActive: appMode === 'employee' && !showUserProfileModal
                 },
                 {
                   id: 'qr_scan',
                   label: 'QR Scan',
                   icon: 'scan',
                   onClick: () => { setAppMode('qr_scan_service'); setView('dashboard'); },
-                  isActive: appMode === 'qr_scan_service'
+                  isActive: appMode === 'qr_scan_service' && !showUserProfileModal
+                },
+                {
+                  id: 'dispatches',
+                  label: 'Dispatches',
+                  icon: 'truck',
+                  onClick: () => { setAppMode('dispatch'); setView('dashboard'); },
+                  isActive: (appMode === 'dispatch' || appMode === 'dispatches' || appMode === 'mobile_dispatches') && !showUserProfileModal
                 },
                 {
                   id: 'orders',
                   label: 'Orders',
                   icon: 'banknote',
                   onClick: () => { setAppMode('orders'); setView('dashboard'); },
-                  isActive: appMode === 'orders'
+                  isActive: appMode === 'orders' && !showUserProfileModal
                 },
                 {
                   id: 'profile',
@@ -4103,14 +4221,21 @@ TS Joinery Kanban System`
                   label: 'Clocking',
                   icon: 'clock',
                   onClick: () => { setAppMode('employee'); setView('dashboard'); },
-                  isActive: appMode === 'employee'
+                  isActive: appMode === 'employee' && !showUserProfileModal
                 },
                 {
                   id: 'qr_scan',
                   label: 'QR Scan',
                   icon: 'scan',
                   onClick: () => { setAppMode('qr_scan_service'); setView('dashboard'); },
-                  isActive: appMode === 'qr_scan_service'
+                  isActive: appMode === 'qr_scan_service' && !showUserProfileModal
+                },
+                {
+                  id: 'dispatches',
+                  label: 'Dispatches',
+                  icon: 'truck',
+                  onClick: () => { setAppMode('dispatch'); setView('dashboard'); },
+                  isActive: (appMode === 'dispatch' || appMode === 'dispatches' || appMode === 'mobile_dispatches') && !showUserProfileModal
                 },
                 {
                   id: 'profile',

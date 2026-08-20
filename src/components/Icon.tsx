@@ -71,7 +71,10 @@ import {
   Flag,
   Download,
   Copy,
-  Share2
+  Share2,
+  Bot,
+  Sparkles,
+  MessageSquare
 } from 'lucide-react';
 
 interface IconProps {
@@ -154,7 +157,10 @@ export const Icon: React.FC<IconProps> = ({ name, size = 24, className = "", str
     'flag': Flag,
     'download': Download,
     'copy': Copy,
-    'share': Share2
+    'share': Share2,
+    'bot': Bot,
+    'sparkles': Sparkles,
+    'message-square': MessageSquare
   };
 
   const LucideIcon = iconMap[name] || HelpCircle;

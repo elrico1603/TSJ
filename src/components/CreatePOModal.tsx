@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { PurchaseOrder, PurchaseOrderItem, Supplier, ProductMaster, StockRequestItem } from '../types';
+import { PurchaseOrder, PurchaseOrderItem, Supplier, ProductMaster, StockRequest, StockRequestItem } from '../types';
 import { productMasterService } from '../services/productMasterService';
 import { stockRequestService } from '../services/stockRequestService';
 import { purchaseOrderService } from '../services/purchaseOrderService';
@@ -22,7 +22,7 @@ export const CreatePOModal: React.FC<CreatePOModalProps> = ({
 }) => {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [products, setProducts] = useState<ProductMaster[]>([]);
-  const [stockRequests, setStockRequests] = useState<StockRequestItem[]>([]);
+  const [stockRequests, setStockRequests] = useState<StockRequest[]>([]);
 
   // Form Fields
   const [selectedSupplierId, setSelectedSupplierId] = useState('');
@@ -75,12 +75,12 @@ export const CreatePOModal: React.FC<CreatePOModalProps> = ({
 
       const newItem: PurchaseOrderItem = {
         id: `poi-${Date.now()}`,
-        productId: matchedProd?.id || preselectedStockRequest.productId || `PRD-${preselectedStockRequest.kanbanId}`,
-        productName: preselectedStockRequest.productDescription,
+        productId: matchedProd?.id || preselectedStockRequest.productId || `PRD-${preselectedStockRequest.kanbanId || '000'}`,
+        productName: preselectedStockRequest.productDescription || preselectedStockRequest.productName || 'Product',
         internalProductCode: matchedProd?.internalProductCode || preselectedStockRequest.kanbanId || 'PRD-000',
         supplierPartNumber: matchedProd?.supplierPartNumber || preselectedStockRequest.supplierPartNumber || '',
         unit: matchedProd?.unit || 'ea',
-        orderQuantity: Number(preselectedStockRequest.orderQuantity) || 1,
+        orderQuantity: Number(preselectedStockRequest.orderQuantity || preselectedStockRequest.quantity) || 1,
         receivedQuantity: 0,
         unitPrice: 0,
         totalPrice: 0,
@@ -257,7 +257,7 @@ export const CreatePOModal: React.FC<CreatePOModalProps> = ({
                 <option value="">-- None / Direct Order --</option>
                 {stockRequests.map(req => (
                   <option key={req.id} value={req.id}>
-                    {req.requestNumber} - {req.productDescription} ({req.branchName})
+                    {req.requestNumber} - {(req as any).productDescription || req.items?.[0]?.productName || 'Stock Request'} ({req.branchName})
                   </option>
                 ))}
               </select>
