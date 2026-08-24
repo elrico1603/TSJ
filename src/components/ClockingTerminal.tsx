@@ -9,20 +9,35 @@ interface ClockingTerminalProps {
   setView: (view: string) => void;
 }
 
-export const PhotoAvatar: React.FC<{ emp: { name?: string; photo?: string | null }; size?: number; className?: string }> = ({ emp, size = 120, className = "" }) => (
-  <div 
-    className={`rounded-[2.5rem] flex items-center justify-center overflow-hidden bg-[#111] border-2 border-white/10 shadow-inner shrink-0 ${className}`} 
-    style={{ width: size, height: size }}
-  >
-    {emp && emp.photo ? (
-      <img src={emp.photo} className="w-full h-full object-cover" alt="Avatar" loading="lazy" />
-    ) : (
-      <span className="font-black text-white/20 uppercase select-none" style={{ fontSize: size * 0.4 }}>
-        {emp && emp.name ? emp.name[0] : 'U'}
-      </span>
-    )}
-  </div>
-);
+export const getValidPhotoUrl = (emp: any): string | null => {
+  if (!emp) return null;
+  const rawUrl = emp.photo || emp.photoUrl || emp.photoURL || emp.avatarUrl || emp.avatar || emp.picture;
+  if (typeof rawUrl === 'string' && rawUrl.trim().length > 0) {
+    const trimmed = rawUrl.trim();
+    if (trimmed !== '' && !trimmed.startsWith('data:,') && !trimmed.includes('default-avatar')) {
+      return trimmed;
+    }
+  }
+  return null;
+};
+
+export const PhotoAvatar: React.FC<{ emp: { name?: string; photo?: string | null; [key: string]: any }; size?: number; className?: string }> = ({ emp, size = 120, className = "" }) => {
+  const photoUrl = getValidPhotoUrl(emp);
+  return (
+    <div 
+      className={`rounded-[2.5rem] flex items-center justify-center overflow-hidden bg-[#111] border-2 border-white/10 shadow-inner shrink-0 ${className}`} 
+      style={{ width: size, height: size }}
+    >
+      {photoUrl ? (
+        <img src={photoUrl} className="w-full h-full object-cover" alt={emp?.name || 'Artisan'} loading="lazy" />
+      ) : (
+        <span className="font-black text-white/20 uppercase select-none" style={{ fontSize: size * 0.4 }}>
+          {emp && emp.name ? emp.name[0] : 'U'}
+        </span>
+      )}
+    </div>
+  );
+};
 
 export const ClockingTerminal: React.FC<ClockingTerminalProps> = ({
   employees,
@@ -31,7 +46,39 @@ export const ClockingTerminal: React.FC<ClockingTerminalProps> = ({
   setView
 }) => {
   const [lastClockEvent, setLastClockEvent] = useState<{ empName: string; action: string; time: string } | null>(null);
-  const activeWorkers = employees.filter(emp => !emp.isArchived);
+
+  // 1. Strictly process live employees from props without any mock/default datasets
+  const rawList = Array.isArray(employees) ? employees : [];
+
+  // 2. Strict Filter:
+  // - Must not be archived or inactive
+  // - MUST have a valid non-empty photo URL (completely excludes placeholder letter initials)
+  // - Deduplicated by unique ID
+  const seenIds = new Set<string>();
+  const activeWorkers: Employee[] = [];
+
+  for (const emp of rawList) {
+    if (!emp) continue;
+
+    // Exclude archived and inactive profiles
+    const isArchived = emp.isArchived === true || emp.status === 'Archived';
+    const isInactive = (emp as any).status === 'inactive' || (emp as any).status === 'Inactive' || (emp as any).active === false;
+    if (isArchived || isInactive) continue;
+
+    // Strict photo requirement: Must have a valid, non-empty photo URL
+    const photoUrl = getValidPhotoUrl(emp);
+    if (!photoUrl) continue;
+
+    // Deduplicate by unique employee ID / identifier
+    const uniqueKey = emp.id || (emp as any).employeeId || emp.employeeNumber || `${emp.name}_${emp.surname}`;
+    if (!uniqueKey || seenIds.has(uniqueKey)) continue;
+
+    seenIds.add(uniqueKey);
+    activeWorkers.push({
+      ...emp,
+      photo: photoUrl
+    });
+  }
 
   const handleCardClick = (emp: Employee) => {
     // Mobile haptic feedback
@@ -169,7 +216,7 @@ export const ClockingTerminal: React.FC<ClockingTerminalProps> = ({
 
         {activeWorkers.length === 0 && (
           <div className="col-span-full text-center py-24 bg-black/30 rounded-[3rem] border border-white/5 font-sans">
-            <p className="text-gray-400 uppercase font-black text-sm tracking-wider">No active artisans found.</p>
+            <p className="text-gray-400 uppercase font-black text-sm tracking-wider">No active artisans with photos found.</p>
           </div>
         )}
       </div>

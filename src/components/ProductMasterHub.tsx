@@ -97,18 +97,46 @@ export const ProductMasterHub: React.FC<ProductMasterHubProps> = ({
 
     if (!matchesStatus || !matchesCat || !matchesSupp) return false;
 
-    if (!searchQuery.trim()) return true;
+    if (!searchQuery || searchQuery.trim() === '') return true;
 
     const q = searchQuery.toLowerCase().trim();
+    if (!q || q === '') return true;
+
+    const prodName = (p?.productName || (p as any)?.name || '').toLowerCase();
+    const prodDesc = ((p as any)?.description || (p as any)?.productDescription || '').toLowerCase();
+    const kanbanId = (
+      p?.internalProductCode || 
+      p?.id || 
+      (p as any)?.kanbanId || 
+      (p as any)?.code || 
+      (p as any)?.internalProductNumber || 
+      ''
+    ).toLowerCase();
+    const suppName = (p?.supplier || (p as any)?.supplierName || (p as any)?.supName || '').toLowerCase();
+    const suppNo = (
+      p?.supplierPartNumber || 
+      (p as any)?.supplierNo || 
+      (p as any)?.supplierNumber || 
+      (p as any)?.supNo || 
+      (p as any)?.supplierCode || 
+      (p as any)?.supplierItemCode || 
+      ''
+    ).toLowerCase();
+    const barcode = (p?.barcode || '').toLowerCase();
+    const qrCode = (p?.qrCode || '').toLowerCase();
+    const location = (p?.location || '').toLowerCase();
+    const category = (p?.category || '').toLowerCase();
+
     return (
-      p.productName.toLowerCase().includes(q) ||
-      p.internalProductCode.toLowerCase().includes(q) ||
-      p.supplier.toLowerCase().includes(q) ||
-      p.supplierPartNumber.toLowerCase().includes(q) ||
-      (p.barcode && p.barcode.toLowerCase().includes(q)) ||
-      (p.qrCode && p.qrCode.toLowerCase().includes(q)) ||
-      p.location.toLowerCase().includes(q) ||
-      p.category.toLowerCase().includes(q)
+      prodName.includes(q) ||
+      prodDesc.includes(q) ||
+      kanbanId.includes(q) ||
+      suppName.includes(q) ||
+      suppNo.includes(q) ||
+      barcode.includes(q) ||
+      qrCode.includes(q) ||
+      location.includes(q) ||
+      category.includes(q)
     );
   });
 

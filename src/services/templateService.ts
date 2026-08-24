@@ -121,16 +121,69 @@ function getTemplatesCollection() {
  * Supports legacy format conversion gracefully.
  */
 export async function getTemplates(): Promise<KanbanTemplateV2[]> {
-  const snapshot = await getTemplatesCollection().orderBy('templateName').get();
-  return snapshot.docs.map(doc => {
-    const data = doc.data();
-    // Step 3: Log Firestore document before mapping
-    console.log("Firestore Document Raw", { id: doc.id, ...data });
-    const mapped = mapToTemplateV2(doc.id, data);
-    // Step 4: Log mapped template
-    console.log("Mapped Template", mapped);
-    return mapped;
-  });
+  try {
+    const snapshot = await getTemplatesCollection().orderBy('templateName').get();
+    if (!snapshot.empty) {
+      return snapshot.docs.map(doc => {
+        const data = doc.data();
+        return mapToTemplateV2(doc.id, data);
+      });
+    }
+
+    // Default starter templates if Firestore is empty
+    const defaultStandard = createDefaultTemplateBlueprint('STANDARD PRODUCTION TEMPLATE', 'standard');
+    defaultStandard.id = 'default-standard-01';
+    defaultStandard.productName = 'CORNER BASE CARCASS';
+    defaultStandard.kanbanId = 'KAN-000001';
+    defaultStandard.supplier = 'GELMAR';
+    defaultStandard.supplierPartNumber = '4161';
+    defaultStandard.orderQuantity = '50';
+    defaultStandard.deliveryTime = '3 Days';
+    defaultStandard.location = 'A-01-B-01';
+    defaultStandard.locationColour = 'GREEN';
+    defaultStandard.binQuantity = '100';
+
+    const defaultSingle = createDefaultTemplateBlueprint('SINGLE CARD BLUEPRINT', 'single_card');
+    defaultSingle.id = 'default-single-02';
+    defaultSingle.productName = 'HINGE CONCEALED 110 DEG';
+    defaultSingle.kanbanId = 'KAN-000002';
+    defaultSingle.supplier = 'BLUM';
+    defaultSingle.supplierPartNumber = '71B3550';
+    defaultSingle.orderQuantity = '200';
+    defaultSingle.deliveryTime = '2 Days';
+    defaultSingle.location = 'B-02-C-04';
+    defaultSingle.locationColour = 'BLUE';
+    defaultSingle.binQuantity = '250';
+
+    const defaultWh = createDefaultTemplateBlueprint('WAREHOUSE IDENTIFICATION BLUEPRINT', 'warehouse_only');
+    defaultWh.id = 'default-wh-03';
+    defaultWh.productName = 'DRAWER RUNNER SOFT CLOSE 500MM';
+    defaultWh.kanbanId = 'KAN-000003';
+    defaultWh.supplier = 'GRASS';
+    defaultWh.supplierPartNumber = 'F100055';
+    defaultWh.orderQuantity = '80';
+    defaultWh.deliveryTime = '4 Days';
+    defaultWh.location = 'C-01-A-02';
+    defaultWh.locationColour = 'ORANGE';
+    defaultWh.binQuantity = '100';
+
+    return [defaultStandard, defaultSingle, defaultWh];
+  } catch (err) {
+    console.error("Error fetching templates:", err);
+    const defaultStandard = createDefaultTemplateBlueprint('STANDARD PRODUCTION TEMPLATE', 'standard');
+    defaultStandard.id = 'default-standard-01';
+    defaultStandard.productName = 'CORNER BASE CARCASS';
+    defaultStandard.kanbanId = 'KAN-000001';
+    defaultStandard.supplier = 'GELMAR';
+    defaultStandard.supplierPartNumber = '4161';
+    defaultStandard.orderQuantity = '50';
+    defaultStandard.deliveryTime = '3 Days';
+    defaultStandard.location = 'A-01-B-01';
+    defaultStandard.locationColour = 'GREEN';
+    defaultStandard.binQuantity = '100';
+
+    return [defaultStandard];
+  }
 }
 
 /**

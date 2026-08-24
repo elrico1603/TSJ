@@ -70,6 +70,14 @@ export const DEFAULT_BRANCHES: Branch[] = [
 
 export const DEFAULT_VERSIONS: ApplicationVersion[] = [
   {
+    id: 'VER-1022',
+    version: '1.0.0.022',
+    releaseDate: '2026-08-24',
+    description: 'Disciplinary Warnings Module & Customizable Role-Based PPE Gear Checklist with Printable A4 Compliance Sign-off Certificate, Storage integration, and central version synchronization.',
+    createdAt: '2026-08-24T10:45:00.000Z',
+    updatedAt: '2026-08-24T10:45:00.000Z'
+  },
+  {
     id: 'VER-1021',
     version: '1.0.0.021',
     releaseDate: '2026-08-05',

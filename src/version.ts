@@ -16,16 +16,16 @@ export interface AppVersionInfo {
 export const APP_VERSION: AppVersionInfo = {
   major: 1,
   minor: 0,
-  patch: 5,
-  buildNumber: 1,
-  buildDate: '2026-08-17',
+  patch: 0,
+  buildNumber: 22,
+  buildDate: '2026-08-24',
   appName: 'TS Kanban Management Hub',
   environment: (typeof import.meta !== 'undefined' && (import.meta as any).env?.MODE) || 'production'
 };
 
 /**
  * Returns formatted version string in vMajor.Minor.Patch.Build format.
- * Example: v1.0.0.001
+ * Example: v1.0.0.022
  */
 export const getVersionString = (info: AppVersionInfo = APP_VERSION): string => {
   const paddedBuild = String(info.buildNumber).padStart(3, '0');
@@ -34,7 +34,7 @@ export const getVersionString = (info: AppVersionInfo = APP_VERSION): string => 
 
 /**
  * Returns Git tag string.
- * Example: v1.0.0.001
+ * Example: v1.0.0.022
  */
 export const getGitTag = (info: AppVersionInfo = APP_VERSION): string => {
   return getVersionString(info);
@@ -47,8 +47,8 @@ export const getBuildInfoString = (info: AppVersionInfo = APP_VERSION): string =
   return `${getVersionString(info)} (${info.buildDate})`;
 };
 
-export const BUILD_ID = 'BUILD-2026-08-13-FORMDATA-FIX-V3';
-export const BUILD_TIMESTAMP = '2026-08-13T04:25:00Z';
+export const BUILD_ID = 'BUILD-2026-08-24-PPE-DISCIPLINARY-V22';
+export const BUILD_TIMESTAMP = '2026-08-24T10:45:00Z';
 export const HAS_FORM_DATA_FIX = true;
 
 export const CURRENT_VERSION_STRING = getVersionString();

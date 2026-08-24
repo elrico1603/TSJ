@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { CompanySettingsHub } from './CompanySettingsHub';
 import { RolePermissionHub } from './RolePermissionHub';
 import { Icon } from './Icon';
 import { AppUser } from '../auth';
+import { RoleDefinition } from '../types';
+import { permissionService } from '../services/permissionService';
 import { APP_VERSION, CURRENT_VERSION_STRING, getGitTag } from '../version';
 
 export type SystemAdminTab = 
@@ -12,7 +14,6 @@ export type SystemAdminTab =
   | 'audit_log'
   | 'notification_settings'
   | 'email_templates'
-  | 'system_settings'
   | 'feature_flags'
   | 'version_history';
 
@@ -56,8 +57,6 @@ export const SystemAdministrationHub: React.FC<SystemAdministrationHubProps> = (
   const hasAccess = isAdmin || isManager;
 
   const [activeTab, setActiveTab] = useState<SystemAdminTab>(initialTab);
-  const [editingPins, setEditingPins] = useState<Record<string, string>>({});
-  const [showPasswordId, setShowPasswordId] = useState<string | null>(null);
 
   // Mock states for administrative tools
   const [featureFlags, setFeatureFlags] = useState([
@@ -78,12 +77,11 @@ export const SystemAdministrationHub: React.FC<SystemAdministrationHubProps> = (
 
   const navItems: { id: SystemAdminTab; label: string; icon: string; badge?: string }[] = [
     { id: 'company_settings', label: 'Company Settings', icon: 'building' },
-    { id: 'roles_permissions', label: 'Roles & Permissions', icon: 'shield' },
+    { id: 'roles_permissions', label: 'Roles & User Access', icon: 'shield', badge: pendingUsers.length > 0 ? `${pendingUsers.length}` : undefined },
     { id: 'system_health', label: 'System Health', icon: 'activity' },
     { id: 'audit_log', label: 'Audit Log', icon: 'file-text' },
     { id: 'notification_settings', label: 'Notification Settings', icon: 'bell' },
     { id: 'email_templates', label: 'Email Templates', icon: 'mail' },
-    { id: 'system_settings', label: 'System Settings', icon: 'sliders', badge: pendingUsers.length > 0 ? `${pendingUsers.length}` : undefined },
     { id: 'feature_flags', label: 'Feature Flags', icon: 'flag' },
     { id: 'version_history', label: 'Version History', icon: 'history' },
   ];
@@ -175,11 +173,16 @@ export const SystemAdministrationHub: React.FC<SystemAdministrationHubProps> = (
           />
         )}
 
-        {/* Tab 2: Roles & Permissions */}
+        {/* Tab 2: Roles & Permissions & User Accounts */}
         {activeTab === 'roles_permissions' && (
           <RolePermissionHub
             currentUser={currentUser}
             activeUsers={activeUsers}
+            pendingUsers={pendingUsers}
+            approvePendingUser={approvePendingUser}
+            rejectPendingUser={rejectPendingUser}
+            deleteActiveUser={deleteActiveUser}
+            updateActiveUser={updateActiveUser}
             announce={announce}
           />
         )}
@@ -390,208 +393,7 @@ export const SystemAdministrationHub: React.FC<SystemAdministrationHubProps> = (
           </div>
         )}
 
-        {/* Tab 7: System Settings & User Permissions */}
-        {activeTab === 'system_settings' && (
-          <div className="space-y-6">
-            <div className="flex items-center justify-between border-b border-white/10 pb-4">
-              <div>
-                <h2 className="text-xl font-black uppercase tracking-tight text-white">System Settings & Active Users</h2>
-                <p className="text-xs text-gray-400 mt-0.5">Manage system access roles, user authentication PINs, and custom permission overrides</p>
-              </div>
-              {setShowAddUserModal && (
-                <button
-                  onClick={() => setShowAddUserModal(true)}
-                  className="px-4 py-2 bg-[#ff8c00] hover:bg-[#e07b00] rounded-xl text-xs font-black uppercase text-white shadow-lg flex items-center gap-2"
-                >
-                  <Icon name="user-plus" size={16} />
-                  Add New User
-                </button>
-              )}
-            </div>
-
-            {/* PENDING APPROVALS SECTION */}
-            {pendingUsers.length > 0 && approvePendingUser && rejectPendingUser && (
-              <div className="bg-orange-500/5 border-2 border-orange-500/20 rounded-3xl p-6 space-y-4">
-                <h3 className="text-base font-black uppercase text-orange-400 tracking-wider flex items-center gap-2">
-                  <Icon name="user-plus" size={18} />
-                  Pending User Registrations ({pendingUsers.length})
-                </h3>
-                <div className="space-y-3">
-                  {pendingUsers.map(user => (
-                    <div key={user.id} className="bg-black/60 border border-orange-500/20 p-4 rounded-2xl flex items-center justify-between">
-                      <div>
-                        <p className="font-black text-white text-sm">{user.name}</p>
-                        <p className="text-xs text-gray-400 font-mono">{user.email} • Requested Role: <strong className="text-orange-400">{user.role}</strong></p>
-                      </div>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={async () => {
-                            await approvePendingUser(user);
-                            announce?.(`${user.name} approved as ${user.role}`);
-                          }}
-                          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-xl text-xs font-black uppercase text-white shadow"
-                        >
-                          Approve
-                        </button>
-                        <button 
-                          onClick={async () => {
-                            await rejectPendingUser(user);
-                            announce?.(`${user.name} registration rejected.`);
-                          }}
-                          className="px-4 py-2 bg-red-600/20 hover:bg-red-600/30 border border-red-500/30 rounded-xl text-xs font-black uppercase text-red-400"
-                        >
-                          Reject
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* ACTIVE USERS SECTION */}
-            <div className="space-y-4">
-              <h3 className="text-sm font-black uppercase tracking-wider text-gray-300">Active System Accounts ({activeUsers.length})</h3>
-              <div className="space-y-4">
-                {activeUsers.map(user => {
-                  const isMasterAccount = user.id === '1' || user.id === 'local-admin';
-                  const currentPinVal = editingPins[user.id] !== undefined ? editingPins[user.id] : (user.pin || '');
-                  const isPinChanged = currentPinVal !== (user.pin || '');
-                  const isPasswordVisible = showPasswordId === user.id;
-
-                  return (
-                    <div key={user.id} className="bg-black/40 border border-white/10 p-6 rounded-3xl space-y-4">
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <p className="font-black text-white text-base">{user.name}</p>
-                            {isMasterAccount && (
-                              <span className="text-[9px] bg-red-500/20 text-red-400 border border-red-500/30 font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
-                                Master Account
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-xs text-gray-400 font-mono mt-0.5">{user.email}</p>
-                        </div>
-                        {deleteActiveUser && (
-                          <button 
-                            onClick={async () => {
-                              if (isMasterAccount) return alert("Master account cannot be removed.");
-                              if (confirm(`Are you sure you want to delete ${user.name}?`)) {
-                                await deleteActiveUser(user);
-                                announce?.(`${user.name} removed.`);
-                              }
-                            }}
-                            className="p-2 text-gray-500 hover:text-red-400 transition-colors disabled:opacity-30"
-                            disabled={isMasterAccount}
-                          >
-                            <Icon name="trash-2" size={18} />
-                          </button>
-                        )}
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-white/5 p-4 rounded-2xl border border-white/5">
-                        <div>
-                          <label className="text-[10px] uppercase text-gray-400 font-black tracking-widest block mb-1.5">System Access Role</label>
-                          <select 
-                            value={user.role} 
-                            disabled={isMasterAccount || !updateActiveUser}
-                            onChange={async (e) => {
-                              if (updateActiveUser) await updateActiveUser(user.id, { role: e.target.value });
-                            }}
-                            className="bg-black border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none w-full disabled:opacity-50"
-                          >
-                            {['Administrator', 'Manager', 'HR', 'Purchasing', 'Clocking Terminal', 'Stock Manager', 'Supervisor', 'Artisan', 'Employee'].map(r => (
-                              <option key={r} value={r}>{r}</option>
-                            ))}
-                          </select>
-                        </div>
-
-                        <div>
-                          <label className="text-[10px] uppercase text-gray-400 font-black tracking-widest block mb-1.5">Password / PIN Code</label>
-                          <div className="flex gap-2">
-                            <div className="relative flex-1">
-                              <input 
-                                type={isPasswordVisible ? 'text' : 'password'}
-                                value={currentPinVal}
-                                onChange={(e) => setEditingPins(prev => ({ ...prev, [user.id]: e.target.value }))}
-                                placeholder="Enter PIN"
-                                className="bg-black border border-white/10 rounded-xl pl-3 pr-8 py-2 text-xs text-white outline-none w-full font-mono"
-                              />
-                              <button 
-                                type="button"
-                                onClick={() => setShowPasswordId(prev => prev === user.id ? null : user.id)}
-                                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
-                              >
-                                <Icon name={isPasswordVisible ? 'eye-off' : 'eye'} size={14} />
-                              </button>
-                            </div>
-                            {isPinChanged && updateActiveUser && (
-                              <button
-                                type="button"
-                                onClick={async () => {
-                                  if (!currentPinVal.trim()) return alert("PIN cannot be empty.");
-                                  await updateActiveUser(user.id, { pin: currentPinVal.trim() });
-                                  setEditingPins(prev => { const c = { ...prev }; delete c[user.id]; return c; });
-                                }}
-                                className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-xl text-xs font-black uppercase text-white shrink-0"
-                              >
-                                Save
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Custom Permission Overrides */}
-                      {setUserPermissions && (
-                        <div>
-                          <label className="text-[10px] uppercase text-gray-400 font-black tracking-widest block mb-2">Custom Access Overrides</label>
-                          <div className="grid grid-cols-2 md:grid-cols-3 gap-2 pt-2 border-t border-white/5">
-                            {[
-                              { key: 'canManageUsers', label: 'Manage Users' },
-                              { key: 'canApproveUsers', label: 'Approve Users' },
-                              { key: 'canManageOrders', label: 'Manage Orders' },
-                              { key: 'canViewAnalytics', label: 'View Analytics' },
-                              { key: 'canAccessMobile', label: 'Access Mobile' },
-                              { key: 'canClock', label: 'Clock In/Out' }
-                            ].map(perm => (
-                              <label key={perm.key} className="flex items-center space-x-2 cursor-pointer hover:bg-white/5 p-2 rounded-xl transition-colors">
-                                <input 
-                                  type="checkbox" 
-                                  checked={userPermissions[user.id]?.[perm.key] ?? true}
-                                  onChange={async (e) => {
-                                    const updatedPerms = {
-                                      ...(userPermissions[user.id] || {
-                                        canManageUsers: true,
-                                        canApproveUsers: true,
-                                        canManageOrders: true,
-                                        canViewAnalytics: true,
-                                        canAccessMobile: true,
-                                        canClock: true
-                                      }),
-                                      [perm.key]: e.target.checked
-                                    };
-                                    setUserPermissions(prev => ({ ...prev, [user.id]: updatedPerms }));
-                                    if (updateActiveUser) await updateActiveUser(user.id, { permissions: updatedPerms });
-                                  }}
-                                  className="w-4 h-4 rounded border-white/20 bg-black/40 accent-[#ff8c00] cursor-pointer"
-                                />
-                                <span className="text-xs font-bold text-gray-300">{perm.label}</span>
-                              </label>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Tab 8: Feature Flags */}
+        {/* Tab 7: Feature Flags */}
         {activeTab === 'feature_flags' && (
           <div className="space-y-6">
             <div className="border-b border-white/10 pb-4">

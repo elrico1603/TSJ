@@ -79,8 +79,48 @@ export const KanbanTemplateManagerPage: React.FC<KanbanTemplateManagerPageProps>
   const [editorTab, setEditorTab] = useState('dimensions');
   const [activeField, setActiveField] = useState<string | null>(null);
   const [sampleImage, setSampleImage] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const selectedTemplateId = editingTemplate?.id || null;
+
+  const filteredTemplates = kanbanTemplates.filter(t => {
+    if (!searchQuery || searchQuery.trim() === '') return true;
+    const q = searchQuery.toLowerCase().trim();
+    if (!q || q === '') return true;
+
+    const name = (t?.templateName || (t as any)?.productName || (t as any)?.name || '').toLowerCase();
+    const desc = ((t as any)?.description || (t as any)?.productDescription || '').toLowerCase();
+    const kanbanId = (
+      (t as any)?.kanbanId || 
+      (t as any)?.code || 
+      t?.id || 
+      (t as any)?.internalProductNumber || 
+      (t as any)?.internalProductCode || 
+      ''
+    ).toLowerCase();
+    const supplierName = ((t as any)?.supplier || (t as any)?.supplierName || (t as any)?.supName || '').toLowerCase();
+    const supplierNo = (
+      (t as any)?.supplierPartNumber ||
+      (t as any)?.supplierNo ||
+      (t as any)?.supplierNumber ||
+      (t as any)?.supNo ||
+      (t as any)?.supplierCode ||
+      (t as any)?.supplierItemCode ||
+      ''
+    ).toLowerCase();
+    const category = ((t as any)?.category || '').toLowerCase();
+    const location = ((t as any)?.location || '').toLowerCase();
+
+    return (
+      name.includes(q) ||
+      desc.includes(q) ||
+      kanbanId.includes(q) ||
+      supplierName.includes(q) ||
+      supplierNo.includes(q) ||
+      category.includes(q) ||
+      location.includes(q)
+    );
+  });
 
   const handlePrintPreview = () => {
     if (!editingTemplate) return;
@@ -195,18 +235,36 @@ export const KanbanTemplateManagerPage: React.FC<KanbanTemplateManagerPageProps>
               </button>
             </div>
           </div>
+          <div className="relative">
+            <Icon name="search" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search by Kanban ID, supplier #, name..."
+              className="w-full pl-9 pr-7 py-2 bg-neutral-900 border border-white/10 rounded-xl text-xs text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 font-medium"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white text-xs"
+              >
+                <Icon name="x" size={12} />
+              </button>
+            )}
+          </div>
           <div className="flex-1 overflow-y-auto custom-scrollbar -mr-3 pr-3 space-y-3">
-            {kanbanTemplates.map(t => (
+            {filteredTemplates.map(t => (
               <div key={t.id} onClick={() => handleSelectTemplate(t)} className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${selectedTemplateId === t.id ? 'bg-purple-500/10 border-purple-500' : 'bg-black/40 border-transparent hover:border-white/20'}`}>
                 <h3 className="font-bold text-white mb-1 font-sans">{t.templateName}</h3>
                 <p className="text-xs text-gray-400 font-sans">{t.dimensions.width}mm x {t.dimensions.height}mm</p>
               </div>
             ))}
-            {kanbanTemplates.length === 0 && (
+            {filteredTemplates.length === 0 && (
               <div className="text-center py-20 font-sans">
                 <Icon name="layout-template" size={48} className="text-gray-700 mx-auto" />
-                <p className="text-xs text-gray-600 font-bold uppercase mt-4">No templates found.</p>
-                <p className="text-xs text-gray-600 mt-1">Create a new template to begin.</p>
+                <p className="text-xs text-gray-600 font-bold uppercase mt-4">No templates match query.</p>
+                <p className="text-xs text-gray-600 mt-1">Try adjusting your search criteria.</p>
               </div>
             )}
           </div>

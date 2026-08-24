@@ -32,6 +32,9 @@ export interface AdvanceRecord {
   paidInFull: boolean;
   photo?: string;
   timestamp: string;
+  status?: 'Pending Approval' | 'Approved' | 'Rejected' | 'Paid';
+  approvedBy?: string;
+  approvedDate?: string;
 }
 
 export interface HistoryRecord {
@@ -72,7 +75,11 @@ export interface Employee {
   clockPin?: string;
   isClockedIn?: boolean;
   employeeNumber?: string;
+  warnings?: import('./types/employee').DisciplinaryWarning[];
+  ppeIssuances?: import('./types/employee').PPEIssuanceRecord[];
 }
+
+export * from './types/employee';
 
 export interface KanbanFieldDefinition {
   id: string;
@@ -585,6 +592,7 @@ export type PermissionCategory =
   | 'EMPLOYEE MANAGEMENT'
   | 'KANBAN'
   | 'PROCUREMENT'
+  | 'DISPATCH & RECEIVING'
   | 'REPORTS'
   | 'SETTINGS';
 

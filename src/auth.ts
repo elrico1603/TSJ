@@ -25,6 +25,7 @@ export interface AppUser {
   name: string;
   email: string;
   role: string;
+  roleId?: string;
   department?: string;
   active?: boolean;
   pin: string;

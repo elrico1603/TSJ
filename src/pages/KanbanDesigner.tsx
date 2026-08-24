@@ -71,6 +71,45 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
     }
   };
 
+  const handleLinkProductMaster = (pm: ProductMaster) => {
+    setSelectedProductMaster(pm);
+    const newMasterInfo: Partial<MasterInfoType> = {
+      internalProductNumber: pm.internalProductCode || pm.id || customMasterInfo.internalProductNumber,
+      productName: pm.productName || '',
+      supplier: pm.supplier || (pm as any).supplierName || '',
+      supplierPartNumber: pm.supplierPartNumber || (pm as any).supplierNo || (pm as any).supplierNumber || '',
+      orderQuantity: pm.orderQuantity ? String(pm.orderQuantity) : (customMasterInfo.orderQuantity || ''),
+      deliveryTime: pm.deliveryTime || (customMasterInfo.deliveryTime || ''),
+      location: pm.location || (customMasterInfo.location || ''),
+      locationColour: pm.locationColour || (customMasterInfo.locationColour || ''),
+      binQuantity: (pm as any).binQuantity ? String((pm as any).binQuantity) : (customMasterInfo.binQuantity || ''),
+      productImage: pm.productImage || (pm as any).imageUrl || customMasterInfo.productImage || ''
+    };
+
+    setCustomMasterInfo(prev => ({ ...prev, ...newMasterInfo }));
+    if (activeTemplate) {
+      setActiveTemplate(prev => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          kanbanId: newMasterInfo.internalProductNumber || prev.kanbanId,
+          productName: newMasterInfo.productName || prev.productName,
+          supplier: newMasterInfo.supplier || prev.supplier,
+          supplierPartNumber: newMasterInfo.supplierPartNumber || prev.supplierPartNumber,
+          orderQuantity: newMasterInfo.orderQuantity || prev.orderQuantity,
+          deliveryTime: newMasterInfo.deliveryTime || prev.deliveryTime,
+          location: newMasterInfo.location || prev.location,
+          locationColour: newMasterInfo.locationColour || prev.locationColour,
+          binQuantity: newMasterInfo.binQuantity || prev.binQuantity,
+          productImage: newMasterInfo.productImage || prev.productImage,
+          imageUrl: newMasterInfo.productImage || prev.imageUrl
+        };
+      });
+    }
+    setIsProductPickerOpen(false);
+    announce(`Linked "${pm.productName}" from Product Master.`);
+  };
+
   const handleImageUpload = (file: File) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -277,6 +316,8 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
 
   // Search and Recent Searches states
   const [searchTerm, setSearchTerm] = useState('');
+  const [productSearchTerm, setProductSearchTerm] = useState('');
+  const [isProductPickerOpen, setIsProductPickerOpen] = useState(false);
   const [recentSearches, setRecentSearches] = useState<{ templateId: string; templateName: string; query: string }[]>(() => {
     try {
       const stored = localStorage.getItem('recent_searches');
@@ -285,6 +326,52 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
       return [];
     }
   });
+
+  // Expanded Product Master filtering predicate
+  const filteredProductMasters = useMemo(() => {
+    if (!productSearchTerm || productSearchTerm.trim() === '') return productMasters;
+    const q = productSearchTerm.toLowerCase().trim();
+    if (!q || q === '') return productMasters;
+
+    return productMasters.filter(p => {
+      const name = (p?.productName || (p as any)?.name || (p as any)?.templateName || '').toLowerCase();
+      const desc = ((p as any)?.description || (p as any)?.productDescription || '').toLowerCase();
+      const kanbanId = (
+        p?.internalProductCode || 
+        p?.id || 
+        (p as any)?.kanbanId || 
+        (p as any)?.code || 
+        (p as any)?.internalProductNumber || 
+        ''
+      ).toLowerCase();
+      const supplierName = (p?.supplier || (p as any)?.supplierName || (p as any)?.supName || '').toLowerCase();
+      const supplierNo = (
+        p?.supplierPartNumber || 
+        (p as any)?.supplierNo || 
+        (p as any)?.supplierNumber || 
+        (p as any)?.supNo || 
+        (p as any)?.supplierCode || 
+        (p as any)?.supplierItemCode || 
+        ''
+      ).toLowerCase();
+      const barcode = (p?.barcode || '').toLowerCase();
+      const qrCode = (p?.qrCode || '').toLowerCase();
+      const category = (p?.category || '').toLowerCase();
+      const location = (p?.location || '').toLowerCase();
+
+      return (
+        name.includes(q) || 
+        desc.includes(q) || 
+        kanbanId.includes(q) || 
+        supplierName.includes(q) || 
+        supplierNo.includes(q) || 
+        barcode.includes(q) || 
+        qrCode.includes(q) || 
+        category.includes(q) || 
+        location.includes(q)
+      );
+    });
+  }, [productMasters, productSearchTerm]);
 
   // Collapsed folders state (default is expanded, so we store collapsed status)
   const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
@@ -411,11 +498,20 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
         getTemplates(),
         productMasterService.getProducts()
       ]);
-      setTemplates(fetchedTemplates);
+      setTemplates(fetchedTemplates || []);
       setProductMasters(fetchedProducts || []);
+
+      if (fetchedTemplates && fetchedTemplates.length > 0 && !activeTemplate) {
+        handleSelectTemplate(fetchedTemplates[0]);
+      } else if ((!fetchedTemplates || fetchedTemplates.length === 0) && !activeTemplate) {
+        handleCreateTemplate('standard');
+      }
     } catch (error) {
       console.error('Failed to load designer context:', error);
       announce('Failed to load database. Loading default layout context.');
+      if (!activeTemplate) {
+        handleCreateTemplate('standard');
+      }
     } finally {
       setLoading(false);
     }
@@ -762,7 +858,7 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
             </span>
             <input
               type="text"
-              placeholder="Search product, supplier, part #, tag..."
+              placeholder="Search by Kanban ID, supplier #, name, part #..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-9 pr-8 py-2 bg-neutral-900/90 border border-white/10 rounded-xl text-xs text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all font-medium"
@@ -831,15 +927,48 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
             </div>
           ) : (
             (() => {
-              const query = searchTerm.toLowerCase().trim();
+              const query = (searchTerm || '').toLowerCase().trim();
               const filtered = templates.filter(t => {
-                if (!query) return true;
-                const nameMatch = (t.templateName || '').toLowerCase().includes(query);
-                const prodMatch = (t.productName || '').toLowerCase().includes(query);
-                const suppMatch = (t.supplier || '').toLowerCase().includes(query);
-                const partMatch = (t.supplierPartNumber || '').toLowerCase().includes(query);
-                const catMatch = (t.category || '').toLowerCase().includes(query);
-                return nameMatch || prodMatch || suppMatch || partMatch || catMatch;
+                if (!searchTerm || searchTerm.trim() === '') return true;
+                if (!query || query === '') return true;
+
+                const name = (t?.productName || (t as any)?.name || t?.templateName || '').toLowerCase();
+                const desc = (t?.description || (t as any)?.productDescription || '').toLowerCase();
+                const kanbanId = (
+                  t?.kanbanId || 
+                  (t as any)?.code || 
+                  t?.id || 
+                  (t as any)?.internalProductNumber || 
+                  (t as any)?.internalProductCode || 
+                  ''
+                ).toLowerCase();
+                const supplierNo = (
+                  t?.supplierPartNumber || 
+                  (t as any)?.supplierNo || 
+                  (t as any)?.supplierNumber || 
+                  (t as any)?.supNo || 
+                  (t as any)?.supplierCode || 
+                  (t as any)?.supplierItemCode || 
+                  ''
+                ).toLowerCase();
+                const supplierName = (
+                  t?.supplier || 
+                  (t as any)?.supplierName || 
+                  (t as any)?.supName || 
+                  ''
+                ).toLowerCase();
+                const category = (t?.category || '').toLowerCase();
+                const location = (t?.location || (t as any)?.locationColour || '').toLowerCase();
+
+                return (
+                  name.includes(query) ||
+                  desc.includes(query) ||
+                  kanbanId.includes(query) ||
+                  supplierNo.includes(query) ||
+                  supplierName.includes(query) ||
+                  category.includes(query) ||
+                  location.includes(query)
+                );
               });
 
               if (filtered.length === 0) {
@@ -968,21 +1097,39 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
               {/* Product Master Preview Selector */}
               <div className="flex items-center gap-2">
                 <span className="text-[10px] font-black uppercase tracking-wider text-gray-500">Product Master:</span>
-                <select
-                  value={selectedProductMaster?.id || ''}
-                  onChange={(e) => {
-                    const matched = productMasters.find(p => p.id === e.target.value);
-                    setSelectedProductMaster(matched || null);
-                  }}
-                  className="bg-black text-white border border-white/15 px-3 py-1.5 rounded-xl text-xs font-bold uppercase focus:outline-none"
-                >
-                  <option value="">Default (Internal Placeholders)</option>
-                  {productMasters.map(pm => (
-                    <option key={pm.id} value={pm.id}>
-                      {pm.internalProductCode || pm.id} - {pm.productName}
-                    </option>
-                  ))}
-                </select>
+                <div className="flex items-center gap-1.5">
+                  <select
+                    value={selectedProductMaster?.id || ''}
+                    onChange={(e) => {
+                      const matched = productMasters.find(p => p.id === e.target.value);
+                      setSelectedProductMaster(matched || null);
+                    }}
+                    className="bg-black text-white border border-white/15 px-3 py-1.5 rounded-xl text-xs font-bold uppercase focus:outline-none max-w-[200px] truncate"
+                  >
+                    <option value="">Default (Internal Placeholders)</option>
+                    {productMasters.map(pm => {
+                      const code = pm.internalProductCode || pm.id || '';
+                      const suppNo = pm.supplierPartNumber ? ` [${pm.supplierPartNumber}]` : '';
+                      return (
+                        <option key={pm.id} value={pm.id}>
+                          {code} - {pm.productName}{suppNo}
+                        </option>
+                      );
+                    })}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProductSearchTerm('');
+                      setIsProductPickerOpen(true);
+                    }}
+                    className="px-2 py-1.5 bg-purple-600/20 hover:bg-purple-600/40 text-purple-300 border border-purple-500/30 rounded-xl text-xs font-bold flex items-center gap-1 transition-all"
+                    title="Search Product Master by Kanban ID, supplier #, name..."
+                  >
+                    <Icon name="search" size={13} />
+                    <span className="hidden sm:inline text-[10px] uppercase font-bold">Find</span>
+                  </button>
+                </div>
               </div>
 
               {/* Action Toolbar */}
@@ -1322,7 +1469,20 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
 
                   {/* Core Product Specifications */}
                   <div className="space-y-3 bg-black/20 p-4 border border-white/5 rounded-2xl">
-                    <span className="text-[9px] font-black uppercase tracking-wider text-gray-400 block">Product Identification</span>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[9px] font-black uppercase tracking-wider text-gray-400 block">Product Identification</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProductSearchTerm('');
+                          setIsProductPickerOpen(true);
+                        }}
+                        className="text-[9px] font-black text-purple-400 hover:text-purple-300 flex items-center gap-1 uppercase bg-purple-500/10 hover:bg-purple-500/20 px-2 py-1 rounded-lg border border-purple-500/20 transition-all cursor-pointer"
+                        title="Search and import specifications directly from Product Master"
+                      >
+                        <Icon name="search" size={10} /> Link Product Master
+                      </button>
+                    </div>
 
                     <div className="space-y-1.5">
                       <label className="text-[9px] text-gray-500 font-extrabold uppercase">Kanban Number</label>
@@ -2691,6 +2851,144 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
                 className="flex-1 py-2 bg-red-600 hover:bg-red-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-colors"
               >
                 Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 9. MODAL: SEARCH & LINK PRODUCT MASTER DIALOG */}
+      {isProductPickerOpen && (
+        <div className="fixed inset-0 z-[1650] bg-black/85 flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-[#121212] border border-white/15 rounded-3xl max-w-2xl w-full shadow-2xl relative flex flex-col max-h-[85vh] font-sans overflow-hidden">
+            
+            {/* Header */}
+            <div className="p-5 border-b border-white/10 flex items-center justify-between bg-black/40">
+              <div className="space-y-0.5">
+                <h3 className="text-sm font-black uppercase tracking-widest text-purple-400 flex items-center gap-2">
+                  <Icon name="package" size={16} /> Search & Link Product Master
+                </h3>
+                <p className="text-[10px] text-gray-400 uppercase tracking-wide">
+                  Select a product to auto-populate specifications & barcode parameters
+                </p>
+              </div>
+              <button
+                onClick={() => setIsProductPickerOpen(false)}
+                className="p-2 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white rounded-full transition-colors"
+              >
+                <Icon name="x" size={16} />
+              </button>
+            </div>
+
+            {/* Search Input Bar */}
+            <div className="p-4 border-b border-white/5 bg-neutral-950/80">
+              <div className="relative">
+                <Icon name="search" size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  autoFocus
+                  value={productSearchTerm}
+                  onChange={(e) => setProductSearchTerm(e.target.value)}
+                  placeholder="Search by Kanban ID, supplier #, name, part #, category..."
+                  className="w-full bg-black border border-white/15 rounded-xl pl-10 pr-10 py-2.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 font-medium"
+                />
+                {productSearchTerm && (
+                  <button
+                    onClick={() => setProductSearchTerm('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white text-xs font-bold"
+                  >
+                    <Icon name="x" size={14} />
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center justify-between mt-2 px-1 text-[9px] text-gray-500 uppercase font-mono">
+                <span>Showing {filteredProductMasters.length} of {productMasters.length} Products</span>
+                <span>Matches: Name, Kanban ID, Supplier #, Supplier Name, Category, Location</span>
+              </div>
+            </div>
+
+            {/* Product List */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar">
+              {filteredProductMasters.length === 0 ? (
+                <div className="text-center py-16 text-gray-500">
+                  <Icon name="search" size={32} className="mx-auto opacity-30 mb-2" />
+                  <p className="text-xs font-black uppercase text-gray-400">No matching products found</p>
+                  <p className="text-[10px] text-gray-600 mt-1">Try searching with a different Kanban ID, supplier number, or name.</p>
+                </div>
+              ) : (
+                filteredProductMasters.map(pm => {
+                  const kanbanId = pm.internalProductCode || pm.id || '';
+                  const supplierNo = pm.supplierPartNumber || (pm as any).supplierNo || '';
+                  const isSelected = selectedProductMaster?.id === pm.id;
+
+                  return (
+                    <div
+                      key={pm.id}
+                      onClick={() => handleLinkProductMaster(pm)}
+                      className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-4 group ${
+                        isSelected 
+                          ? 'bg-purple-600/15 border-purple-500/50' 
+                          : 'bg-black/40 border-white/5 hover:border-purple-500/40 hover:bg-white/5'
+                      }`}
+                    >
+                      <div className="space-y-1.5 min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h4 className="text-xs font-black text-white uppercase group-hover:text-purple-300 transition-colors truncate">
+                            {pm.productName}
+                          </h4>
+                          {kanbanId && (
+                            <span className="px-2 py-0.5 bg-purple-500/20 text-purple-300 border border-purple-500/30 rounded-md text-[9px] font-mono font-bold uppercase">
+                              ID: {kanbanId}
+                            </span>
+                          )}
+                          {supplierNo && (
+                            <span className="px-2 py-0.5 bg-blue-500/20 text-blue-300 border border-blue-500/30 rounded-md text-[9px] font-mono font-bold uppercase">
+                              SUP #: {supplierNo}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-3 text-[10px] text-gray-400 flex-wrap">
+                          {pm.supplier && (
+                            <span className="flex items-center gap-1 font-semibold text-gray-300">
+                              <Icon name="truck" size={11} className="text-gray-500" /> {pm.supplier}
+                            </span>
+                          )}
+                          {pm.category && (
+                            <span className="flex items-center gap-1">
+                              <Icon name="tag" size={11} className="text-gray-500" /> {pm.category}
+                            </span>
+                          )}
+                          {pm.location && (
+                            <span className="flex items-center gap-1">
+                              <Icon name="map-pin" size={11} className="text-gray-500" /> {pm.location}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="shrink-0 flex items-center gap-2">
+                        <button
+                          type="button"
+                          className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-[10px] font-black uppercase tracking-wider transition-all shadow-md shadow-purple-600/20 flex items-center gap-1"
+                        >
+                          <Icon name="check" size={12} /> Select
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="p-3.5 border-t border-white/10 bg-black/40 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setIsProductPickerOpen(false)}
+                className="px-4 py-2 bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white rounded-xl text-xs font-black uppercase tracking-wider transition-colors"
+              >
+                Close
               </button>
             </div>
           </div>

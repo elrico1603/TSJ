@@ -8,6 +8,7 @@ import {
   OrderItem,
   GlobalNotification,
   LeaveRequest,
+  AdvanceRecord,
   getLocalDateString
 } from './types';
 import {
@@ -61,7 +62,8 @@ const { SUPER_USER_PIN } = SECURITY;
 export default function App() {
   // System Version State
   const [systemVersion, setSystemVersion] = useState<string>(() => {
-    return companyService.getLocalVersions()[0]?.version || CURRENT_VERSION_STRING;
+    const ver = companyService.getLocalVersions()[0]?.version || CURRENT_VERSION_STRING;
+    return ver.startsWith('v') ? ver : `v${ver}`;
   });
   // ==========================================
   // STATE MANAGEMENT
@@ -180,7 +182,8 @@ export default function App() {
     });
     const unsubVersions = companyService.subscribeVersions(vList => {
       if (vList.length > 0) {
-        setSystemVersion(vList[0].version);
+        const ver = vList[0].version;
+        setSystemVersion(ver.startsWith('v') ? ver : `v${ver}`);
       }
     });
     return () => {
@@ -612,16 +615,13 @@ export default function App() {
           setIsCloudLive(true);
           // Listen to artisans list
           db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('data').collection('employees')
-            .onSnapshot(async (snap) => {
+            .onSnapshot((snap) => {
               if (!isMounted) return;
               if (snap.empty) {
-                // auto hydration seed files
-                const initialTeam: any[] = [];
-                for (const worker of initialTeam) {
-                  await db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('data').collection('employees').add(worker);
-                }
+                setEmployees([]);
               } else {
-                setEmployees(snap.docs.map(d => ({ id: d.id, ...d.data() } as Employee)));
+                const loaded = snap.docs.map(d => ({ id: d.id, ...d.data() } as Employee));
+                setEmployees(loaded);
               }
               dismissSplash();
             }, err => {
@@ -1424,8 +1424,8 @@ TS Joinery Kanban System`
       const totalAmount = baseAmount + fee;
       const dateStr = getLocalDateString(new Date());
       
-      const advance = { 
-        id: Date.now().toString() + Math.floor(Math.random()*1000).toString(),
+      const advance: AdvanceRecord = { 
+        id: `ADV-${Date.now()}-${Math.floor(Math.random()*1000).toString()}`,
         date: dateStr, 
         amount: totalAmount, 
         baseAmount, 
@@ -1434,6 +1434,7 @@ TS Joinery Kanban System`
         method: borrowMethod || 'Cash', 
         months: parseInt(borrowMonths) || 1,
         paidInFull: false,
+        status: 'Pending Approval',
         photo: capturedBorrowPhoto || '', 
         timestamp: new Date().toISOString() 
       };
@@ -1441,10 +1442,28 @@ TS Joinery Kanban System`
       const newAdvances = [...(emp.advances || [])]; 
       newAdvances.push(advance);
       
-      announce(`Your request has been sent through to HR.`);
-      auditLogger.log('HR_ADVANCE_REQUEST', emp.name || 'Unknown Artisan', `Advance R${totalAmount} via ${borrowMethod}`);
+      announce("Request submitted successfully and sent through for approval.");
+      auditLogger.log('HR_ADVANCE_REQUEST', emp.name || 'Unknown Artisan', `Borrow request R${totalAmount} via ${borrowMethod} submitted (Pending Approval)`);
       
       setEmployees(prev => prev.map(e => e.id === emp.id ? { ...emp, advances: newAdvances } : e));
+      
+      // Dispatch in-app notification to admins (Frans and Jana)
+      try {
+        await notificationService.addNotification({
+          category: 'employee_request',
+          categoryLabel: 'Employee Requests',
+          title: `Borrow Money Request: ${emp.name} ${emp.surname}`,
+          description: `${emp.name} ${emp.surname} submitted a borrow request of R ${totalAmount.toLocaleString()} (${borrowMethod || 'Cash'}, ${borrowMonths} mo) for "${borrowReason || 'Cash Advance'}". Status: Pending Approval.`,
+          date: dateStr,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          priority: 'high',
+          relatedPage: 'admin',
+          targetEmails: ['frans@tsjoinery.co.za', 'janah@tsjoinery.co.za'],
+          targetRoles: ['Admin', 'HR', 'Supervisor']
+        });
+      } catch (notifErr) {
+        console.warn('Error dispatching borrow money notification:', notifErr);
+      }
       
       setTimeout(() => {
         setView('dashboard'); 
@@ -2266,72 +2285,72 @@ TS Joinery Kanban System`
                     </div>
                     <div className="space-y-2 font-sans font-sans">
                       <button 
-                        disabled={isLocked || !permissionService.canAccessMode(currentUser?.role, 'product_master')}
+                        disabled={isLocked || !permissionService.canAccessMode(currentUser, 'product_master')}
                         onClick={() => { setAppMode('product_master'); }} 
-                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${(isLocked || !permissionService.canAccessMode(currentUser?.role, 'product_master')) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'product_master' ? 'bg-cyan-600/10 border border-cyan-500/30 text-cyan-400' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${(isLocked || !permissionService.canAccessMode(currentUser, 'product_master')) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'product_master' ? 'bg-cyan-600/10 border border-cyan-500/30 text-cyan-400' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
                       >
                         <Icon name="box" size={18} />
                         <span className="font-black uppercase text-xs tracking-wider">Product Master</span>
                       </button>
 
                       <button 
-                        disabled={isLocked || !permissionService.canAccessMode(currentUser?.role, 'purchase_orders')}
+                        disabled={isLocked || !permissionService.canAccessMode(currentUser, 'purchase_orders')}
                         onClick={() => { setAppMode('purchase_orders'); }} 
-                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${(isLocked || !permissionService.canAccessMode(currentUser?.role, 'purchase_orders')) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'purchase_orders' ? 'bg-cyan-600/10 border border-cyan-500/30 text-cyan-400' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${(isLocked || !permissionService.canAccessMode(currentUser, 'purchase_orders')) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'purchase_orders' ? 'bg-cyan-600/10 border border-cyan-500/30 text-cyan-400' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
                       >
                         <Icon name="file-text" size={18} />
                         <span className="font-black uppercase text-xs tracking-wider">Purchase Orders</span>
                       </button>
 
                       <button 
-                        disabled={isLocked || !permissionService.canAccessMode(currentUser?.role, 'dispatch')}
+                        disabled={isLocked || !permissionService.canAccessMode(currentUser, 'dispatch')}
                         onClick={() => { setAppMode('dispatch'); }} 
-                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${(isLocked || !permissionService.canAccessMode(currentUser?.role, 'dispatch')) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'dispatch' ? 'bg-amber-600/10 border border-amber-500/30 text-amber-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${(isLocked || !permissionService.canAccessMode(currentUser, 'dispatch')) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'dispatch' ? 'bg-amber-600/10 border border-amber-500/30 text-amber-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
                       >
                         <Icon name="truck" size={18} />
                         <span className="font-black uppercase text-xs tracking-wider">Dispatch & Receiving</span>
                       </button>
 
                       <button 
-                        disabled={isLocked || !permissionService.canAccessMode(currentUser?.role, 'template_designer')}
+                        disabled={isLocked || !permissionService.canAccessMode(currentUser, 'template_designer')}
                         onClick={() => { setAppMode('template_designer'); }} 
-                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${(isLocked || !permissionService.canAccessMode(currentUser?.role, 'template_designer')) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'template_designer' ? 'bg-purple-600/10 border border-purple-500/30 text-purple-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${(isLocked || !permissionService.canAccessMode(currentUser, 'template_designer')) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'template_designer' ? 'bg-purple-600/10 border border-purple-500/30 text-purple-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
                       >
                         <Icon name="layout-template" size={18} />
                         <span className="font-black uppercase text-xs tracking-wider">Kanban Designer</span>
                       </button>
 
                       <button 
-                        disabled={isLocked || !permissionService.canAccessMode(currentUser?.role, 'orders')}
+                        disabled={isLocked || !permissionService.canAccessMode(currentUser, 'orders')}
                         onClick={() => { setAppMode('orders'); }} 
-                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${(isLocked || !permissionService.canAccessMode(currentUser?.role, 'orders')) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'orders' ? 'bg-[#ff8c00]/10 border border-[#ff8c00]/30 text-[#ff8c00]' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${(isLocked || !permissionService.canAccessMode(currentUser, 'orders')) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'orders' ? 'bg-[#ff8c00]/10 border border-[#ff8c00]/30 text-[#ff8c00]' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
                       >
                         <Icon name="banknote" size={18} />
                         <span className="font-black uppercase text-xs tracking-wider">Procurement & Orders</span>
                       </button>
 
                       <button 
-                        disabled={isLocked || !permissionService.canAccessMode(currentUser?.role, 'admin')}
+                        disabled={isLocked || !permissionService.canAccessMode(currentUser, 'admin')}
                         onClick={() => { setAppMode('admin'); setView('dashboard'); }} 
-                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${(isLocked || !permissionService.canAccessMode(currentUser?.role, 'admin')) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'admin' ? 'bg-blue-600/10 border border-blue-500/30 text-blue-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${(isLocked || !permissionService.canAccessMode(currentUser, 'admin')) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'admin' ? 'bg-blue-600/10 border border-blue-500/30 text-blue-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
                       >
                         <Icon name="users" size={18} />
                         <span className="font-black uppercase text-xs tracking-wider font-sans">Employer Registration</span>
                       </button>
 
                       <button 
-                        disabled={isLocked || !permissionService.canAccessMode(currentUser?.role, 'analytics')}
+                        disabled={isLocked || !permissionService.canAccessMode(currentUser, 'analytics')}
                         onClick={() => { setAppMode('analytics'); setView('dashboard'); }} 
-                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${(isLocked || !permissionService.canAccessMode(currentUser?.role, 'analytics')) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'analytics' ? 'bg-emerald-600/10 border border-emerald-500/30 text-emerald-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${(isLocked || !permissionService.canAccessMode(currentUser, 'analytics')) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'analytics' ? 'bg-emerald-600/10 border border-emerald-500/30 text-emerald-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
                       >
                         <Icon name="bar-chart-3" size={18} />
                         <span className="font-black uppercase text-xs tracking-wider font-sans">Work Analytics</span>
                       </button>
 
                       <button 
-                        disabled={isLocked || !permissionService.canAccessMode(currentUser?.role, 'leave')}
+                        disabled={isLocked || !permissionService.canAccessMode(currentUser, 'leave')}
                         onClick={() => { setAppMode('leave'); setView('dashboard'); }} 
-                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${(isLocked || !permissionService.canAccessMode(currentUser?.role, 'leave')) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'leave' ? 'bg-amber-600/10 border border-amber-500/30 text-amber-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${(isLocked || !permissionService.canAccessMode(currentUser, 'leave')) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'leave' ? 'bg-amber-600/10 border border-amber-500/30 text-amber-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
                       >
                         <Icon name="calendar" size={18} />
                         <div className="flex items-center justify-between w-full">
@@ -2452,7 +2471,7 @@ TS Joinery Kanban System`
                   </div>
                 )}
 
-                {appMode === 'employee' && view === 'dashboard' && (
+                {(appMode === 'employee' || appMode === 'clocking_terminal') && (
                   <div className="space-y-6">
                     <MobileDashboardSummary
                       currentUser={currentUser}
@@ -2574,6 +2593,11 @@ TS Joinery Kanban System`
                     setShowHistoryModal={setShowHistoryModal}
                     onViewDetails={(emp) => { setDetailsEmp(emp); setShowEmpDetailsModal(true); }}
                     onArchiveProfile={(emp) => { setSelectedEmployee(emp); setPendingAction('archive'); setView('supervisor_approval'); }}
+                    currentUser={currentUser}
+                    announce={announce}
+                    onUpdateEmployee={(updatedEmp) => {
+                      setEmployees(prev => prev.map(e => e.id === updatedEmp.id ? updatedEmp : e));
+                    }}
                   />
                 )}
 
@@ -2687,10 +2711,11 @@ TS Joinery Kanban System`
                   'mobile',
                   'qr_scan_service',
                   'gemini_chat',
-                  'home'
-                ].includes(appMode) &&
-                !(appMode === 'employee' && view === 'dashboard') &&
-                !(appMode === 'admin' && view === 'dashboard') && (
+                  'home',
+                  'employee',
+                  'clocking_terminal',
+                  'admin'
+                ].includes(appMode) && (
                   <div className="flex flex-col items-center justify-center py-20 text-center space-y-4 font-sans">
                     <p className="text-gray-400 font-bold uppercase text-xs tracking-wider">Unable to load workspace</p>
                     <button 
@@ -2780,10 +2805,8 @@ TS Joinery Kanban System`
                 {(selectedEmployee.status === 'In' || selectedEmployee.status === 'Break') && (
                   <button
                     onClick={() => {
-                      processClockEvent(selectedEmployee);
-                      setView('clocking');
-                      setSelectedEmployee(null);
-                      setActionSubMenu('menu');
+                      setScanComplete(false);
+                      setView('scanning');
                     }}
                     className="w-full p-4 bg-purple-500/10 border border-purple-500/30 hover:bg-purple-500/20 rounded-2xl text-purple-300 transition-all flex items-center justify-center gap-2 active:scale-95"
                   >
@@ -2796,7 +2819,10 @@ TS Joinery Kanban System`
 
                 {/* FACIAL CAMERA SCAN OPTION */}
                 <button 
-                  onClick={() => setView('scanning')} 
+                  onClick={() => {
+                    setScanComplete(false);
+                    setView('scanning');
+                  }} 
                   className="w-full p-4 bg-blue-500/10 border border-blue-500/30 hover:bg-blue-500/20 rounded-2xl text-blue-400 transition-all flex items-center justify-center gap-2 active:scale-95"
                 >
                   <Icon name="camera" size={20} />
@@ -2806,7 +2832,7 @@ TS Joinery Kanban System`
                 {/* Cancel Button */}
                 <button 
                   onClick={() => { 
-                    setView('clocking'); 
+                    setView('dashboard'); 
                     setSelectedEmployee(null); 
                     setActionSubMenu('menu');
                   }} 
@@ -2826,10 +2852,8 @@ TS Joinery Kanban System`
                 {selectedEmployee.status === 'In' || selectedEmployee.isClockedIn ? (
                   <button 
                     onClick={() => {
-                      processClockEvent(selectedEmployee);
-                      setView('clocking');
-                      setSelectedEmployee(null);
-                      setActionSubMenu('menu');
+                      setScanComplete(false);
+                      setView('scanning');
                     }}
                     className="w-full p-6 rounded-3xl text-center border-2 border-red-500/60 bg-red-500/20 hover:bg-red-500/30 text-red-400 hover:text-white shadow-2xl active:scale-95 transition-all flex items-center justify-center gap-4"
                   >
@@ -2843,10 +2867,8 @@ TS Joinery Kanban System`
                 ) : selectedEmployee.status === 'Break' ? (
                   <button 
                     onClick={() => {
-                      processClockEvent(selectedEmployee);
-                      setView('clocking');
-                      setSelectedEmployee(null);
-                      setActionSubMenu('menu');
+                      setScanComplete(false);
+                      setView('scanning');
                     }}
                     className="w-full p-6 rounded-3xl text-center border-2 border-purple-500/60 bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 hover:text-white shadow-2xl active:scale-95 transition-all flex items-center justify-center gap-4"
                   >
@@ -2860,10 +2882,8 @@ TS Joinery Kanban System`
                 ) : (
                   <button 
                     onClick={() => {
-                      processClockEvent(selectedEmployee);
-                      setView('clocking');
-                      setSelectedEmployee(null);
-                      setActionSubMenu('menu');
+                      setScanComplete(false);
+                      setView('scanning');
                     }}
                     className="w-full p-6 rounded-3xl text-center border-2 border-emerald-500/60 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 hover:text-white shadow-2xl active:scale-95 transition-all flex items-center justify-center gap-4"
                   >
@@ -2878,7 +2898,10 @@ TS Joinery Kanban System`
 
                 {/* FACIAL SCAN ALTERNATIVE */}
                 <button 
-                  onClick={() => setView('scanning')}
+                  onClick={() => {
+                    setScanComplete(false);
+                    setView('scanning');
+                  }}
                   className="w-full p-4 bg-purple-500/10 border border-purple-500/30 hover:bg-purple-500/20 rounded-2xl text-purple-300 transition-all flex items-center justify-center gap-2 active:scale-95"
                 >
                   <Icon name="camera" size={20} />
@@ -2897,7 +2920,7 @@ TS Joinery Kanban System`
                   </button>
                   <button 
                     onClick={() => { 
-                      setView('clocking'); 
+                      setView('dashboard'); 
                       setSelectedEmployee(null); 
                       setActionSubMenu('menu');
                     }} 
@@ -2966,7 +2989,7 @@ TS Joinery Kanban System`
             </div>
             <h2 className="text-2xl font-black uppercase tracking-tighter mb-1 text-white font-sans">Request Money Borrowed</h2>
             <p className="text-gray-500 text-[11px] font-black uppercase mb-12 tracking-widest font-sans">For: {selectedEmployee.name} {selectedEmployee.surname}</p>
-            <form onSubmit={(e) => { e.preventDefault(); setPendingAction('borrow_money'); setView('supervisor_approval'); }} className="grid grid-cols-2 gap-6 text-left">
+            <form onSubmit={(e) => { e.preventDefault(); processMoneyBorrow(selectedEmployee); }} className="grid grid-cols-2 gap-6 text-left">
               <div className="col-span-2 space-y-2">
                 <label className="text-[10px] font-black uppercase text-gray-500 ml-3">Amount (R)</label>
                 <input type="number" placeholder="e.g., 500" value={borrowAmount} onChange={e => setBorrowAmount(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-white text-sm" required autoFocus />
@@ -3104,10 +3127,14 @@ TS Joinery Kanban System`
           }`}>
             <PhotoAvatar emp={selectedEmployee} size={256} className="border-0 rounded-full shadow-none w-full h-full" />
           </div>
-          <h2 className="text-6xl md:text-8xl font-black italic uppercase tracking-tighter text-white mb-4 leading-none">
-            {lastClockResult === 'HR_Request' ? 'PAYMENT REGISTERED' : lastClockResult === 'Archive' ? 'PROFILE ARCHIVED' : 'IDENTITY VERIFIED'}
+          <h2 className="text-5xl md:text-7xl font-black italic uppercase tracking-tighter text-white mb-4 leading-none">
+            {lastClockResult === 'HR_Request' ? 'REQUEST SUBMITTED' : lastClockResult === 'Archive' ? 'PROFILE ARCHIVED' : 'IDENTITY VERIFIED'}
           </h2>
-          {lastClockResult === 'HR_Request' && <p className="text-emerald-500 font-bold uppercase tracking-widest text-xl mb-6">Your transaction has been written to wage logs.</p>}
+          {lastClockResult === 'HR_Request' && (
+            <p className="text-emerald-400 font-bold uppercase tracking-widest text-base md:text-lg mb-6">
+              Request submitted successfully and sent through for approval.
+            </p>
+          )}
           <p className="text-3xl font-black text-gray-500 uppercase tracking-widest mb-16">{selectedEmployee.name} {selectedEmployee.surname}</p>
           <button 
             onClick={() => {

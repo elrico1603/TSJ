@@ -3,6 +3,7 @@ import { Employee } from '../types';
 import { Search, Clock, LogIn, LogOut, Coffee, Calendar, Lock, Shield, CheckCircle2, Wifi, RefreshCw, Camera } from 'lucide-react';
 import { OfflineSyncStatus } from './OfflineSyncStatus';
 import permissionService from '../services/permissionService';
+import { getValidPhotoUrl } from './ClockingTerminal';
 
 interface DedicatedKioskClockingTerminalProps {
   employees: Employee[];
@@ -34,7 +35,28 @@ export const DedicatedKioskClockingTerminal: React.FC<DedicatedKioskClockingTerm
     return () => clearInterval(interval);
   }, []);
 
-  const activeWorkers = employees.filter(emp => !emp.isArchived);
+  const rawList = Array.isArray(employees) ? employees : [];
+  const seenIds = new Set<string>();
+  const activeWorkers: Employee[] = [];
+
+  for (const emp of rawList) {
+    if (!emp) continue;
+    const isArchived = emp.isArchived === true || emp.status === 'Archived';
+    const isInactive = (emp as any).status === 'inactive' || (emp as any).status === 'Inactive' || (emp as any).active === false;
+    if (isArchived || isInactive) continue;
+
+    const photoUrl = getValidPhotoUrl(emp);
+    if (!photoUrl) continue;
+
+    const uniqueKey = emp.id || (emp as any).employeeId || emp.employeeNumber || `${emp.name}_${emp.surname}`;
+    if (!uniqueKey || seenIds.has(uniqueKey)) continue;
+
+    seenIds.add(uniqueKey);
+    activeWorkers.push({
+      ...emp,
+      photo: photoUrl
+    });
+  }
 
   const filteredEmployees = activeWorkers.filter(emp => {
     const matchesSearch = 

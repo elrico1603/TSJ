@@ -20,7 +20,10 @@ export interface MobileDispatchDoc {
   courier?: string;
   trackingNumber?: string;
   notes?: string;
-  status: 'In Transit' | 'Delivered / Received' | 'Draft' | 'Ready for Dispatch' | 'Received' | 'Issue Logged' | 'Dispatched' | string;
+  totalPieces?: number;
+  missingPieces?: number[];
+  verifiedPieces?: number[];
+  status: 'In Transit' | 'Delivered / Completed' | 'Delivered / Received' | 'Discrepancy Flagged' | 'Draft' | 'Ready for Dispatch' | 'Received' | 'Issue Logged' | 'Dispatched' | string;
   photos: DispatchPhotoItem[];
   photoCount: number;
   receivingPhotos?: DispatchPhotoItem[];
@@ -31,6 +34,9 @@ export interface MobileDispatchDoc {
     packagingIntact: boolean;
     parcelCountMatches: boolean;
     qualityChecked: boolean;
+    totalPieces?: number;
+    verifiedPieces?: number[];
+    missingPieces?: number[];
   };
   createdBy: string;
   createdAt: string;
@@ -58,7 +64,84 @@ async function fileToDataUrl(file: File): Promise<string> {
 }
 
 /**
+ * Compresses and scales down an image file to maximum dimensions of 1600px
+ * and 0.75 JPEG quality using HTML5 Canvas.
+ * Reduces 10MB phone camera photos down to ~300KB–800KB before uploading to Firebase.
+ */
+export async function compressImageFile(
+  file: File,
+  maxDimension = 1600,
+  quality = 0.75
+): Promise<File> {
+  // If not an image or SVG/GIF, return as is
+  if (!file.type.startsWith('image/') || file.type === 'image/svg+xml' || file.type === 'image/gif') {
+    return file;
+  }
+
+  return new Promise((resolve) => {
+    const img = new Image();
+    const reader = new FileReader();
+
+    reader.onload = (e) => {
+      img.src = e.target?.result as string;
+    };
+
+    img.onload = () => {
+      let width = img.width;
+      let height = img.height;
+
+      // Scale dimensions down to a maximum of 1600px while maintaining aspect ratio
+      if (width > maxDimension || height > maxDimension) {
+        if (width > height) {
+          height = Math.round((height * maxDimension) / width);
+          width = maxDimension;
+        } else {
+          width = Math.round((width * maxDimension) / height);
+          height = maxDimension;
+        }
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(file);
+        return;
+      }
+
+      // Draw onto canvas and compress to JPEG at 0.75 quality
+      ctx.drawImage(img, 0, 0, width, height);
+
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) {
+            resolve(file);
+            return;
+          }
+          const cleanFileName = file.name.replace(/\.[^/.]+$/, '') + '.jpg';
+          const compressedFile = new File([blob], cleanFileName, {
+            type: 'image/jpeg',
+            lastModified: Date.now()
+          });
+          resolve(compressedFile);
+        },
+        'image/jpeg',
+        quality
+      );
+    };
+
+    img.onerror = () => resolve(file);
+    reader.onerror = () => resolve(file);
+
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
  * Uploads a photo to Firebase Cloud Storage under dispatches/{dispatchId}/{folder}/
+ * Automatically compresses the image file with HTML5 Canvas before uploading.
  * Falls back safely to compressed data URL if storage bucket is unreachable.
  */
 export async function uploadDispatchPhoto(
@@ -67,37 +150,43 @@ export async function uploadDispatchPhoto(
   folder: 'outgoing' | 'incoming'
 ): Promise<DispatchPhotoItem> {
   const timestamp = Date.now();
-  const cleanName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+
+  // 1. Client-Side Image Compression (< 1MB Target, Max 1600px, 0.75 JPEG Quality)
+  const compressedFile = await compressImageFile(file, 1600, 0.75);
+
+  const cleanName = compressedFile.name.replace(/[^a-zA-Z0-9._-]/g, '_');
   const path = `dispatches/${dispatchId}/${folder}/${timestamp}_${cleanName}`;
   const photoId = `photo_${timestamp}_${Math.random().toString(36).substring(2, 7)}`;
 
   try {
     if (storage && typeof storage.ref === 'function') {
       const storageRef = storage.ref(path);
-      const snapshot = await storageRef.put(file);
+      const snapshot = await storageRef.put(compressedFile, {
+        contentType: compressedFile.type || 'image/jpeg'
+      });
       const downloadUrl = await snapshot.ref.getDownloadURL();
       return {
         id: photoId,
-        name: file.name,
+        name: compressedFile.name,
         url: downloadUrl,
         uploadedAt: new Date().toISOString(),
-        size: file.size,
-        mimeType: file.type || 'image/jpeg'
+        size: compressedFile.size,
+        mimeType: compressedFile.type || 'image/jpeg'
       };
     }
   } catch (err) {
-    console.warn('[Dispatch Storage] Direct storage upload failed, using high-res local image fallback:', err);
+    console.warn('[Dispatch Storage] Direct storage upload failed, using compressed local image fallback:', err);
   }
 
   // Resilient fallback (ensures photos are never lost if storage permissions are restricted)
-  const dataUrl = await fileToDataUrl(file);
+  const dataUrl = await fileToDataUrl(compressedFile);
   return {
     id: photoId,
-    name: file.name,
+    name: compressedFile.name,
     url: dataUrl,
     uploadedAt: new Date().toISOString(),
-    size: file.size,
-    mimeType: file.type || 'image/jpeg'
+    size: compressedFile.size,
+    mimeType: compressedFile.type || 'image/jpeg'
   };
 }
 
@@ -122,11 +211,13 @@ export async function createMobileDispatch(payload: {
   courier?: string;
   trackingNumber?: string;
   notes?: string;
+  totalPieces?: number;
   photos: DispatchPhotoItem[];
   createdBy: string;
 }): Promise<MobileDispatchDoc> {
   const now = new Date().toISOString();
   const dispatchId = `dsp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  const pieces = payload.totalPieces && payload.totalPieces > 0 ? payload.totalPieces : Math.max(payload.photos.length, 1);
 
   const newDoc: MobileDispatchDoc = {
     id: dispatchId,
@@ -138,6 +229,7 @@ export async function createMobileDispatch(payload: {
     courier: payload.courier?.trim() || 'Internal Logistics',
     trackingNumber: payload.trackingNumber?.trim() || '',
     notes: payload.notes?.trim() || '',
+    totalPieces: pieces,
     status: 'In Transit',
     photos: payload.photos,
     photoCount: payload.photos.length,
@@ -150,7 +242,7 @@ export async function createMobileDispatch(payload: {
         action: 'Dispatched (In Transit)',
         user: payload.createdBy || 'Factory Dispatch Officer',
         timestamp: now,
-        notes: `Outgoing goods dispatched from ${payload.originBranch} to ${payload.destinationBranch} with ${payload.photos.length} photo evidence capture(s).`
+        notes: `Outgoing goods (${pieces} piece(s)) dispatched from ${payload.originBranch} to ${payload.destinationBranch} with ${payload.photos.length} photo evidence capture(s).`
       }
     ]
   };
@@ -172,7 +264,7 @@ export async function createMobileDispatch(payload: {
 }
 
 /**
- * Updates a dispatch document when receiving team confirms receipt and inspects goods
+ * Updates a dispatch document when receiving team confirms full receipt and inspects goods
  */
 export async function confirmReceiptAndInspect(
   dispatchId: string,
@@ -180,6 +272,8 @@ export async function confirmReceiptAndInspect(
     receiverName: string;
     receivingNotes?: string;
     receivingPhotos: DispatchPhotoItem[];
+    verifiedPieces?: number[];
+    totalPieces?: number;
     checklist?: {
       packagingIntact: boolean;
       parcelCountMatches: boolean;
@@ -190,15 +284,20 @@ export async function confirmReceiptAndInspect(
   const now = new Date().toISOString();
 
   const updateData: Partial<MobileDispatchDoc> = {
-    status: 'Delivered / Received',
+    status: 'Delivered / Completed',
     receivedBy: payload.receiverName.trim(),
     receivedAt: now,
-    receivingNotes: payload.receivingNotes?.trim() || 'Received and inspected in good order.',
+    receivingNotes: payload.receivingNotes?.trim() || 'All items verified, inspected and accepted in good order.',
     receivingPhotos: payload.receivingPhotos,
-    receivingChecklist: payload.checklist || {
-      packagingIntact: true,
-      parcelCountMatches: true,
-      qualityChecked: true
+    verifiedPieces: payload.verifiedPieces,
+    missingPieces: [],
+    receivingChecklist: {
+      packagingIntact: payload.checklist?.packagingIntact ?? true,
+      parcelCountMatches: payload.checklist?.parcelCountMatches ?? true,
+      qualityChecked: payload.checklist?.qualityChecked ?? true,
+      totalPieces: payload.totalPieces,
+      verifiedPieces: payload.verifiedPieces,
+      missingPieces: []
     },
     updatedAt: now
   };
@@ -213,10 +312,10 @@ export async function confirmReceiptAndInspect(
       }
 
       const newHistoryEntry = {
-        action: 'Delivered / Received',
+        action: 'Delivered / Completed',
         user: payload.receiverName.trim(),
         timestamp: now,
-        notes: `Receipt confirmed at destination with ${payload.receivingPhotos.length} condition photo(s). ${payload.receivingNotes || ''}`
+        notes: `Full piece-by-piece receipt approved (${payload.verifiedPieces?.length || payload.totalPieces || 1} of ${payload.totalPieces || 1} pieces verified). ${payload.receivingNotes || ''}`
       };
 
       await docRef.set({
@@ -232,10 +331,83 @@ export async function confirmReceiptAndInspect(
   updateLocalCache(dispatchId, {
     ...updateData,
     historyEntry: {
-      action: 'Delivered / Received',
+      action: 'Delivered / Completed',
       user: payload.receiverName.trim(),
       timestamp: now,
-      notes: payload.receivingNotes || 'Inspected and confirmed.'
+      notes: payload.receivingNotes || 'Full piece-by-piece receipt approved and completed.'
+    }
+  });
+}
+
+/**
+ * Flags a dispatch as having discrepancies or missing pieces at destination
+ */
+export async function flagDispatchDiscrepancy(
+  dispatchId: string,
+  payload: {
+    receiverName: string;
+    receivingNotes: string;
+    receivingPhotos: DispatchPhotoItem[];
+    missingPieces: number[];
+    verifiedPieces: number[];
+    totalPieces: number;
+  }
+): Promise<void> {
+  const now = new Date().toISOString();
+  const missingText = payload.missingPieces.map(p => `Piece ${p} of ${payload.totalPieces}`).join(', ');
+
+  const updateData: Partial<MobileDispatchDoc> = {
+    status: 'Discrepancy Flagged',
+    receivedBy: payload.receiverName.trim(),
+    receivedAt: now,
+    receivingNotes: payload.receivingNotes.trim() || `Discrepancy logged: Missing ${missingText}`,
+    receivingPhotos: payload.receivingPhotos,
+    missingPieces: payload.missingPieces,
+    verifiedPieces: payload.verifiedPieces,
+    receivingChecklist: {
+      packagingIntact: false,
+      parcelCountMatches: false,
+      qualityChecked: false,
+      totalPieces: payload.totalPieces,
+      verifiedPieces: payload.verifiedPieces,
+      missingPieces: payload.missingPieces
+    },
+    updatedAt: now
+  };
+
+  if (db) {
+    try {
+      const docRef = db.collection('dispatches').doc(dispatchId);
+      const snap = await docRef.get();
+      let currentHistory: any[] = [];
+      if (snap.exists) {
+        currentHistory = snap.data()?.history || [];
+      }
+
+      const newHistoryEntry = {
+        action: 'Discrepancy Flagged',
+        user: payload.receiverName.trim(),
+        timestamp: now,
+        notes: `EXCEPTION FLAGGED: Missing [${missingText}]. Verified [${payload.verifiedPieces.length}/${payload.totalPieces}]. Notes: ${payload.receivingNotes}`
+      };
+
+      await docRef.set({
+        ...updateData,
+        history: [...currentHistory, newHistoryEntry]
+      }, { merge: true });
+    } catch (e) {
+      console.warn('[Firestore] Error flagging dispatch discrepancy:', e);
+    }
+  }
+
+  // Update local cache
+  updateLocalCache(dispatchId, {
+    ...updateData,
+    historyEntry: {
+      action: 'Discrepancy Flagged',
+      user: payload.receiverName.trim(),
+      timestamp: now,
+      notes: `Discrepancy: Missing ${missingText}. ${payload.receivingNotes}`
     }
   });
 }
@@ -274,6 +446,9 @@ export function subscribeMobileDispatches(
                 trackingNumber: data.trackingNumber || '',
                 notes: data.notes || '',
                 status: data.status || 'In Transit',
+                totalPieces: typeof data.totalPieces === 'number' ? data.totalPieces : (Array.isArray(data.photos) && data.photos.length > 0 ? data.photos.length : 1),
+                missingPieces: Array.isArray(data.missingPieces) ? data.missingPieces : [],
+                verifiedPieces: Array.isArray(data.verifiedPieces) ? data.verifiedPieces : [],
                 photos: Array.isArray(data.photos) ? data.photos : [],
                 photoCount: typeof data.photoCount === 'number' ? data.photoCount : (Array.isArray(data.photos) ? data.photos.length : 0),
                 receivingPhotos: Array.isArray(data.receivingPhotos) ? data.receivingPhotos : [],

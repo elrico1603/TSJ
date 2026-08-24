@@ -225,6 +225,101 @@ export const ReportPrintTemplate: React.FC<ReportPrintTemplateProps> = ({
           </table>
         </div>
 
+        {/* Section 4: Disciplinary & Warning Records */}
+        <div className="mb-8 font-sans">
+          <h3 className="text-lg font-black uppercase mb-4 border-b border-gray-200 pb-2 avoid-break text-black">
+            Disciplinary & Warning Records
+          </h3>
+          <table className="w-full text-left border-collapse border border-gray-200 font-sans text-xs">
+            <thead>
+              <tr className="bg-gray-100 text-[10px] uppercase tracking-widest avoid-break">
+                <th className="p-3 border border-gray-300 font-bold text-black">Notice Date</th>
+                <th className="p-3 border border-gray-300 font-bold text-black">Warning Level</th>
+                <th className="p-3 border border-gray-300 font-bold text-black">Category</th>
+                <th className="p-3 border border-gray-300 font-bold text-center text-black">Expiry</th>
+                <th className="p-3 border border-gray-300 font-bold text-black">Incident Details / Reason</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(printingEmployee.warnings || [])
+                .map((warn, i) => (
+                  <tr key={i} className="avoid-break font-sans">
+                    <td className="p-3 border border-gray-300 font-mono text-black">{warn.issueDate}</td>
+                    <td className="p-3 border border-gray-300 font-bold text-red-700">
+                      {warn.warningLevel}
+                    </td>
+                    <td className="p-3 border border-gray-300 font-medium text-black">{warn.offenseCategory}</td>
+                    <td className="p-3 border border-gray-300 text-center font-mono text-[10px] text-gray-600">
+                      {warn.expiryDate || warn.expiryPeriod}
+                    </td>
+                    <td className="p-3 border border-gray-300 text-gray-800">
+                      <span className="font-medium">{warn.detailedReason}</span>
+                      {warn.documentName && (
+                        <span className="block text-[9px] text-gray-500 font-mono mt-0.5">Attached: {warn.documentName}</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              {(!printingEmployee.warnings || printingEmployee.warnings.length === 0) && (
+                <tr className="avoid-break">
+                  <td colSpan={5} className="p-4 text-center text-gray-500 font-bold font-sans">
+                    No active warnings or disciplinary notices on record.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Section 5: PPE Safety Gear & Issuance Compliance */}
+        <div className="mb-8 font-sans">
+          <h3 className="text-lg font-black uppercase mb-4 border-b border-gray-200 pb-2 avoid-break text-black">
+            Personal Protective Equipment (PPE) Issuance History
+          </h3>
+          <table className="w-full text-left border-collapse border border-gray-200 font-sans text-xs">
+            <thead>
+              <tr className="bg-gray-100 text-[10px] uppercase tracking-widest avoid-break">
+                <th className="p-3 border border-gray-300 font-bold text-black">Issuance Date</th>
+                <th className="p-3 border border-gray-300 font-bold text-black">Issued Equipment List</th>
+                <th className="p-3 border border-gray-300 font-bold text-center text-black">Location</th>
+                <th className="p-3 border border-gray-300 font-bold text-center text-black">Supervisor</th>
+                <th className="p-3 border border-gray-300 font-bold text-center text-black">OHS Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(printingEmployee.ppeIssuances || [])
+                .map((ppe, i) => (
+                  <tr key={i} className="avoid-break font-sans">
+                    <td className="p-3 border border-gray-300 font-mono text-black">{ppe.issuanceDate}</td>
+                    <td className="p-3 border border-gray-300 font-medium text-black">
+                      <ul className="list-disc list-inside space-y-0.5 text-[11px]">
+                        {ppe.items.filter(item => item.issued).map((item, idx) => (
+                          <li key={idx}>
+                            {item.itemName} {item.size ? `(${item.size})` : ''} - <span className="text-gray-500 uppercase text-[9px]">{item.condition}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </td>
+                    <td className="p-3 border border-gray-300 text-center text-gray-700">{ppe.branchLocation || 'Bloemfontein Central'}</td>
+                    <td className="p-3 border border-gray-300 text-center font-medium text-black">{ppe.supervisorName}</td>
+                    <td className="p-3 border border-gray-300 text-center">
+                      <span className="inline-block px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded font-bold text-[10px]">
+                        ✓ Compliant
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              {(!printingEmployee.ppeIssuances || printingEmployee.ppeIssuances.length === 0) && (
+                <tr className="avoid-break">
+                  <td colSpan={5} className="p-4 text-center text-gray-500 font-bold font-sans">
+                    No PPE equipment issuances logged in the system.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
         {printingEmployee.isArchived && (
           <div className="mb-12 avoid-break font-sans">
             <h3 className="text-lg font-black uppercase mb-4 border-b border-gray-200 pb-2 text-red-600">Archival Record</h3>

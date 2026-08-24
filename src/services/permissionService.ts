@@ -74,6 +74,15 @@ export const PERMISSION_CATEGORIES_CONFIG: ModuleCategoryGroup[] = [
     ]
   },
   {
+    category: 'DISPATCH & RECEIVING',
+    modules: [
+      'Dispatch Creation',
+      'Receiving Inspection',
+      'Discrepancy Management',
+      'Waybills & Delivery Notes'
+    ]
+  },
+  {
     category: 'REPORTS',
     modules: [
       'Dashboard',
@@ -233,6 +242,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, RolePermissions> = {
         'Employer Registration', 'Clocking', 'Leave Management', 'Work Analytics', 'Historical Logs', 'Generate Reports',
         'Kanban Designer', 'Product Master', 'Print Templates', 'QR Generation',
         'QR Scan Service', 'Basket', 'Stock Requests', 'Purchase Orders', 'Goods Receiving', 'Inventory', 'Inventory Adjustments',
+        'Dispatch Creation', 'Receiving Inspection', 'Discrepancy Management', 'Waybills & Delivery Notes',
         'Dashboard', 'Reports', 'Exports', 'Print', 'Notifications', 'System Settings'
       ],
       ['View', 'Create', 'Edit', 'Approve', 'Print', 'Export']
@@ -244,7 +254,11 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, RolePermissions> = {
     roleId: 'ROLE-PURCHASING',
     roleName: 'Purchasing',
     permissions: customMatrix(
-      ['Basket', 'Stock Requests', 'Purchase Orders', 'Goods Receiving', 'Inventory', 'QR Scan Service', 'Dashboard', 'Reports', 'Print', 'Export'],
+      [
+        'Basket', 'Stock Requests', 'Purchase Orders', 'Goods Receiving', 'Inventory', 'QR Scan Service',
+        'Dispatch Creation', 'Receiving Inspection', 'Discrepancy Management', 'Waybills & Delivery Notes',
+        'Dashboard', 'Reports', 'Print', 'Export'
+      ],
       ['View', 'Create', 'Edit', 'Approve', 'Print', 'Export']
     ),
     updatedAt: new Date().toISOString(),
@@ -254,7 +268,11 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, RolePermissions> = {
     roleId: 'ROLE-STOCK-MGR',
     roleName: 'Stock Manager',
     permissions: customMatrix(
-      ['Product Master', 'QR Generation', 'QR Scan Service', 'Stock Requests', 'Goods Receiving', 'Inventory', 'Inventory Adjustments', 'Dashboard', 'Print'],
+      [
+        'Product Master', 'QR Generation', 'QR Scan Service', 'Stock Requests', 'Goods Receiving', 'Inventory', 'Inventory Adjustments',
+        'Dispatch Creation', 'Receiving Inspection', 'Discrepancy Management', 'Waybills & Delivery Notes',
+        'Dashboard', 'Print'
+      ],
       ['View', 'Create', 'Edit', 'Delete', 'Print']
     ),
     updatedAt: new Date().toISOString(),
@@ -264,7 +282,11 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, RolePermissions> = {
     roleId: 'ROLE-SUPERVISOR',
     roleName: 'Supervisor',
     permissions: customMatrix(
-      ['Clocking', 'Leave Management', 'Work Analytics', 'Historical Logs', 'Generate Reports', 'Stock Requests', 'Kanban Designer', 'Dashboard', 'Print'],
+      [
+        'Clocking', 'Leave Management', 'Work Analytics', 'Historical Logs', 'Generate Reports', 'Stock Requests', 'Kanban Designer',
+        'Dispatch Creation', 'Receiving Inspection', 'Discrepancy Management', 'Waybills & Delivery Notes',
+        'Dashboard', 'Print'
+      ],
       ['View', 'Create', 'Edit', 'Approve', 'Print']
     ),
     updatedAt: new Date().toISOString(),
@@ -274,7 +296,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, RolePermissions> = {
     roleId: 'ROLE-EMPLOYEE',
     roleName: 'Employee',
     permissions: customMatrix(
-      ['Clocking', 'Leave Management', 'Dashboard', 'Notifications'],
+      ['Clocking', 'Leave Management', 'Dispatch Creation', 'Receiving Inspection', 'Dashboard', 'Notifications'],
       ['View', 'Create']
     ),
     updatedAt: new Date().toISOString(),
@@ -284,7 +306,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, RolePermissions> = {
     roleId: 'ROLE-VIEWER',
     roleName: 'Viewer',
     permissions: customMatrix(
-      ['Dashboard', 'Work Analytics', 'Historical Logs', 'Product Master', 'Inventory', 'Reports'],
+      ['Dashboard', 'Work Analytics', 'Historical Logs', 'Product Master', 'Inventory', 'Dispatch Creation', 'Receiving Inspection', 'Waybills & Delivery Notes', 'Reports'],
       ['View']
     ),
     updatedAt: new Date().toISOString(),
@@ -854,25 +876,35 @@ export const permissionService = {
     return `${timeGreeting}, ${name}`;
   },
 
-  canAccessMode(role: string, mode: string): boolean {
-    if (mode === 'gemini_chat' || mode === 'ai_assistant' || mode === 'dispatch' || mode === 'dispatches' || mode === 'mobile_dispatches') return true;
+  canAccessMode(roleOrUser: any, mode: string): boolean {
+    if (mode === 'gemini_chat' || mode === 'ai_assistant') return true;
+    const role = typeof roleOrUser === 'string' ? roleOrUser : roleOrUser?.role || '';
     const normRole = (role || '').trim();
     if (normRole === 'Administrator' || normRole === 'Admin') return true;
     if (normRole === 'Clocking Kiosk' || normRole === 'Clocking Terminal' || normRole === 'Clocking') {
       return ['clocking_terminal', 'employee', 'leave', 'qr_scan_service'].includes(mode);
     }
 
+    if (mode === 'dispatch' || mode === 'dispatches' || mode === 'mobile_dispatches') {
+      if (['Manager', 'Purchasing', 'Stock Manager', 'Supervisor'].includes(normRole)) return true;
+      if (typeof roleOrUser === 'object' && roleOrUser !== null) {
+        return this.hasPermission(roleOrUser, 'Dispatch Creation', 'View') || 
+               this.hasPermission(roleOrUser, 'Receiving Inspection', 'View');
+      }
+      return false;
+    }
+
     switch (normRole) {
       case 'Manager':
-        return ['clocking_terminal', 'admin', 'employee', 'analytics', 'leave', 'qr_scan_service', 'orders'].includes(mode);
+        return ['clocking_terminal', 'admin', 'employee', 'analytics', 'leave', 'qr_scan_service', 'orders', 'dispatch', 'dispatches', 'mobile_dispatches'].includes(mode);
       case 'HR':
         return ['clocking_terminal', 'admin', 'employee', 'leave'].includes(mode);
       case 'Purchasing':
-        return ['clocking_terminal', 'purchase_orders', 'orders', 'product_master', 'kanban', 'dispatch', 'qr_scan_service'].includes(mode);
+        return ['clocking_terminal', 'purchase_orders', 'orders', 'product_master', 'kanban', 'dispatch', 'dispatches', 'mobile_dispatches', 'qr_scan_service'].includes(mode);
       case 'Stock Manager':
-        return ['clocking_terminal', 'product_master', 'purchase_orders', 'dispatch', 'qr_scan_service'].includes(mode);
+        return ['clocking_terminal', 'product_master', 'purchase_orders', 'dispatch', 'dispatches', 'mobile_dispatches', 'qr_scan_service'].includes(mode);
       case 'Supervisor':
-        return ['clocking_terminal', 'admin', 'employee', 'analytics', 'leave', 'qr_scan_service'].includes(mode);
+        return ['clocking_terminal', 'admin', 'employee', 'analytics', 'leave', 'qr_scan_service', 'dispatch', 'dispatches', 'mobile_dispatches'].includes(mode);
       case 'Employee':
       case 'Artisan':
         return ['clocking_terminal', 'employee', 'leave'].includes(mode);
