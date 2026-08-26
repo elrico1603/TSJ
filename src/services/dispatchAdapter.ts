@@ -116,6 +116,9 @@ export function normalizeDispatchRecord(raw: any): DispatchRecord {
     receivingNotes: raw.receivingNotes ? String(raw.receivingNotes).trim() : undefined,
     receivedBy: raw.receivedBy ? String(raw.receivedBy).trim() : undefined,
     receivedAt: raw.receivedAt ? String(raw.receivedAt) : undefined,
+    isArchived: Boolean(raw.isArchived),
+    archivedAt: raw.archivedAt ? String(raw.archivedAt) : undefined,
+    archivedBy: raw.archivedBy ? String(raw.archivedBy).trim() : undefined,
 
     createdBy: String(raw.createdBy || 'System').trim(),
     createdAt: raw.createdAt ? String(raw.createdAt) : new Date().toISOString(),

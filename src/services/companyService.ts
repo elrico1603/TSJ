@@ -70,6 +70,54 @@ export const DEFAULT_BRANCHES: Branch[] = [
 
 export const DEFAULT_VERSIONS: ApplicationVersion[] = [
   {
+    id: 'VER-1029',
+    version: '1.0.0.029',
+    releaseDate: '2026-08-26',
+    description: 'Added Archive Dispatch workflow for completed shipments with confirmation modal, dedicated Archived status filter, and audit persistence.',
+    createdAt: '2026-08-26T07:45:00.000Z',
+    updatedAt: '2026-08-26T07:45:00.000Z'
+  },
+  {
+    id: 'VER-1028',
+    version: '1.0.0.028',
+    releaseDate: '2026-08-25',
+    description: 'Defaulted Dispatches landing tab to incoming and fixed missing timestamp sorting fallbacks.',
+    createdAt: '2026-08-25T10:35:00.000Z',
+    updatedAt: '2026-08-25T10:35:00.000Z'
+  },
+  {
+    id: 'VER-1027',
+    version: '1.0.0.027',
+    releaseDate: '2026-08-25',
+    description: 'Fixed viewport hardware auto-detection and cleared legacy phone localStorage overrides on desktop screens.',
+    createdAt: '2026-08-25T08:25:00.000Z',
+    updatedAt: '2026-08-25T08:25:00.000Z'
+  },
+  {
+    id: 'VER-1026',
+    version: '1.0.0.026',
+    releaseDate: '2026-08-24',
+    description: 'Fixed dynamic Dispatch sub-module gating and dynamic navigation permission filters.',
+    createdAt: '2026-08-24T11:55:00.000Z',
+    updatedAt: '2026-08-24T11:55:00.000Z'
+  },
+  {
+    id: 'VER-1025',
+    version: '1.0.0.025',
+    releaseDate: '2026-08-24',
+    description: 'Fixed artisan terminal profile visibility and fallback avatars, non-destructive photo gate correction, and live stream maintenance.',
+    createdAt: '2026-08-24T11:15:00.000Z',
+    updatedAt: '2026-08-24T11:15:00.000Z'
+  },
+  {
+    id: 'VER-1023',
+    version: '1.0.0.023',
+    releaseDate: '2026-08-24',
+    description: 'Fixed PPE Printable Certificate CSS @media print engine & multi-page support, A4 portrait isolation, and page-break prevention.',
+    createdAt: '2026-08-24T11:05:00.000Z',
+    updatedAt: '2026-08-24T11:05:00.000Z'
+  },
+  {
     id: 'VER-1022',
     version: '1.0.0.022',
     releaseDate: '2026-08-24',

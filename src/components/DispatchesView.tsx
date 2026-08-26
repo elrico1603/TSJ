@@ -8,6 +8,8 @@ import {
   createMobileDispatch,
   confirmReceiptAndInspect,
   flagDispatchDiscrepancy,
+  archiveDispatch,
+  unarchiveDispatch,
   subscribeMobileDispatches
 } from '../services/mobileDispatchService';
 import { permissionService } from '../services/permissionService';
@@ -40,10 +42,37 @@ export const DispatchesView: React.FC<DispatchesViewProps> = ({
   announce,
   onBackToDashboard
 }) => {
+  // Permission Enforcement for Dispatch & Receiving sub-modules
+  const canViewDispatchCreation = permissionService.hasPermission(currentUser, 'Dispatch Creation', 'View');
+  const canViewReceivingInspection = permissionService.hasPermission(currentUser, 'Receiving Inspection', 'View');
+  const canViewDiscrepancyManagement = permissionService.hasPermission(currentUser, 'Discrepancy Management', 'View');
+  const canViewWaybills = permissionService.hasPermission(currentUser, 'Waybills & Delivery Notes', 'View');
+
+  // Top-Level Screen Gate: Access granted if user has View permission for ANY sub-module in Dispatch & Receiving
+  const canViewDispatch = canViewDispatchCreation || canViewReceivingInspection || canViewDiscrepancyManagement || canViewWaybills;
+  const canCreateDispatch = permissionService.hasPermission(currentUser, 'Dispatch Creation', 'Create');
+  const canInspectReceiving = permissionService.hasPermission(currentUser, 'Receiving Inspection', 'Approve') ||
+    permissionService.hasPermission(currentUser, 'Receiving Inspection', 'Create') ||
+    permissionService.hasPermission(currentUser, 'Receiving Inspection', 'Edit');
+  const canFlagDiscrepancy = permissionService.hasPermission(currentUser, 'Discrepancy Management', 'Create') ||
+    permissionService.hasPermission(currentUser, 'Discrepancy Management', 'Edit') ||
+    permissionService.hasPermission(currentUser, 'Discrepancy Management', 'Approve');
+  const canPrintWaybill = permissionService.hasPermission(currentUser, 'Waybills & Delivery Notes', 'Print') ||
+    permissionService.hasPermission(currentUser, 'Dispatch Creation', 'Print');
+
+  // Active Tab Default:
+  // ALWAYS defaults to 'incoming' (Active / Incoming dispatches list) for all users,
+  // allowing immediate visibility of active shipments upon opening the module.
+  // Users with creation permission can switch to 'create' tab manually.
   const [activeTab, setActiveTab] = useState<'create' | 'incoming'>('incoming');
+
   const [dispatches, setDispatches] = useState<MobileDispatchDoc[]>([]);
-  const [filterStatus, setFilterStatus] = useState<'ALL' | 'IN_TRANSIT' | 'DISCREPANCY' | 'DELIVERED'>('ALL');
+  const [filterStatus, setFilterStatus] = useState<'ALL' | 'IN_TRANSIT' | 'DISCREPANCY' | 'DELIVERED' | 'ARCHIVED'>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Archiving State
+  const [archiveConfirmTarget, setArchiveConfirmTarget] = useState<MobileDispatchDoc | null>(null);
+  const [isArchiving, setIsArchiving] = useState(false);
 
   // Form State for "Create Dispatch"
   const [dispatchNumber, setDispatchNumber] = useState(generateDispatchNumber());
@@ -86,19 +115,6 @@ export const DispatchesView: React.FC<DispatchesViewProps> = ({
   // File Input Refs
   const outgoingCameraRef = useRef<HTMLInputElement>(null);
   const incomingCameraRef = useRef<HTMLInputElement>(null);
-
-  // Permission Enforcement for Dispatch & Receiving sub-modules
-  const canViewDispatch = permissionService.hasPermission(currentUser, 'Dispatch Creation', 'View') ||
-    permissionService.hasPermission(currentUser, 'Receiving Inspection', 'View');
-  const canCreateDispatch = permissionService.hasPermission(currentUser, 'Dispatch Creation', 'Create');
-  const canInspectReceiving = permissionService.hasPermission(currentUser, 'Receiving Inspection', 'Approve') ||
-    permissionService.hasPermission(currentUser, 'Receiving Inspection', 'Create') ||
-    permissionService.hasPermission(currentUser, 'Receiving Inspection', 'Edit');
-  const canFlagDiscrepancy = permissionService.hasPermission(currentUser, 'Discrepancy Management', 'Create') ||
-    permissionService.hasPermission(currentUser, 'Discrepancy Management', 'Edit') ||
-    permissionService.hasPermission(currentUser, 'Discrepancy Management', 'Approve');
-  const canPrintWaybill = permissionService.hasPermission(currentUser, 'Waybills & Delivery Notes', 'Print') ||
-    permissionService.hasPermission(currentUser, 'Dispatch Creation', 'Print');
 
   // Subscribe to real-time dispatches
   useEffect(() => {
@@ -360,19 +376,63 @@ export const DispatchesView: React.FC<DispatchesViewProps> = ({
     }
   };
 
-  // Filtered Dispatches List
-  const inTransitCount = dispatches.filter(d => d.status === 'In Transit' || d.status === 'Dispatched').length;
-  const discrepancyCount = dispatches.filter(d => d.status === 'Discrepancy Flagged' || d.status === 'Issue Logged').length;
-  const deliveredCount = dispatches.filter(d => d.status === 'Delivered / Completed' || d.status === 'Delivered / Received' || d.status === 'Received').length;
+  // Handlers for Archiving & Restoring Dispatches
+  const handleArchiveConfirm = async () => {
+    if (!archiveConfirmTarget) return;
+    setIsArchiving(true);
+    try {
+      const userName = currentUser?.name || currentUser?.displayName || currentUser?.email || 'Authorized User';
+      await archiveDispatch(archiveConfirmTarget.id, userName);
+      if (announce) {
+        announce(`Dispatch ${archiveConfirmTarget.dispatchNumber} archived successfully.`);
+      }
+      setArchiveConfirmTarget(null);
+    } catch (err: any) {
+      console.error('Failed to archive dispatch:', err);
+      alert(`Failed to archive dispatch: ${err.message || 'Unknown error'}`);
+    } finally {
+      setIsArchiving(false);
+    }
+  };
+
+  const handleUnarchive = async (dispatch: MobileDispatchDoc) => {
+    try {
+      const userName = currentUser?.name || currentUser?.displayName || currentUser?.email || 'Authorized User';
+      await unarchiveDispatch(dispatch.id, userName);
+      if (announce) {
+        announce(`Dispatch ${dispatch.dispatchNumber} restored to active register.`);
+      }
+    } catch (err: any) {
+      console.error('Failed to unarchive dispatch:', err);
+      alert(`Failed to restore dispatch: ${err.message || 'Unknown error'}`);
+    }
+  };
+
+  // Filtered Dispatches List & Partitioning
+  const activeDispatches = dispatches.filter(d => !d.isArchived);
+  const archivedDispatches = dispatches.filter(d => Boolean(d.isArchived));
+
+  const inTransitCount = activeDispatches.filter(d => d.status === 'In Transit' || d.status === 'Dispatched').length;
+  const discrepancyCount = activeDispatches.filter(d => d.status === 'Discrepancy Flagged' || d.status === 'Issue Logged').length;
+  const deliveredCount = activeDispatches.filter(d => d.status === 'Delivered / Completed' || d.status === 'Delivered / Received' || d.status === 'Received').length;
+  const archivedCount = archivedDispatches.length;
+  const activeCount = activeDispatches.length;
 
   const filteredDispatches = dispatches.filter((d) => {
-    // Status filter
-    if (filterStatus === 'IN_TRANSIT') {
-      if (d.status !== 'In Transit' && d.status !== 'Dispatched') return false;
-    } else if (filterStatus === 'DISCREPANCY') {
-      if (d.status !== 'Discrepancy Flagged' && d.status !== 'Issue Logged') return false;
-    } else if (filterStatus === 'DELIVERED') {
-      if (d.status !== 'Delivered / Completed' && d.status !== 'Delivered / Received' && d.status !== 'Received') return false;
+    // Partition by Archive status
+    if (filterStatus === 'ARCHIVED') {
+      if (!d.isArchived) return false;
+    } else {
+      if (d.isArchived) return false;
+
+      // Status filter for active dispatches
+      if (filterStatus === 'IN_TRANSIT') {
+        if (d.status !== 'In Transit' && d.status !== 'Dispatched') return false;
+      } else if (filterStatus === 'DISCREPANCY') {
+        if (d.status !== 'Discrepancy Flagged' && d.status !== 'Issue Logged') return false;
+      } else if (filterStatus === 'DELIVERED') {
+        if (d.status !== 'Delivered / Completed' && d.status !== 'Delivered / Received' && d.status !== 'Received') return false;
+      }
     }
 
     // Search query
@@ -783,7 +843,7 @@ export const DispatchesView: React.FC<DispatchesViewProps> = ({
                     : 'bg-white/5 text-gray-400 hover:text-white'
                 }`}
               >
-                All ({dispatches.length})
+                All ({activeCount})
               </button>
 
               <button
@@ -822,6 +882,19 @@ export const DispatchesView: React.FC<DispatchesViewProps> = ({
                 }`}
               >
                 Delivered ({deliveredCount})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setFilterStatus('ARCHIVED')}
+                className={`px-3.5 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+                  filterStatus === 'ARCHIVED'
+                    ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40'
+                    : 'bg-white/5 text-gray-400 hover:text-white'
+                }`}
+              >
+                <Icon name="archive" size={14} />
+                Archived ({archivedCount})
               </button>
             </div>
 
@@ -875,8 +948,13 @@ export const DispatchesView: React.FC<DispatchesViewProps> = ({
                     </div>
 
                     {/* Status Badge */}
-                    <div>
-                      {isInTransit ? (
+                    <div className="flex items-center gap-2">
+                      {dispatch.isArchived ? (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-500/20 border border-purple-500/40 text-purple-300 text-xs font-black uppercase tracking-wider">
+                          <Icon name="archive" size={13} />
+                          Archived
+                        </span>
+                      ) : isInTransit ? (
                         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-black uppercase tracking-wider">
                           <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
                           In Transit
@@ -1050,7 +1128,7 @@ export const DispatchesView: React.FC<DispatchesViewProps> = ({
                     </div>
                   )}
 
-                  {/* Card Actions (Print Delivery Note & Receiver Confirmation) */}
+                  {/* Card Actions (Print Delivery Note, Archive & Receiver Confirmation) */}
                   <div className="pt-3 border-t border-white/5 flex flex-wrap items-center justify-end gap-2.5 no-print">
                     <button
                       type="button"
@@ -1062,6 +1140,32 @@ export const DispatchesView: React.FC<DispatchesViewProps> = ({
                       <Icon name={canPrintWaybill ? "printer" : "lock"} size={15} className="text-[#ff8c00]" />
                       <span>Print Delivery Note</span>
                     </button>
+
+                    {/* Archive Dispatch Action (Available for completed/received shipments) */}
+                    {isDelivered && !dispatch.isArchived && (
+                      <button
+                        type="button"
+                        onClick={() => setArchiveConfirmTarget(dispatch)}
+                        className="w-full sm:w-auto px-4 py-2.5 bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-500/30 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 active:scale-95 transition-all shadow-sm"
+                        title="Archive completed dispatch record after stock receipt confirmation"
+                      >
+                        <Icon name="archive" size={15} />
+                        <span>Archive Dispatch</span>
+                      </button>
+                    )}
+
+                    {/* Unarchive / Restore Action */}
+                    {dispatch.isArchived && (
+                      <button
+                        type="button"
+                        onClick={() => handleUnarchive(dispatch)}
+                        className="w-full sm:w-auto px-4 py-2.5 bg-white/10 hover:bg-white/20 text-gray-300 border border-white/10 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 active:scale-95 transition-all shadow-sm"
+                        title="Restore dispatch record to active register"
+                      >
+                        <Icon name="refresh-cw" size={15} />
+                        <span>Restore to Active</span>
+                      </button>
+                    )}
 
                     {(isInTransit || isDiscrepancy) && (
                       <button
@@ -1679,6 +1783,59 @@ export const DispatchesView: React.FC<DispatchesViewProps> = ({
                 </p>
               </div>
 
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: CONFIRM ARCHIVE DISPATCH */}
+      {/* ========================================================================= */}
+      {archiveConfirmTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+          <div className="bg-[#18181c] border border-purple-500/30 rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl space-y-5 text-center">
+            <div className="w-14 h-14 bg-purple-500/20 text-purple-400 rounded-full flex items-center justify-center mx-auto border border-purple-500/40">
+              <Icon name="archive" size={28} />
+            </div>
+            <div>
+              <h3 className="text-lg font-black text-white uppercase tracking-wider">
+                Archive Completed Dispatch?
+              </h3>
+              <p className="text-xs text-gray-400 mt-2 leading-relaxed">
+                Are you sure you want to archive dispatch <span className="text-white font-mono font-bold">{archiveConfirmTarget.dispatchNumber}</span> ({archiveConfirmTarget.project})?
+              </p>
+              <p className="text-[11px] text-gray-500 mt-2">
+                The stock has been received at <span className="text-gray-300 font-bold">{archiveConfirmTarget.destinationBranch}</span>. This record will be moved out of the active dispatches register and preserved in the Archived list for auditing.
+              </p>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setArchiveConfirmTarget(null)}
+                disabled={isArchiving}
+                className="flex-1 py-3 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleArchiveConfirm}
+                disabled={isArchiving}
+                className="flex-1 py-3 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-colors shadow-lg shadow-purple-600/30 flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                {isArchiving ? (
+                  <>
+                    <Icon name="refresh-cw" size={15} className="animate-spin" />
+                    <span>Archiving...</span>
+                  </>
+                ) : (
+                  <>
+                    <Icon name="archive" size={15} />
+                    <span>Confirm Archive</span>
+                  </>
+                )}
+              </button>
             </div>
           </div>
         </div>

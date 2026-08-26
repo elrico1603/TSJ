@@ -92,54 +92,74 @@ export default function App() {
     return 'desktop';
   };
 
-  // Responsive Layout Mode, Header Search & Profile Modal State (defaults to 'phone' on mobile screens)
+  // Responsive Layout Mode, Header Search & Profile Modal State
+  // Pure physical screen-width auto-detection with sanity checks for saved preferences:
+  // - width >= 1024px: Always defaults to 'desktop' (clearing any cached 'phone' in localStorage)
+  // - width >= 768px && < 1024px: Sets 'tablet'
+  // - width < 768px: Sets 'phone'
   const [layoutMode, setLayoutMode] = useState<'desktop' | 'tablet' | 'phone'>(() => {
     if (typeof window !== 'undefined') {
       try {
-        if (window.innerWidth < 768) return 'phone';
-        const saved = localStorage.getItem('ts_joinery_layout_mode') as 'desktop' | 'tablet' | 'phone' | null;
-        if (saved && ['desktop', 'tablet', 'phone'].includes(saved)) {
-          return saved;
+        const width = window.innerWidth;
+        if (width >= 1024) {
+          const saved = localStorage.getItem('ts_joinery_layout_mode');
+          if (saved === 'phone') {
+            try { localStorage.setItem('ts_joinery_layout_mode', 'desktop'); } catch (e) {}
+          }
+          return 'desktop';
         }
-        return window.innerWidth < 1024 ? 'tablet' : 'desktop';
-      } catch (e) {
+        if (width >= 768) {
+          const saved = localStorage.getItem('ts_joinery_layout_mode') as 'desktop' | 'tablet' | 'phone' | null;
+          if (saved && ['desktop', 'tablet'].includes(saved)) {
+            return saved;
+          }
+          return 'tablet';
+        }
         return 'phone';
+      } catch (e) {
+        return getAutoLayoutMode();
       }
     }
-    return 'phone';
+    return 'desktop';
   });
   const [showUserProfileModal, setShowUserProfileModal] = useState<boolean>(false);
   const [headerSearchQuery, setHeaderSearchQuery] = useState<string>('');
 
   useEffect(() => {
-    try {
-      if (window.innerWidth < 768) {
-        setLayoutMode('phone');
-      } else {
-        const saved = localStorage.getItem('ts_joinery_layout_mode') as 'desktop' | 'tablet' | 'phone' | null;
-        if (saved && ['desktop', 'tablet', 'phone'].includes(saved)) {
-          setLayoutMode(saved);
-        } else {
-          setLayoutMode(getAutoLayoutMode());
-        }
-      }
-    } catch (e) {
-      setLayoutMode(getAutoLayoutMode());
-    }
-
-    const handleResize = () => {
+    const evaluateAndSyncLayout = () => {
       try {
-        if (window.innerWidth < 768) {
-          setLayoutMode('phone');
-        } else {
-          const stored = localStorage.getItem('ts_joinery_layout_mode');
-          if (!stored) {
-            setLayoutMode(getAutoLayoutMode());
+        const width = window.innerWidth;
+        if (width >= 1024) {
+          const saved = localStorage.getItem('ts_joinery_layout_mode');
+          if (saved === 'phone') {
+            try { localStorage.setItem('ts_joinery_layout_mode', 'desktop'); } catch (e) {}
           }
+          setLayoutMode('desktop');
+        } else if (width >= 768) {
+          const saved = localStorage.getItem('ts_joinery_layout_mode') as 'desktop' | 'tablet' | 'phone' | null;
+          if (saved && ['desktop', 'tablet'].includes(saved)) {
+            setLayoutMode(saved);
+          } else {
+            setLayoutMode('tablet');
+          }
+        } else {
+          setLayoutMode('phone');
         }
       } catch (e) {
         setLayoutMode(getAutoLayoutMode());
       }
+    };
+
+    // Immediate evaluation on mount to handle iframe and sandbox container rendering
+    evaluateAndSyncLayout();
+
+    // Re-evaluate on next frame / microtask to ensure layout dimensions are fully calculated in sandboxes
+    const rafId = requestAnimationFrame(() => {
+      evaluateAndSyncLayout();
+    });
+
+    const handleResize = () => {
+      evaluateAndSyncLayout();
     };
 
     window.addEventListener('resize', handleResize);
@@ -149,6 +169,7 @@ export default function App() {
     }
 
     return () => {
+      cancelAnimationFrame(rafId);
       window.removeEventListener('resize', handleResize);
       window.removeEventListener('orientationchange', handleResize);
       if (window.screen && window.screen.orientation) {
@@ -2239,13 +2260,15 @@ TS Joinery Kanban System`
                 <div>
                   <p className="text-[10px] font-black uppercase text-gray-500 tracking-[0.2em] mb-3 xl:mb-4">Artisan Terminal</p>
                   <div className="space-y-2">
-                    <button 
-                      onClick={() => { setAppMode('employee'); setView('dashboard'); setSelectedEmployee(null); }} 
-                      className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${appMode === 'employee' ? 'bg-[#ff8c00]/10 border border-[#ff8c00]/30 text-[#ff8c00]' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
-                    >
-                      <Icon name="clock" size={18} />
-                      <span className="font-black uppercase text-xs tracking-wider font-sans">Clocking Terminal</span>
-                    </button>
+                    {permissionService.hasPermission(currentUser, 'Clocking', 'View') && (
+                      <button 
+                        onClick={() => { setAppMode('employee'); setView('dashboard'); setSelectedEmployee(null); }} 
+                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${appMode === 'employee' ? 'bg-[#ff8c00]/10 border border-[#ff8c00]/30 text-[#ff8c00]' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                      >
+                        <Icon name="clock" size={18} />
+                        <span className="font-black uppercase text-xs tracking-wider font-sans">Clocking Terminal</span>
+                      </button>
+                    )}
 
                     <button 
                       onClick={() => { setAppMode('qr_scan_service'); setView('dashboard'); }} 
@@ -4097,6 +4120,7 @@ TS Joinery Kanban System`
             })();
 
             const unreadNotifications = notifications.filter(n => !n.isRead).length;
+            const hasClockingPermission = permissionService.hasPermission(currentUser, 'Clocking', 'View');
 
             let navItems: Array<{
               id: string;
@@ -4109,6 +4133,13 @@ TS Joinery Kanban System`
 
             if (role === 'Stock Manager') {
               navItems = [
+                ...(hasClockingPermission ? [{
+                  id: 'clocking',
+                  label: 'Clocking',
+                  icon: 'clock',
+                  onClick: () => { setAppMode('employee'); setView('dashboard'); },
+                  isActive: appMode === 'employee' && !showUserProfileModal
+                }] : []),
                 {
                   id: 'qr_scan',
                   label: 'QR Scan',
@@ -4141,13 +4172,13 @@ TS Joinery Kanban System`
               ];
             } else if (role === 'HR' || role === 'Purchasing') {
               navItems = [
-                {
+                ...(hasClockingPermission ? [{
                   id: 'clocking',
                   label: 'Clocking',
                   icon: 'clock',
                   onClick: () => { setAppMode('employee'); setView('dashboard'); },
                   isActive: appMode === 'employee'
-                },
+                }] : []),
                 {
                   id: 'notifications',
                   label: 'Alerts',
@@ -4173,13 +4204,13 @@ TS Joinery Kanban System`
               ];
             } else if (role === 'Admin') {
               navItems = [
-                {
+                ...(hasClockingPermission ? [{
                   id: 'clocking',
                   label: 'Clocking',
                   icon: 'clock',
                   onClick: () => { setAppMode('employee'); setView('dashboard'); },
                   isActive: appMode === 'employee'
-                },
+                }] : []),
                 {
                   id: 'management',
                   label: 'Hub',
@@ -4204,13 +4235,13 @@ TS Joinery Kanban System`
               ];
             } else if (role === 'Supervisor') {
               navItems = [
-                {
+                ...(hasClockingPermission ? [{
                   id: 'dashboard',
                   label: 'Clocking',
                   icon: 'clock',
                   onClick: () => { setAppMode('employee'); setView('dashboard'); },
                   isActive: appMode === 'employee' && !showUserProfileModal
-                },
+                }] : []),
                 {
                   id: 'qr_scan',
                   label: 'QR Scan',
@@ -4243,13 +4274,13 @@ TS Joinery Kanban System`
             } else {
               // Artisan / Default
               navItems = [
-                {
+                ...(hasClockingPermission ? [{
                   id: 'clocking',
                   label: 'Clocking',
                   icon: 'clock',
                   onClick: () => { setAppMode('employee'); setView('dashboard'); },
                   isActive: appMode === 'employee' && !showUserProfileModal
-                },
+                }] : []),
                 {
                   id: 'qr_scan',
                   label: 'QR Scan',

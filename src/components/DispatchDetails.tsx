@@ -63,6 +63,9 @@ export interface DispatchRecord {
   receivingNotes?: string;
   receivedBy?: string;
   receivedAt?: string;
+  isArchived?: boolean;
+  archivedAt?: string;
+  archivedBy?: string;
   createdBy: string;
   createdAt: string;
   updatedAt: string;

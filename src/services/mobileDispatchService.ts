@@ -38,6 +38,9 @@ export interface MobileDispatchDoc {
     verifiedPieces?: number[];
     missingPieces?: number[];
   };
+  isArchived?: boolean;
+  archivedAt?: string;
+  archivedBy?: string;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
@@ -413,14 +416,118 @@ export async function flagDispatchDiscrepancy(
 }
 
 /**
- * Real-time subscription to dispatches from Firestore with cache fallback
+ * Archives a completed dispatch record
+ */
+export async function archiveDispatch(
+  dispatchId: string,
+  userIdentifier: string = 'Authorized User'
+): Promise<void> {
+  const now = new Date().toISOString();
+  const updateData = {
+    isArchived: true,
+    archivedAt: now,
+    archivedBy: userIdentifier,
+    updatedAt: now
+  };
+
+  if (db) {
+    try {
+      const docRef = db.collection('dispatches').doc(dispatchId);
+      const snap = await docRef.get();
+      let currentHistory: any[] = [];
+      if (snap.exists) {
+        currentHistory = snap.data()?.history || [];
+      }
+
+      const newHistoryEntry = {
+        action: 'Dispatch Archived',
+        user: userIdentifier,
+        timestamp: now,
+        notes: 'Dispatch record archived following stock receipt confirmation'
+      };
+
+      await docRef.set({
+        ...updateData,
+        history: [...currentHistory, newHistoryEntry]
+      }, { merge: true });
+    } catch (e) {
+      console.warn('[Firestore] Error archiving dispatch:', e);
+    }
+  }
+
+  // Update local cache
+  updateLocalCache(dispatchId, {
+    ...updateData,
+    historyEntry: {
+      action: 'Dispatch Archived',
+      user: userIdentifier,
+      timestamp: now,
+      notes: 'Dispatch record archived'
+    }
+  });
+}
+
+/**
+ * Unarchives a previously archived dispatch record
+ */
+export async function unarchiveDispatch(
+  dispatchId: string,
+  userIdentifier: string = 'Authorized User'
+): Promise<void> {
+  const now = new Date().toISOString();
+  const updateData = {
+    isArchived: false,
+    archivedAt: undefined,
+    archivedBy: undefined,
+    updatedAt: now
+  };
+
+  if (db) {
+    try {
+      const docRef = db.collection('dispatches').doc(dispatchId);
+      const snap = await docRef.get();
+      let currentHistory: any[] = [];
+      if (snap.exists) {
+        currentHistory = snap.data()?.history || [];
+      }
+
+      const newHistoryEntry = {
+        action: 'Dispatch Unarchived',
+        user: userIdentifier,
+        timestamp: now,
+        notes: 'Dispatch restored to active register'
+      };
+
+      await docRef.set({
+        ...updateData,
+        history: [...currentHistory, newHistoryEntry]
+      }, { merge: true });
+    } catch (e) {
+      console.warn('[Firestore] Error unarchiving dispatch:', e);
+    }
+  }
+
+  // Update local cache
+  updateLocalCache(dispatchId, {
+    ...updateData,
+    historyEntry: {
+      action: 'Dispatch Unarchived',
+      user: userIdentifier,
+      timestamp: now,
+      notes: 'Dispatch restored to active register'
+    }
+  });
+}
+
+/**
+ * Real-time subscription to dispatches from Firestore with cache fallback and legacy merging
  */
 export function subscribeMobileDispatches(
   callback: (dispatches: MobileDispatchDoc[]) => void
 ): () => void {
   let unsubscribe: (() => void) | null = null;
 
-  // Immediate local cache emission
+  // Immediate local cache emission (including legacy records)
   const cached = getLocalCache();
   if (cached.length > 0) {
     callback(cached);
@@ -428,13 +535,19 @@ export function subscribeMobileDispatches(
 
   if (db) {
     try {
+      // Query without strict orderBy to avoid excluding documents missing indexed createdAt fields
       unsubscribe = db.collection('dispatches')
-        .orderBy('createdAt', 'desc')
         .onSnapshot(
           (snapshot) => {
             const list: MobileDispatchDoc[] = [];
+            const seenIds = new Set<string>();
+
             snapshot.forEach((doc) => {
               const data = doc.data();
+              const createdAt = data.createdAt || data.createdDate || data.timestamp || new Date().toISOString();
+              const updatedAt = data.updatedAt || data.updatedDate || createdAt;
+
+              seenIds.add(doc.id);
               list.push({
                 id: doc.id,
                 dispatchNumber: data.dispatchNumber || 'DSP-0000',
@@ -456,15 +569,39 @@ export function subscribeMobileDispatches(
                 receivedBy: data.receivedBy || '',
                 receivedAt: data.receivedAt || '',
                 receivingChecklist: data.receivingChecklist,
+                isArchived: Boolean(data.isArchived),
+                archivedAt: data.archivedAt || '',
+                archivedBy: data.archivedBy || '',
                 createdBy: data.createdBy || 'Factory Supervisor',
-                createdAt: data.createdAt || new Date().toISOString(),
-                updatedAt: data.updatedAt || new Date().toISOString(),
+                createdAt,
+                updatedAt,
                 history: Array.isArray(data.history) ? data.history : []
               });
             });
 
+            // If local storage has legacy items not in Firestore snapshot, preserve them
+            const localLegacy = getLocalCache();
+            localLegacy.forEach((legacyItem) => {
+              if (legacyItem && legacyItem.id && !seenIds.has(legacyItem.id)) {
+                seenIds.add(legacyItem.id);
+                list.push(legacyItem);
+              }
+            });
+
+            // Sort cleanly in memory by date descending
+            list.sort((a, b) => {
+              const dateA = new Date(a.createdAt || 0).getTime();
+              const dateB = new Date(b.createdAt || 0).getTime();
+              return dateB - dateA;
+            });
+
             // Update localStorage
-            localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(list));
+            try {
+              localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(list));
+            } catch (e) {
+              console.warn('Failed to cache dispatches to localStorage:', e);
+            }
+
             callback(list);
           },
           (error) => {
@@ -486,15 +623,80 @@ export function subscribeMobileDispatches(
 }
 
 function getLocalCache(): MobileDispatchDoc[] {
+  const result: MobileDispatchDoc[] = [];
+  const seenIds = new Set<string>();
+
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
     if (raw) {
-      return JSON.parse(raw);
+      const parsed: MobileDispatchDoc[] = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        parsed.forEach((item) => {
+          if (item && item.id && !seenIds.has(item.id)) {
+            seenIds.add(item.id);
+            result.push(item);
+          }
+        });
+      }
     }
   } catch (e) {
     console.warn('Failed to parse local dispatches cache:', e);
   }
-  return [];
+
+  // Gracefully load and map legacy dispatches from tsj_dispatches_v1 if present
+  try {
+    const rawLegacy = localStorage.getItem('tsj_dispatches_v1');
+    if (rawLegacy) {
+      const parsedLegacy = JSON.parse(rawLegacy);
+      if (Array.isArray(parsedLegacy)) {
+        parsedLegacy.forEach((item: any) => {
+          if (item && item.id && !seenIds.has(item.id)) {
+            seenIds.add(item.id);
+            result.push({
+              id: String(item.id),
+              dispatchNumber: item.dispatchNumber || 'DSP-0000',
+              project: item.project || item.customer || 'Unnamed Project',
+              customer: item.customer || '',
+              originBranch: item.originBranch || 'Main Factory',
+              destinationBranch: item.destinationBranch || 'Cape Town',
+              courier: item.courier || '',
+              trackingNumber: item.trackingNumber || '',
+              notes: item.notes || '',
+              status: item.status || 'In Transit',
+              totalPieces: typeof item.totalPieces === 'number' ? item.totalPieces : (Array.isArray(item.photos) && item.photos.length > 0 ? item.photos.length : 1),
+              missingPieces: Array.isArray(item.missingPieces) ? item.missingPieces : [],
+              verifiedPieces: Array.isArray(item.verifiedPieces) ? item.verifiedPieces : [],
+              photos: Array.isArray(item.photos) ? item.photos : [],
+              photoCount: typeof item.photoCount === 'number' ? item.photoCount : (Array.isArray(item.photos) ? item.photos.length : 0),
+              receivingPhotos: Array.isArray(item.receivingPhotos) ? item.receivingPhotos : [],
+              receivingNotes: item.receivingNotes || '',
+              receivedBy: item.receivedBy || '',
+              receivedAt: item.receivedAt || '',
+              receivingChecklist: item.receivingChecklist,
+              isArchived: Boolean(item.isArchived),
+              archivedAt: item.archivedAt || '',
+              archivedBy: item.archivedBy || '',
+              createdBy: item.createdBy || 'Factory Supervisor',
+              createdAt: item.createdAt || new Date().toISOString(),
+              updatedAt: item.updatedAt || new Date().toISOString(),
+              history: Array.isArray(item.history) ? item.history : []
+            });
+          }
+        });
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to parse legacy tsj_dispatches_v1 cache:', e);
+  }
+
+  // Sort in memory by date descending
+  result.sort((a, b) => {
+    const dateA = new Date(a.createdAt || 0).getTime();
+    const dateB = new Date(b.createdAt || 0).getTime();
+    return dateB - dateA;
+  });
+
+  return result;
 }
 
 function saveToLocalCache(doc: MobileDispatchDoc) {

@@ -57,12 +57,11 @@ export const PPESignOffCertificate: React.FC<PPESignOffCertificateProps> = ({
 
       {/* A4 Document Layout */}
       <div 
-        id="ppe-certificate-print-container" 
-        className="bg-white text-black p-10 md:p-14 font-sans w-full max-w-4xl shadow-2xl rounded-sm text-left border border-gray-200 print:border-none print:shadow-none print:p-8"
-        style={{ minHeight: '297mm' }}
+        id="ppe-print-certificate" 
+        className="ppe-certificate-print bg-white text-black p-10 md:p-14 font-sans w-full max-w-4xl shadow-2xl rounded-sm text-left border border-gray-200 print:border-none print:shadow-none print:p-0 print:m-0 print:w-full print:max-w-none print:static"
       >
         {/* Letterhead Header */}
-        <div className="border-b-2 border-black pb-6 mb-6 flex justify-between items-start avoid-break">
+        <div className="ppe-header-block border-b-2 border-black pb-6 mb-6 flex justify-between items-start avoid-break ppe-avoid-break">
           <div>
             <div className="flex items-center gap-3 mb-1">
               <div className="w-10 h-10 rounded-lg bg-black text-white flex items-center justify-center font-black text-xl tracking-tighter">
@@ -96,7 +95,7 @@ export const PPESignOffCertificate: React.FC<PPESignOffCertificateProps> = ({
         </div>
 
         {/* Certificate Title */}
-        <div className="text-center bg-gray-50 border border-gray-200 py-3 px-4 rounded-xl mb-6 avoid-break">
+        <div className="text-center bg-gray-50 border border-gray-200 py-3 px-4 rounded-xl mb-6 avoid-break ppe-avoid-break">
           <h2 className="text-lg font-black uppercase tracking-wider text-black">
             Personal Protective Equipment (PPE) Issuance & Handover Certificate
           </h2>
@@ -106,7 +105,7 @@ export const PPESignOffCertificate: React.FC<PPESignOffCertificateProps> = ({
         </div>
 
         {/* Employee & Supervisor Metadata Grid */}
-        <div className="grid grid-cols-2 gap-6 mb-6 border border-gray-200 p-5 rounded-2xl bg-gray-50/50 avoid-break">
+        <div className="ppe-metadata-block grid grid-cols-2 gap-6 mb-6 border border-gray-200 p-5 rounded-2xl bg-gray-50/50 avoid-break ppe-avoid-break">
           <div>
             <p className="text-[10px] font-black uppercase tracking-wider text-gray-500 mb-1">Employee Recipient</p>
             <p className="text-xl font-black uppercase text-black">{issuanceRecord.employeeName}</p>
@@ -128,14 +127,14 @@ export const PPESignOffCertificate: React.FC<PPESignOffCertificateProps> = ({
         </div>
 
         {/* Itemized Table of Issued Equipment */}
-        <div className="mb-6 avoid-break">
-          <h3 className="text-xs font-black uppercase tracking-wider text-gray-700 mb-3 flex items-center justify-between border-b border-gray-200 pb-1.5">
+        <div className="mb-6">
+          <h3 className="text-xs font-black uppercase tracking-wider text-gray-700 mb-3 flex items-center justify-between border-b border-gray-200 pb-1.5 avoid-break ppe-avoid-break">
             <span>Itemized Schedule of Received Safety Gear</span>
             <span className="text-amber-800 font-bold font-mono">({issuedItems.length} Items Handed Over)</span>
           </h3>
-          <table className="w-full text-left border-collapse border border-gray-300 text-xs">
+          <table className="w-full text-left border-collapse border border-gray-300 text-xs ppe-items-table">
             <thead>
-              <tr className="bg-gray-100 text-[10px] uppercase font-black tracking-wider text-gray-700">
+              <tr className="bg-gray-100 text-[10px] uppercase font-black tracking-wider text-gray-700 avoid-break ppe-avoid-break">
                 <th className="p-2.5 border border-gray-300 text-center w-10">#</th>
                 <th className="p-2.5 border border-gray-300">Equipment Description</th>
                 <th className="p-2.5 border border-gray-300 w-28">Category</th>
@@ -146,7 +145,7 @@ export const PPESignOffCertificate: React.FC<PPESignOffCertificateProps> = ({
             </thead>
             <tbody>
               {issuedItems.map((item, idx) => (
-                <tr key={item.itemId || idx} className="border-b border-gray-300 hover:bg-gray-50">
+                <tr key={item.itemId || idx} className="ppe-table-row border-b border-gray-300 hover:bg-gray-50 avoid-break ppe-avoid-break">
                   <td className="p-2.5 border border-gray-300 text-center font-mono font-bold text-gray-500">
                     {idx + 1}
                   </td>
@@ -171,7 +170,7 @@ export const PPESignOffCertificate: React.FC<PPESignOffCertificateProps> = ({
                 </tr>
               ))}
               {issuedItems.length === 0 && (
-                <tr>
+                <tr className="avoid-break ppe-avoid-break">
                   <td colSpan={6} className="p-6 text-center text-gray-500 italic">
                     No safety gear items recorded in this issuance batch.
                   </td>
@@ -182,7 +181,7 @@ export const PPESignOffCertificate: React.FC<PPESignOffCertificateProps> = ({
         </div>
 
         {/* Legal Compliance & Employee Undertaking */}
-        <div className="mb-8 p-4 bg-gray-50 border border-gray-300 rounded-xl text-[11px] leading-relaxed text-gray-700 avoid-break">
+        <div className="ppe-undertaking-box mb-8 p-4 bg-gray-50 border border-gray-300 rounded-xl text-[11px] leading-relaxed text-gray-700 avoid-break ppe-avoid-break">
           <h4 className="font-black uppercase text-[11px] text-black mb-1 tracking-wider">
             Legal Compliance Undertaking & Care Obligations
           </h4>
@@ -201,8 +200,8 @@ export const PPESignOffCertificate: React.FC<PPESignOffCertificateProps> = ({
         </div>
 
         {/* Dual Signature Blocks */}
-        <div className="grid grid-cols-2 gap-12 pt-4 avoid-break">
-          <div className="border border-gray-300 p-5 rounded-2xl text-center bg-white shadow-sm">
+        <div className="ppe-signatures-block grid grid-cols-2 gap-12 pt-4 avoid-break ppe-avoid-break">
+          <div className="border border-gray-300 p-5 rounded-2xl text-center bg-white shadow-sm avoid-break ppe-avoid-break">
             <div className="h-16 flex items-end justify-center pb-1">
               <div className="font-mono text-xs font-bold text-blue-900 border-b-2 border-black w-full pb-1">
                 {issuanceRecord.employeeAcknowledged ? `[Verified Employee PIN & Handover Signed]` : '______________________________________'}
@@ -213,7 +212,7 @@ export const PPESignOffCertificate: React.FC<PPESignOffCertificateProps> = ({
             <p className="text-[10px] text-gray-400 font-mono mt-1">Date: {issuanceRecord.issuanceDate}</p>
           </div>
 
-          <div className="border border-gray-300 p-5 rounded-2xl text-center bg-white shadow-sm">
+          <div className="border border-gray-300 p-5 rounded-2xl text-center bg-white shadow-sm avoid-break ppe-avoid-break">
             <div className="h-16 flex items-end justify-center pb-1">
               <div className="font-mono text-xs font-bold text-amber-900 border-b-2 border-black w-full pb-1">
                 {issuanceRecord.supervisorSigned ? `[Supervisor Verified & Signed]` : '______________________________________'}
@@ -226,7 +225,7 @@ export const PPESignOffCertificate: React.FC<PPESignOffCertificateProps> = ({
         </div>
 
         {/* Certificate Footer */}
-        <div className="mt-10 pt-4 border-t border-gray-300 flex justify-between items-center text-[9px] font-bold text-gray-500 uppercase tracking-wider avoid-break">
+        <div className="mt-10 pt-4 border-t border-gray-300 flex justify-between items-center text-[9px] font-bold text-gray-500 uppercase tracking-wider avoid-break ppe-avoid-break">
           <span>TimberSmith Joinery (Pty) Ltd • OHS Compliance Form OH-PPE-01</span>
           <span>Official Record • Master File Copy</span>
           <span>Generated: {new Date().toLocaleDateString('en-ZA')}</span>

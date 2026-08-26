@@ -50,10 +50,8 @@ export const ClockingTerminal: React.FC<ClockingTerminalProps> = ({
   // 1. Strictly process live employees from props without any mock/default datasets
   const rawList = Array.isArray(employees) ? employees : [];
 
-  // 2. Strict Filter:
-  // - Must not be archived or inactive
-  // - MUST have a valid non-empty photo URL (completely excludes placeholder letter initials)
-  // - Deduplicated by unique ID
+  // 2. Filter active workers (excluding archived and inactive profiles)
+  // Deduplicated by unique ID, fallback avatar supported if photo is not set
   const seenIds = new Set<string>();
   const activeWorkers: Employee[] = [];
 
@@ -65,18 +63,16 @@ export const ClockingTerminal: React.FC<ClockingTerminalProps> = ({
     const isInactive = (emp as any).status === 'inactive' || (emp as any).status === 'Inactive' || (emp as any).active === false;
     if (isArchived || isInactive) continue;
 
-    // Strict photo requirement: Must have a valid, non-empty photo URL
-    const photoUrl = getValidPhotoUrl(emp);
-    if (!photoUrl) continue;
-
     // Deduplicate by unique employee ID / identifier
     const uniqueKey = emp.id || (emp as any).employeeId || emp.employeeNumber || `${emp.name}_${emp.surname}`;
     if (!uniqueKey || seenIds.has(uniqueKey)) continue;
 
+    const photoUrl = getValidPhotoUrl(emp);
+
     seenIds.add(uniqueKey);
     activeWorkers.push({
       ...emp,
-      photo: photoUrl
+      photo: photoUrl || emp.photo || null
     });
   }
 
@@ -216,7 +212,7 @@ export const ClockingTerminal: React.FC<ClockingTerminalProps> = ({
 
         {activeWorkers.length === 0 && (
           <div className="col-span-full text-center py-24 bg-black/30 rounded-[3rem] border border-white/5 font-sans">
-            <p className="text-gray-400 uppercase font-black text-sm tracking-wider">No active artisans with photos found.</p>
+            <p className="text-gray-400 uppercase font-black text-sm tracking-wider">No active artisans found on roster.</p>
           </div>
         )}
       </div>
