@@ -293,7 +293,19 @@ export const EmployeeDetailsModal: React.FC<EmployeeDetailsModalProps> = ({
                           <Icon name="calendar" size={18} />
                         </div>
                         <div>
-                          <p className="font-bold text-white text-sm font-sans">{shift.date}</p>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="font-bold text-white text-sm font-sans">{shift.date}</p>
+                            {shift.isOvernight && (
+                              <span className="text-[9px] uppercase font-black px-1.5 py-0.5 bg-blue-500/20 text-blue-300 border border-blue-500/30 rounded">
+                                🌙 Overnight Shift
+                              </span>
+                            )}
+                            {shift.isStaleRecovery && (
+                              <span className="text-[9px] uppercase font-black px-1.5 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded flex items-center gap-1">
+                                ⚠️ Stale / Review Needed
+                              </span>
+                            )}
+                          </div>
                           <p className="text-xs text-gray-500 font-mono mt-0.5">
                             Shift: <span className="text-blue-300">{shift.clockIn}</span> to <span className="text-blue-300">{shift.clockOut}</span>
                           </p>

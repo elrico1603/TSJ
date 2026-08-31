@@ -3,6 +3,7 @@ import { db, auth, APP_ID_PATH, APP_MOBILE_LINK } from './firebase';
 import {
   SA_HOLIDAYS,
   Employee,
+  ShiftRecord,
   KanbanCard,
   KanbanTemplate,
   OrderItem,
@@ -1686,24 +1687,73 @@ TS Joinery Kanban System`
     }
   };
 
-  const processClockEvent = async (emp: Employee) => {
+  const processClockEvent = async (emp: Employee, forcedIntent?: 'In' | 'Out' | 'Break') => {
     try {
       const clockTime = new Date();
       let newStatus: 'In' | 'Out' | 'Break' | 'Archived';
       let actionMsg;
+      let isStaleRecoveryAction = false;
+      let staleShiftRecordToArchive: ShiftRecord | null = null;
 
+      // 1. Determine Intent
       if (pendingAction === 'time_off_out') {
         newStatus = 'Break';
         actionMsg = `Time off logged: ${timeOffReason}`;
       } else if (pendingAction === 'time_off_in') {
         newStatus = 'In';
         actionMsg = `Returned to work.`;
+      } else if (forcedIntent) {
+        newStatus = forcedIntent;
+        actionMsg = newStatus === 'In' ? `You have clocked in.` : newStatus === 'Out' ? `You have clocked out.` : `Time off logged.`;
       } else {
-        newStatus = emp.status === 'In' ? 'Out' : 'In';
-        actionMsg = newStatus === 'In' ? `You have clocked in.` : `You have clocked out.`;
+        // Automatic state resolution with Stale Open Shift Check
+        if (emp.status === 'In') {
+          if (emp.shiftStartTime) {
+            const shiftStart = new Date(emp.shiftStartTime);
+            const elapsedMs = clockTime.getTime() - shiftStart.getTime();
+            const elapsedHours = elapsedMs / 3600000;
+            const startDateStr = getLocalDateString(shiftStart);
+            const todayDateStr = getLocalDateString(clockTime);
+
+            // Shift is legitimate overnight / extended if elapsed <= 24 hours
+            if (elapsedHours >= 0 && elapsedHours <= 24) {
+              newStatus = 'Out';
+              actionMsg = `You have clocked out.`;
+            } else {
+              // STALE OPEN SHIFT DETECTED (> 24 hours or cross-day gap without clock-out)
+              // Fail-safe requirement: DO NOT pair with old shift. DO NOT invent clock-out time.
+              // Preserve original open shift metadata, isolate it, and start new legitimate shift.
+              console.warn(`[CLOCKING FAIL-SAFE] Stale open shift detected for ${emp.name} (Started ${emp.shiftStartTime}, elapsed ${elapsedHours.toFixed(1)}h). Starting fresh shift.`);
+              isStaleRecoveryAction = true;
+              newStatus = 'In';
+              actionMsg = `Welcome back. New shift started. (Prior open shift flagged for review)`;
+
+              // Create isolated stale shift record with metadata
+              staleShiftRecordToArchive = {
+                date: startDateStr,
+                clockIn: shiftStart.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                clockOut: '--:--',
+                hours: 0,
+                clockInDateTime: shiftStart.toISOString(),
+                isStaleRecovery: true,
+                requiresSupervisorReview: true,
+                notes: `Stale open shift detected on ${todayDateStr}. Isolated for supervisor review.`
+              };
+
+              auditLogger.log('STALE_SHIFT_ISOLATED', emp.name || 'Artisan', `Open shift from ${startDateStr} (${shiftStart.toLocaleTimeString()}) was detected as stale on ${todayDateStr} and isolated for review.`);
+            }
+          } else {
+            // Clocked in but missing shiftStartTime timestamp
+            newStatus = 'Out';
+            actionMsg = `You have clocked out.`;
+          }
+        } else {
+          newStatus = 'In';
+          actionMsg = `You have clocked in.`;
+        }
       }
       
-      console.log('[Clocking Debug] Attendance record found for:', emp.name, 'Current status:', emp.status, 'New calculated status:', newStatus);
+      console.log('[Clocking Debug] Attendance record found for:', emp.name, 'Current status:', emp.status, 'Forced intent:', forcedIntent, 'New calculated status:', newStatus, 'Stale recovery:', isStaleRecoveryAction);
       
       setLastClockResult(newStatus);
       setView('success_screen'); 
@@ -1746,35 +1796,59 @@ TS Joinery Kanban System`
           }
           updateData.breaks = breaks;
         }
-      }
 
-      if (newStatus === 'In') {
+        // Handle starting new shift
         updateData.shiftStartTime = clockTime.toISOString();
+
+        // If this clock-in was recovering from a stale open shift, append the isolated stale record to shifts
+        if (isStaleRecoveryAction && staleShiftRecordToArchive) {
+          const currentShifts = [...(emp.shifts || [])];
+          currentShifts.push(staleShiftRecordToArchive);
+          updateData.shifts = currentShifts;
+        }
       } else {
+        // CLOCK OUT: Calculate shift hours accurately using ISO timestamps
         const startTime = new Date(emp.shiftStartTime || clockTime);
-        const shiftHours = parseFloat(((clockTime.getTime() - startTime.getTime()) / 3600000).toFixed(2));
-        const todayStr = getLocalDateString(clockTime);
+        const shiftDurationMs = Math.max(0, clockTime.getTime() - startTime.getTime());
+        const shiftHours = parseFloat((shiftDurationMs / 3600000).toFixed(2));
         
+        // Use the shift's START date for accurate calendar allocation
+        const shiftStartDateStr = getLocalDateString(startTime);
+        const clockOutDateStr = getLocalDateString(clockTime);
+        const isOvernight = shiftStartDateStr !== clockOutDateStr;
+
+        // Allocate hours to the shift start date in history
         const history = [...(emp.history || [])]; 
-        const existingToday = history.findIndex(h => h.date === todayStr);
-        if (existingToday > -1) {
-          history[existingToday] = { ...history[existingToday], hours: history[existingToday].hours + shiftHours };
+        const existingShiftDateIndex = history.findIndex(h => h.date === shiftStartDateStr);
+        if (existingShiftDateIndex > -1) {
+          history[existingShiftDateIndex] = { 
+            ...history[existingShiftDateIndex], 
+            hours: parseFloat((history[existingShiftDateIndex].hours + shiftHours).toFixed(2)) 
+          };
         } else {
-          history.push({ date: todayStr, hours: shiftHours });
+          history.push({ date: shiftStartDateStr, hours: shiftHours });
         }
 
         const shifts = [...(emp.shifts || [])]; 
-        shifts.push({
-          date: todayStr,
+        const newShiftRecord: ShiftRecord = {
+          date: shiftStartDateStr,
           clockIn: startTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           clockOut: clockTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          hours: shiftHours
-        });
+          hours: shiftHours,
+          clockInDateTime: startTime.toISOString(),
+          clockOutDateTime: clockTime.toISOString(),
+          isOvernight: isOvernight,
+          closedBy: currentUser?.name || currentUser?.email || 'Self Terminal'
+        };
+        shifts.push(newShiftRecord);
+
+        const todayStr = getLocalDateString(clockTime);
+        const todayHistoryEntry = history.find(h => h.date === todayStr);
 
         updateData.shifts = shifts;
-        updateData.todayHours = history.find(h => h.date === todayStr)!.hours;
-        updateData.weeklyHours = (emp.weeklyHours || 0) + shiftHours;
-        updateData.monthlyHours = (emp.monthlyHours || 0) + shiftHours;
+        updateData.todayHours = todayHistoryEntry ? todayHistoryEntry.hours : 0;
+        updateData.weeklyHours = parseFloat(((emp.weeklyHours || 0) + shiftHours).toFixed(2));
+        updateData.monthlyHours = parseFloat(((emp.monthlyHours || 0) + shiftHours).toFixed(2));
         updateData.history = history;
         updateData.shiftStartTime = null;
       }

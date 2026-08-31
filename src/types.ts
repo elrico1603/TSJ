@@ -10,6 +10,12 @@ export interface ShiftRecord {
   clockOut: string;
   hours: number;
   notes?: string;
+  clockInDateTime?: string;
+  clockOutDateTime?: string;
+  isOvernight?: boolean;
+  isStaleRecovery?: boolean;
+  requiresSupervisorReview?: boolean;
+  closedBy?: string;
 }
 
 export interface BreakRecord {
