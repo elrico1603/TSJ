@@ -2334,7 +2334,7 @@ TS Joinery Kanban System`
                 <div>
                   <p className="text-[10px] font-black uppercase text-gray-500 tracking-[0.2em] mb-3 xl:mb-4">Artisan Terminal</p>
                   <div className="space-y-2">
-                    {permissionService.hasPermission(currentUser, 'Clocking', 'View') && (
+                    {permissionService.canAccessMode(currentUser, 'employee', 'desktop') && (
                       <button 
                         onClick={() => { setAppMode('employee'); setView('dashboard'); setSelectedEmployee(null); }} 
                         className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${appMode === 'employee' ? 'bg-[#ff8c00]/10 border border-[#ff8c00]/30 text-[#ff8c00]' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
@@ -2344,130 +2344,150 @@ TS Joinery Kanban System`
                       </button>
                     )}
 
-                    <button 
-                      onClick={() => { setAppMode('qr_scan_service'); setView('dashboard'); }} 
-                      className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${appMode === 'qr_scan_service' ? 'bg-purple-600/10 border border-purple-500/30 text-purple-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
-                    >
-                      <Icon name="scan" size={18} />
-                      <span className="font-black uppercase text-xs tracking-wider font-sans">QR Scan Service</span>
-                    </button>
+                    {permissionService.canAccessMode(currentUser, 'qr_scan_service', 'desktop') && (
+                      <button 
+                        onClick={() => { setAppMode('qr_scan_service'); setView('dashboard'); }} 
+                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${appMode === 'qr_scan_service' ? 'bg-purple-600/10 border border-purple-500/30 text-purple-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                      >
+                        <Icon name="scan" size={18} />
+                        <span className="font-black uppercase text-xs tracking-wider font-sans">QR Scan Service</span>
+                      </button>
+                    )}
                   </div>
                 </div>
 
                 {/* Gemini AI Hub Navigation Section */}
-                <div>
-                  <p className="text-[10px] font-black uppercase text-cyan-400 tracking-[0.2em] mb-3 xl:mb-4 flex items-center gap-1.5">
-                    <Icon name="sparkles" size={12} className="text-cyan-400" />
-                    <span>AI Intelligence</span>
-                  </p>
-                  <button 
-                    disabled={isLocked}
-                    onClick={() => { setAppMode('gemini_chat'); }} 
-                    className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${isLocked ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'gemini_chat' ? 'bg-gradient-to-r from-cyan-950/50 to-blue-950/50 border border-cyan-500/40 text-cyan-300 shadow-lg shadow-cyan-500/10' : 'hover:bg-white/5 text-gray-300 hover:text-white'}`}
-                  >
-                    <Icon name="bot" size={18} className="text-cyan-400 shrink-0" />
-                    <div className="flex items-center justify-between w-full">
-                      <span className="font-black uppercase text-xs tracking-wider">Gemini AI Hub</span>
-                      <span className="px-2 py-0.5 bg-cyan-500/20 border border-cyan-500/30 text-cyan-300 text-[9px] font-mono font-black rounded-full">3.7</span>
-                    </div>
-                  </button>
-                </div>
+                {permissionService.canAccessMode(currentUser, 'gemini_chat', 'desktop') && (
+                  <div>
+                    <p className="text-[10px] font-black uppercase text-cyan-400 tracking-[0.2em] mb-3 xl:mb-4 flex items-center gap-1.5">
+                      <Icon name="sparkles" size={12} className="text-cyan-400" />
+                      <span>AI Intelligence</span>
+                    </p>
+                    <button 
+                      disabled={isLocked}
+                      onClick={() => { setAppMode('gemini_chat'); }} 
+                      className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${isLocked ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'gemini_chat' ? 'bg-gradient-to-r from-cyan-950/50 to-blue-950/50 border border-cyan-500/40 text-cyan-300 shadow-lg shadow-cyan-500/10' : 'hover:bg-white/5 text-gray-300 hover:text-white'}`}
+                    >
+                      <Icon name="bot" size={18} className="text-cyan-400 shrink-0" />
+                      <div className="flex items-center justify-between w-full">
+                        <span className="font-black uppercase text-xs tracking-wider">Gemini AI Hub</span>
+                        <span className="px-2 py-0.5 bg-cyan-500/20 border border-cyan-500/30 text-cyan-300 text-[9px] font-mono font-black rounded-full">3.7</span>
+                      </div>
+                    </button>
+                  </div>
+                )}
 
-                {/* Hide Management Hub completely for Stock Manager role */}
-                {!isStockManager && (
+                {/* Management Hub Section */}
+                {(
+                  permissionService.canAccessMode(currentUser, 'product_master', 'desktop') ||
+                  permissionService.canAccessMode(currentUser, 'purchase_orders', 'desktop') ||
+                  permissionService.canAccessMode(currentUser, 'dispatch', 'desktop') ||
+                  permissionService.canAccessMode(currentUser, 'template_designer', 'desktop') ||
+                  permissionService.canAccessMode(currentUser, 'orders', 'desktop') ||
+                  permissionService.canAccessMode(currentUser, 'admin', 'desktop') ||
+                  permissionService.canAccessMode(currentUser, 'analytics', 'desktop') ||
+                  permissionService.canAccessMode(currentUser, 'leave', 'desktop')
+                ) && (
                   <div>
                     <div className="flex justify-between items-center mb-3 xl:mb-4">
                       <p className="text-[10px] font-black uppercase text-gray-500 tracking-[0.2em]">Management Hub</p>
                       {isLocked && <span className="p-1 bg-red-500/10 text-red-500 border border-red-500/20 rounded text-[8px] font-bold uppercase tracking-widest font-sans">Locked</span>}
                     </div>
-                    <div className="space-y-2 font-sans font-sans">
-                      <button 
-                        disabled={isLocked || !permissionService.canAccessMode(currentUser, 'product_master')}
-                        onClick={() => { setAppMode('product_master'); }} 
-                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${(isLocked || !permissionService.canAccessMode(currentUser, 'product_master')) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'product_master' ? 'bg-cyan-600/10 border border-cyan-500/30 text-cyan-400' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
-                      >
-                        <Icon name="box" size={18} />
-                        <span className="font-black uppercase text-xs tracking-wider">Product Master</span>
-                      </button>
+                    <div className="space-y-2 font-sans">
+                      {permissionService.canAccessMode(currentUser, 'product_master', 'desktop') && (
+                        <button 
+                          disabled={isLocked}
+                          onClick={() => { setAppMode('product_master'); }} 
+                          className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${isLocked ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'product_master' ? 'bg-cyan-600/10 border border-cyan-500/30 text-cyan-400' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                        >
+                          <Icon name="box" size={18} />
+                          <span className="font-black uppercase text-xs tracking-wider">Product Master</span>
+                        </button>
+                      )}
 
-                      <button 
-                        disabled={isLocked || !permissionService.canAccessMode(currentUser, 'purchase_orders')}
-                        onClick={() => { setAppMode('purchase_orders'); }} 
-                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${(isLocked || !permissionService.canAccessMode(currentUser, 'purchase_orders')) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'purchase_orders' ? 'bg-cyan-600/10 border border-cyan-500/30 text-cyan-400' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
-                      >
-                        <Icon name="file-text" size={18} />
-                        <span className="font-black uppercase text-xs tracking-wider">Purchase Orders</span>
-                      </button>
+                      {permissionService.canAccessMode(currentUser, 'purchase_orders', 'desktop') && (
+                        <button 
+                          disabled={isLocked}
+                          onClick={() => { setAppMode('purchase_orders'); }} 
+                          className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${isLocked ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'purchase_orders' ? 'bg-cyan-600/10 border border-cyan-500/30 text-cyan-400' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                        >
+                          <Icon name="file-text" size={18} />
+                          <span className="font-black uppercase text-xs tracking-wider">Purchase Orders</span>
+                        </button>
+                      )}
 
-                      <button 
-                        disabled={isLocked || !permissionService.canAccessMode(currentUser, 'dispatch')}
-                        onClick={() => { setAppMode('dispatch'); }} 
-                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${(isLocked || !permissionService.canAccessMode(currentUser, 'dispatch')) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'dispatch' ? 'bg-amber-600/10 border border-amber-500/30 text-amber-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
-                      >
-                        <Icon name="truck" size={18} />
-                        <span className="font-black uppercase text-xs tracking-wider">Dispatch & Receiving</span>
-                      </button>
+                      {permissionService.canAccessMode(currentUser, 'dispatch', 'desktop') && (
+                        <button 
+                          disabled={isLocked}
+                          onClick={() => { setAppMode('dispatch'); }} 
+                          className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${isLocked ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'dispatch' ? 'bg-amber-600/10 border border-amber-500/30 text-amber-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                        >
+                          <Icon name="truck" size={18} />
+                          <span className="font-black uppercase text-xs tracking-wider">Dispatch & Receiving</span>
+                        </button>
+                      )}
 
-                      <button 
-                        disabled={isLocked || !permissionService.canAccessMode(currentUser, 'template_designer')}
-                        onClick={() => { setAppMode('template_designer'); }} 
-                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${(isLocked || !permissionService.canAccessMode(currentUser, 'template_designer')) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'template_designer' ? 'bg-purple-600/10 border border-purple-500/30 text-purple-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
-                      >
-                        <Icon name="layout-template" size={18} />
-                        <span className="font-black uppercase text-xs tracking-wider">Kanban Designer</span>
-                      </button>
+                      {permissionService.canAccessMode(currentUser, 'template_designer', 'desktop') && (
+                        <button 
+                          disabled={isLocked}
+                          onClick={() => { setAppMode('template_designer'); }} 
+                          className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${isLocked ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'template_designer' ? 'bg-purple-600/10 border border-purple-500/30 text-purple-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                        >
+                          <Icon name="layout-template" size={18} />
+                          <span className="font-black uppercase text-xs tracking-wider">Kanban Designer</span>
+                        </button>
+                      )}
 
-                      <button 
-                        disabled={isLocked || !permissionService.canAccessMode(currentUser, 'orders')}
-                        onClick={() => { setAppMode('orders'); }} 
-                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${(isLocked || !permissionService.canAccessMode(currentUser, 'orders')) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'orders' ? 'bg-[#ff8c00]/10 border border-[#ff8c00]/30 text-[#ff8c00]' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
-                      >
-                        <Icon name="banknote" size={18} />
-                        <span className="font-black uppercase text-xs tracking-wider">Procurement & Orders</span>
-                      </button>
+                      {permissionService.canAccessMode(currentUser, 'orders', 'desktop') && (
+                        <button 
+                          disabled={isLocked}
+                          onClick={() => { setAppMode('orders'); }} 
+                          className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${isLocked ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'orders' ? 'bg-[#ff8c00]/10 border border-[#ff8c00]/30 text-[#ff8c00]' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                        >
+                          <Icon name="banknote" size={18} />
+                          <span className="font-black uppercase text-xs tracking-wider">Procurement & Orders</span>
+                        </button>
+                      )}
 
-                      <button 
-                        disabled={isLocked || !permissionService.canAccessMode(currentUser, 'admin')}
-                        onClick={() => { setAppMode('admin'); setView('dashboard'); }} 
-                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${(isLocked || !permissionService.canAccessMode(currentUser, 'admin')) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'admin' ? 'bg-blue-600/10 border border-blue-500/30 text-blue-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
-                      >
-                        <Icon name="users" size={18} />
-                        <span className="font-black uppercase text-xs tracking-wider font-sans">Employer Registration</span>
-                      </button>
+                      {permissionService.canAccessMode(currentUser, 'admin', 'desktop') && (
+                        <button 
+                          disabled={isLocked}
+                          onClick={() => { setAppMode('admin'); setView('dashboard'); }} 
+                          className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${isLocked ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'admin' ? 'bg-blue-600/10 border border-blue-500/30 text-blue-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                        >
+                          <Icon name="users" size={18} />
+                          <span className="font-black uppercase text-xs tracking-wider font-sans">Employer Registration</span>
+                        </button>
+                      )}
 
-                      <button 
-                        disabled={isLocked || !permissionService.canAccessMode(currentUser, 'analytics')}
-                        onClick={() => { setAppMode('analytics'); setView('dashboard'); }} 
-                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${(isLocked || !permissionService.canAccessMode(currentUser, 'analytics')) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'analytics' ? 'bg-emerald-600/10 border border-emerald-500/30 text-emerald-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
-                      >
-                        <Icon name="bar-chart-3" size={18} />
-                        <span className="font-black uppercase text-xs tracking-wider font-sans">Work Analytics</span>
-                      </button>
+                      {permissionService.canAccessMode(currentUser, 'analytics', 'desktop') && (
+                        <button 
+                          disabled={isLocked}
+                          onClick={() => { setAppMode('analytics'); setView('dashboard'); }} 
+                          className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${isLocked ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'analytics' ? 'bg-emerald-600/10 border border-emerald-500/30 text-emerald-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                        >
+                          <Icon name="bar-chart-3" size={18} />
+                          <span className="font-black uppercase text-xs tracking-wider font-sans">Work Analytics</span>
+                        </button>
+                      )}
 
-                      <button 
-                        disabled={isLocked || !permissionService.canAccessMode(currentUser, 'leave')}
-                        onClick={() => { setAppMode('leave'); setView('dashboard'); }} 
-                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${(isLocked || !permissionService.canAccessMode(currentUser, 'leave')) ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'leave' ? 'bg-amber-600/10 border border-amber-500/30 text-amber-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
-                      >
-                        <Icon name="calendar" size={18} />
-                        <div className="flex items-center justify-between w-full">
-                          <span className="font-black uppercase text-xs tracking-wider">Leave Management</span>
-                          {leaveRequests.filter(r => r.status === 'Pending').length > 0 && (
-                            <span className="px-2 py-0.5 bg-amber-500 text-black text-[10px] font-mono font-black rounded-full">
-                              {leaveRequests.filter(r => r.status === 'Pending').length}
-                            </span>
-                          )}
-                        </div>
-                      </button>
-
-                      <button 
-                        disabled={isLocked}
-                        onClick={() => setAppMode('mobile')} 
-                        className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${isLocked ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'mobile' ? 'bg-pink-600/10 border border-pink-500/30 text-pink-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
-                      >
-                        <Icon name="smartphone" size={18} />
-                        <span className="font-black uppercase text-xs tracking-wider">Mobile Deployment</span>
-                      </button>
+                      {permissionService.canAccessMode(currentUser, 'leave', 'desktop') && (
+                        <button 
+                          disabled={isLocked}
+                          onClick={() => { setAppMode('leave'); setView('dashboard'); }} 
+                          className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${isLocked ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'leave' ? 'bg-amber-600/10 border border-amber-500/30 text-amber-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                        >
+                          <Icon name="calendar" size={18} />
+                          <div className="flex items-center justify-between w-full">
+                            <span className="font-black uppercase text-xs tracking-wider">Leave Management</span>
+                            {leaveRequests.filter(r => r.status === 'Pending').length > 0 && (
+                              <span className="px-2 py-0.5 bg-amber-500 text-black text-[10px] font-mono font-black rounded-full">
+                                {leaveRequests.filter(r => r.status === 'Pending').length}
+                              </span>
+                            )}
+                          </div>
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}
@@ -4179,7 +4199,6 @@ TS Joinery Kanban System`
       {(layoutMode === 'phone' || window.innerWidth < 768) && (
         <nav className={`fixed bottom-0 inset-x-0 z-50 bg-[#0c0c0c]/95 backdrop-blur-2xl border-t border-white/10 px-3 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] flex items-center justify-around shadow-[0_-10px_30px_rgba(0,0,0,0.8)] ${layoutMode === 'phone' ? '' : 'md:hidden'}`}>
           {(() => {
-            const role = currentUser?.role || (isLocked ? 'Artisan' : 'Admin');
             const basketCount = (() => {
               try {
                 const stored = localStorage.getItem('ts_joinery_kanban_basket');
@@ -4194,190 +4213,62 @@ TS Joinery Kanban System`
             })();
 
             const unreadNotifications = notifications.filter(n => !n.isRead).length;
-            const hasClockingPermission = permissionService.hasPermission(currentUser, 'Clocking', 'View');
 
-            let navItems: Array<{
-              id: string;
-              label: string;
-              icon: string;
-              badge?: number;
-              onClick: () => void;
-              isActive: boolean;
-            }> = [];
+            const authPhoneItems = permissionService.getAuthorizedPhoneNavItems(currentUser, {
+              basketCount,
+              unreadNotifications
+            });
 
-            if (role === 'Stock Manager') {
-              navItems = [
-                ...(hasClockingPermission ? [{
-                  id: 'clocking',
-                  label: 'Clocking',
-                  icon: 'clock',
-                  onClick: () => { setAppMode('employee'); setView('dashboard'); },
-                  isActive: appMode === 'employee' && !showUserProfileModal
-                }] : []),
-                {
-                  id: 'qr_scan',
-                  label: 'QR Scan',
-                  icon: 'scan',
-                  onClick: () => { setAppMode('qr_scan_service'); setView('dashboard'); },
-                  isActive: appMode === 'qr_scan_service'
-                },
-                {
-                  id: 'basket',
-                  label: 'Basket',
-                  icon: 'shopping-bag',
-                  badge: basketCount > 0 ? basketCount : undefined,
-                  onClick: () => { setAppMode('qr_scan_service'); setView('dashboard'); },
-                  isActive: appMode === 'qr_scan_service'
-                },
-                {
-                  id: 'history',
-                  label: 'History',
-                  icon: 'history',
-                  onClick: () => { setAppMode('orders'); setView('dashboard'); },
-                  isActive: appMode === 'orders'
-                },
-                {
-                  id: 'profile',
-                  label: 'Profile',
-                  icon: 'user',
-                  onClick: () => setShowUserProfileModal(true),
-                  isActive: showUserProfileModal
+            const navItems = authPhoneItems.map(item => {
+              let isActive = false;
+              let handleClick = () => {};
+
+              if (item.isModal) {
+                if (item.modalTarget === 'profile') {
+                  isActive = showUserProfileModal;
+                  handleClick = () => setShowUserProfileModal(true);
+                } else if (item.modalTarget === 'notifications') {
+                  isActive = showNotificationsModal;
+                  handleClick = () => setShowNotificationsModal(true);
                 }
-              ];
-            } else if (role === 'HR' || role === 'Purchasing') {
-              navItems = [
-                ...(hasClockingPermission ? [{
-                  id: 'clocking',
-                  label: 'Clocking',
-                  icon: 'clock',
-                  onClick: () => { setAppMode('employee'); setView('dashboard'); },
-                  isActive: appMode === 'employee'
-                }] : []),
-                {
-                  id: 'notifications',
-                  label: 'Alerts',
-                  icon: 'bell',
-                  badge: unreadNotifications > 0 ? unreadNotifications : undefined,
-                  onClick: () => setShowNotificationsModal(true),
-                  isActive: showNotificationsModal
-                },
-                {
-                  id: 'stock_requests',
-                  label: 'Requests',
-                  icon: 'shopping-cart',
-                  onClick: () => { setAppMode('orders'); setView('dashboard'); },
-                  isActive: appMode === 'orders'
-                },
-                {
-                  id: 'profile',
-                  label: 'Profile',
-                  icon: 'user',
-                  onClick: () => setShowUserProfileModal(true),
-                  isActive: showUserProfileModal
+              } else if (item.targetMode) {
+                const target = item.targetMode;
+                if (target === 'dispatch') {
+                  isActive = (appMode === 'dispatch' || appMode === 'dispatches' || appMode === 'mobile_dispatches') && !showUserProfileModal && !showNotificationsModal;
+                  handleClick = () => { setAppMode('dispatch'); setView('dashboard'); };
+                } else if (target === 'employee') {
+                  isActive = appMode === 'employee' && !showUserProfileModal && !showNotificationsModal;
+                  handleClick = () => { setAppMode('employee'); setView('dashboard'); };
+                } else if (target === 'qr_scan_service') {
+                  isActive = appMode === 'qr_scan_service' && !showUserProfileModal && !showNotificationsModal;
+                  handleClick = () => { setAppMode('qr_scan_service'); setView('dashboard'); };
+                } else if (target === 'orders') {
+                  isActive = appMode === 'orders' && !showUserProfileModal && !showNotificationsModal;
+                  handleClick = () => { setAppMode('orders'); setView('dashboard'); };
+                } else if (target === 'template_designer') {
+                  isActive = appMode === 'template_designer' && !showUserProfileModal && !showNotificationsModal;
+                  handleClick = () => { setAppMode('template_designer'); };
+                } else if (target === 'admin') {
+                  isActive = appMode === 'admin' && !showUserProfileModal && !showNotificationsModal;
+                  handleClick = () => { setAppMode('admin'); setView('dashboard'); };
+                } else if (target === 'analytics') {
+                  isActive = appMode === 'analytics' && !showUserProfileModal && !showNotificationsModal;
+                  handleClick = () => { setAppMode('analytics'); setView('dashboard'); };
+                } else {
+                  isActive = appMode === target && !showUserProfileModal && !showNotificationsModal;
+                  handleClick = () => { setAppMode(target as any); };
                 }
-              ];
-            } else if (role === 'Admin') {
-              navItems = [
-                ...(hasClockingPermission ? [{
-                  id: 'clocking',
-                  label: 'Clocking',
-                  icon: 'clock',
-                  onClick: () => { setAppMode('employee'); setView('dashboard'); },
-                  isActive: appMode === 'employee'
-                }] : []),
-                {
-                  id: 'management',
-                  label: 'Hub',
-                  icon: 'layout-template',
-                  onClick: () => { setAppMode('template_designer'); },
-                  isActive: appMode === 'template_designer'
-                },
-                {
-                  id: 'analytics',
-                  label: 'Analytics',
-                  icon: 'bar-chart-3',
-                  onClick: () => { setAppMode('analytics'); setView('dashboard'); },
-                  isActive: appMode === 'analytics'
-                },
-                {
-                  id: 'profile',
-                  label: 'Profile',
-                  icon: 'user',
-                  onClick: () => setShowUserProfileModal(true),
-                  isActive: showUserProfileModal
-                }
-              ];
-            } else if (role === 'Supervisor') {
-              navItems = [
-                ...(hasClockingPermission ? [{
-                  id: 'dashboard',
-                  label: 'Clocking',
-                  icon: 'clock',
-                  onClick: () => { setAppMode('employee'); setView('dashboard'); },
-                  isActive: appMode === 'employee' && !showUserProfileModal
-                }] : []),
-                {
-                  id: 'qr_scan',
-                  label: 'QR Scan',
-                  icon: 'scan',
-                  onClick: () => { setAppMode('qr_scan_service'); setView('dashboard'); },
-                  isActive: appMode === 'qr_scan_service' && !showUserProfileModal
-                },
-                {
-                  id: 'dispatches',
-                  label: 'Dispatches',
-                  icon: 'truck',
-                  onClick: () => { setAppMode('dispatch'); setView('dashboard'); },
-                  isActive: (appMode === 'dispatch' || appMode === 'dispatches' || appMode === 'mobile_dispatches') && !showUserProfileModal
-                },
-                {
-                  id: 'orders',
-                  label: 'Orders',
-                  icon: 'banknote',
-                  onClick: () => { setAppMode('orders'); setView('dashboard'); },
-                  isActive: appMode === 'orders' && !showUserProfileModal
-                },
-                {
-                  id: 'profile',
-                  label: 'Profile',
-                  icon: 'user',
-                  onClick: () => setShowUserProfileModal(true),
-                  isActive: showUserProfileModal
-                }
-              ];
-            } else {
-              // Artisan / Default
-              navItems = [
-                ...(hasClockingPermission ? [{
-                  id: 'clocking',
-                  label: 'Clocking',
-                  icon: 'clock',
-                  onClick: () => { setAppMode('employee'); setView('dashboard'); },
-                  isActive: appMode === 'employee' && !showUserProfileModal
-                }] : []),
-                {
-                  id: 'qr_scan',
-                  label: 'QR Scan',
-                  icon: 'scan',
-                  onClick: () => { setAppMode('qr_scan_service'); setView('dashboard'); },
-                  isActive: appMode === 'qr_scan_service' && !showUserProfileModal
-                },
-                {
-                  id: 'dispatches',
-                  label: 'Dispatches',
-                  icon: 'truck',
-                  onClick: () => { setAppMode('dispatch'); setView('dashboard'); },
-                  isActive: (appMode === 'dispatch' || appMode === 'dispatches' || appMode === 'mobile_dispatches') && !showUserProfileModal
-                },
-                {
-                  id: 'profile',
-                  label: 'Profile',
-                  icon: 'user',
-                  onClick: () => setShowUserProfileModal(true),
-                  isActive: showUserProfileModal
-                }
-              ];
-            }
+              }
+
+              return {
+                id: item.id,
+                label: item.label,
+                icon: item.icon,
+                badge: item.badge,
+                isActive,
+                onClick: handleClick
+              };
+            });
 
             return navItems.map((item) => (
               <button

@@ -28,7 +28,7 @@ const BRANCH_OPTIONS = [
   'Durban'
 ];
 
-const COURIER_OPTIONS = [
+export const COURIER_OPTIONS = [
   'Internal Driver / Bakkie',
   'The Courier Guy',
   'RAM Hand-to-Hand Couriers',
@@ -36,6 +36,86 @@ const COURIER_OPTIONS = [
   'DSV Global Transport',
   'Customer Collection'
 ];
+
+export interface CourierTrackingInfo {
+  courier: string;
+  trackingNumber: string;
+  url: string | null;
+  isExternalCourier: boolean;
+  buttonLabel: string;
+  note?: string;
+}
+
+export const getCourierTrackingInfo = (courierName?: string, trackingNum?: string): CourierTrackingInfo => {
+  const courier = (courierName || 'Internal Driver / Bakkie').trim();
+  const trackingNumber = (trackingNum || '').trim();
+
+  if (courier === 'The Courier Guy') {
+    return {
+      courier,
+      trackingNumber,
+      url: 'https://thecourierguy.co.za/tracking',
+      isExternalCourier: true,
+      buttonLabel: 'Track on The Courier Guy Portal',
+      note: 'The Courier Guy tracking portal (requires waybill lookup on their portal)'
+    };
+  }
+
+  if (courier === 'RAM Hand-to-Hand Couriers') {
+    return {
+      courier,
+      trackingNumber,
+      url: 'https://www.ram.co.za/',
+      isExternalCourier: true,
+      buttonLabel: 'Track on RAM Couriers Portal',
+      note: 'RAM Hand-to-Hand Couriers online tracking portal'
+    };
+  }
+
+  if (courier === 'DSV Global Transport') {
+    return {
+      courier,
+      trackingNumber,
+      url: trackingNumber 
+        ? `https://www.dsv.com/en/our-solutions/tracking?trackingNumber=${encodeURIComponent(trackingNumber)}`
+        : 'https://www.dsv.com/en/our-solutions/tracking',
+      isExternalCourier: true,
+      buttonLabel: 'Track on DSV Global Portal',
+      note: 'DSV Global freight tracking portal'
+    };
+  }
+
+  if (courier === 'Mainline Freight Logistics') {
+    return {
+      courier,
+      trackingNumber,
+      url: 'https://www.mainlinefreight.co.za/',
+      isExternalCourier: true,
+      buttonLabel: 'Track on Mainline Freight Portal',
+      note: 'Mainline Freight logistics tracking portal'
+    };
+  }
+
+  if (courier === 'Customer Collection') {
+    return {
+      courier,
+      trackingNumber,
+      url: null,
+      isExternalCourier: false,
+      buttonLabel: 'Customer Collection',
+      note: 'Client / Site representative collection at depot'
+    };
+  }
+
+  return {
+    courier: courier || 'Internal Driver / Bakkie',
+    trackingNumber,
+    url: null,
+    isExternalCourier: false,
+    buttonLabel: 'Internal Fleet Delivery',
+    note: 'Company vehicle / bakkie transfer'
+  };
+};
 
 export const DispatchesView: React.FC<DispatchesViewProps> = ({
   currentUser,
@@ -69,6 +149,19 @@ export const DispatchesView: React.FC<DispatchesViewProps> = ({
   const [dispatches, setDispatches] = useState<MobileDispatchDoc[]>([]);
   const [filterStatus, setFilterStatus] = useState<'ALL' | 'IN_TRANSIT' | 'DISCREPANCY' | 'DELIVERED' | 'ARCHIVED'>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
+  const [copiedTrackingId, setCopiedTrackingId] = useState<string | null>(null);
+
+  const handleCopyTrackingNumber = (trackingNum: string, id: string) => {
+    if (!trackingNum) return;
+    try {
+      navigator.clipboard.writeText(trackingNum);
+      setCopiedTrackingId(id);
+      if (announce) announce(`Copied tracking number ${trackingNum} to clipboard`);
+      setTimeout(() => setCopiedTrackingId(null), 2500);
+    } catch (e) {
+      console.warn('Clipboard write failed:', e);
+    }
+  };
 
   // Archiving State
   const [archiveConfirmTarget, setArchiveConfirmTarget] = useState<MobileDispatchDoc | null>(null);
@@ -196,6 +289,10 @@ export const DispatchesView: React.FC<DispatchesViewProps> = ({
   // Submit Create Dispatch
   const handleCreateDispatch = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!permissionService.canPerform(currentUser, 'Dispatch Creation', 'Create')) {
+      alert('Access Restricted: You do not have permission to create dispatch shipments.');
+      return;
+    }
     if (!project.trim()) {
       alert('Please specify the Project or Job Name.');
       return;
@@ -264,6 +361,11 @@ export const DispatchesView: React.FC<DispatchesViewProps> = ({
     if (e) e.preventDefault();
     if (!inspectingDispatch) return;
 
+    if (!permissionService.canPerform(currentUser, 'Receiving Inspection', 'Approve') && !permissionService.canPerform(currentUser, 'Receiving Inspection', 'Create') && !permissionService.canPerform(currentUser, 'Receiving Inspection', 'Edit')) {
+      alert('Access Restricted: You do not have permission to inspect or approve receiving.');
+      return;
+    }
+
     const totalCount = inspectingDispatch.totalPieces || (inspectingDispatch.photos && inspectingDispatch.photos.length > 0 ? inspectingDispatch.photos.length : 1);
     
     // Strict Validation: Must have at least 1 label photo and all pieces verified
@@ -324,6 +426,11 @@ export const DispatchesView: React.FC<DispatchesViewProps> = ({
   // Submit Discrepancy / Partial Receipt Flagging
   const handleFlagDiscrepancy = async () => {
     if (!inspectingDispatch) return;
+
+    if (!permissionService.canPerform(currentUser, 'Discrepancy Management', 'Create') && !permissionService.canPerform(currentUser, 'Discrepancy Management', 'Edit') && !permissionService.canPerform(currentUser, 'Discrepancy Management', 'Approve')) {
+      alert('Access Restricted: You do not have permission to flag or manage discrepancies.');
+      return;
+    }
 
     const totalCount = inspectingDispatch.totalPieces || (inspectingDispatch.photos && inspectingDispatch.photos.length > 0 ? inspectingDispatch.photos.length : 1);
     const allPiecesList = Array.from({ length: totalCount }, (_, i) => i + 1);
@@ -671,15 +778,30 @@ export const DispatchesView: React.FC<DispatchesViewProps> = ({
 
             {/* Tracking / Waybill Number */}
             <div>
-              <label className="block text-[11px] font-black uppercase tracking-wider text-gray-400 mb-1.5">
-                Tracking / Waybill # (Optional)
-              </label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-[11px] font-black uppercase tracking-wider text-gray-400">
+                  Tracking / Waybill # (Optional)
+                </label>
+                {courier !== 'Internal Driver / Bakkie' && courier !== 'Customer Collection' && (
+                  <span className="text-[10px] text-[#ff8c00] font-bold">
+                    Official {courier} Portal Linkable
+                  </span>
+                )}
+              </div>
               <input
                 type="text"
                 value={trackingNumber}
                 onChange={(e) => setTrackingNumber(e.target.value)}
                 className="w-full bg-[#101012] border border-white/10 focus:border-[#ff8c00] rounded-xl px-4 py-3 text-sm font-mono text-white focus:outline-none transition-colors"
-                placeholder="e.g. RAM-99214-CPT"
+                placeholder={
+                  courier === 'The Courier Guy'
+                    ? 'e.g. TCG-92817263'
+                    : courier === 'RAM Hand-to-Hand Couriers'
+                    ? 'e.g. RAM-44910293'
+                    : courier === 'DSV Global Transport'
+                    ? 'e.g. DSV-ZA-882716'
+                    : 'e.g. WAYBILL-10029'
+                }
               />
             </div>
 
@@ -1017,36 +1139,88 @@ export const DispatchesView: React.FC<DispatchesViewProps> = ({
                     </div>
                   )}
 
-                  {/* Project Details */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  {/* Project & Transport Details */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
                       <p className="text-[10px] font-black uppercase tracking-wider text-gray-500">
                         Project / Job
                       </p>
                       <p className="text-sm font-black text-white">{dispatch.project}</p>
+                      {dispatch.customer && (
+                        <p className="text-[11px] text-gray-400 font-medium">{dispatch.customer}</p>
+                      )}
                     </div>
 
                     <div>
                       <p className="text-[10px] font-black uppercase tracking-wider text-gray-500">
                         Shipment Quantity
                       </p>
-                      <p className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <p className="text-xs font-bold text-white flex items-center gap-1.5 mt-0.5">
                         <Icon name="package" size={14} className="text-[#ff8c00]" />
                         <span>{totalPieces} Piece{totalPieces > 1 ? 's' : ''} / Package{totalPieces > 1 ? 's' : ''}</span>
                       </p>
                     </div>
 
-                    {dispatch.courier && (
-                      <div>
-                        <p className="text-[10px] font-black uppercase tracking-wider text-gray-500">
-                          Transport / Courier
-                        </p>
-                        <p className="text-xs font-bold text-gray-300">
-                          {dispatch.courier}
-                          {dispatch.trackingNumber ? ` (${dispatch.trackingNumber})` : ''}
-                        </p>
-                      </div>
-                    )}
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-wider text-gray-500 mb-1">
+                        Transport & Carrier
+                      </p>
+                      {(() => {
+                        const trackingInfo = getCourierTrackingInfo(dispatch.courier, dispatch.trackingNumber);
+                        const isCopied = copiedTrackingId === dispatch.id;
+                        return (
+                          <div className="space-y-1.5">
+                            <div className="flex items-center gap-1.5">
+                              <span className="p-1 rounded-md bg-white/5 text-amber-400">
+                                <Icon name="truck" size={12} />
+                              </span>
+                              <span className="text-xs font-bold text-gray-200">
+                                {trackingInfo.courier}
+                              </span>
+                            </div>
+
+                            {dispatch.trackingNumber ? (
+                              <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                                <span className="font-mono text-xs font-black text-white bg-black/60 px-2 py-0.5 rounded-lg border border-white/10">
+                                  #{dispatch.trackingNumber}
+                                </span>
+
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleCopyTrackingNumber(dispatch.trackingNumber!, dispatch.id);
+                                  }}
+                                  className="px-2 py-0.5 bg-white/10 hover:bg-white/20 text-gray-300 hover:text-white rounded-lg text-[10px] font-bold uppercase transition-colors inline-flex items-center gap-1"
+                                  title="Copy tracking number"
+                                >
+                                  <Icon name={isCopied ? 'check' : 'copy'} size={11} className={isCopied ? 'text-emerald-400' : ''} />
+                                  <span>{isCopied ? 'Copied!' : 'Copy'}</span>
+                                </button>
+
+                                {trackingInfo.url && (
+                                  <a
+                                    href={trackingInfo.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="px-2.5 py-0.5 bg-[#ff8c00]/20 hover:bg-[#ff8c00]/30 text-[#ff8c00] hover:text-white rounded-lg text-[10px] font-black uppercase tracking-wider transition-colors inline-flex items-center gap-1 border border-[#ff8c00]/30"
+                                    title={trackingInfo.note || `Track on ${trackingInfo.courier} Portal`}
+                                  >
+                                    <Icon name="external-link" size={11} />
+                                    <span>Track</span>
+                                  </a>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-[11px] text-gray-500 font-medium">
+                                {trackingInfo.isExternalCourier ? 'No waybill # assigned' : 'Direct transfer'}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </div>
                   </div>
 
                   {dispatch.notes && (
@@ -1270,6 +1444,62 @@ export const DispatchesView: React.FC<DispatchesViewProps> = ({
                   <Icon name="x" size={20} />
                 </button>
               </div>
+
+              {/* Carrier & Tracking Reference */}
+              {(() => {
+                const modalTrackingInfo = getCourierTrackingInfo(inspectingDispatch.courier, inspectingDispatch.trackingNumber);
+                const isCopied = copiedTrackingId === `modal-${inspectingDispatch.id}`;
+                return (
+                  <div className="bg-black/40 border border-white/10 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-[#ff8c00]/10 border border-[#ff8c00]/30 flex items-center justify-center text-[#ff8c00] flex-shrink-0">
+                        <Icon name="truck" size={18} />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-black uppercase text-white">
+                            {modalTrackingInfo.courier}
+                          </span>
+                          {inspectingDispatch.totalPieces && (
+                            <span className="text-[10px] bg-white/10 text-gray-300 font-bold px-2 py-0.5 rounded-full">
+                              {inspectingDispatch.totalPieces} Piece{inspectingDispatch.totalPieces > 1 ? 's' : ''}
+                            </span>
+                          )}
+                        </div>
+                        {inspectingDispatch.trackingNumber ? (
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-xs font-mono font-bold text-gray-300">
+                              Waybill: #{inspectingDispatch.trackingNumber}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleCopyTrackingNumber(inspectingDispatch.trackingNumber!, `modal-${inspectingDispatch.id}`)}
+                              className="px-2 py-0.5 bg-white/10 hover:bg-white/20 text-gray-300 hover:text-white rounded text-[10px] font-bold transition-colors inline-flex items-center gap-1"
+                            >
+                              <Icon name={isCopied ? 'check' : 'copy'} size={10} className={isCopied ? 'text-emerald-400' : ''} />
+                              <span>{isCopied ? 'Copied' : 'Copy'}</span>
+                            </button>
+                          </div>
+                        ) : (
+                          <p className="text-[11px] text-gray-400 mt-0.5">{modalTrackingInfo.note}</p>
+                        )}
+                      </div>
+                    </div>
+
+                    {modalTrackingInfo.url && inspectingDispatch.trackingNumber && (
+                      <a
+                        href={modalTrackingInfo.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-3.5 py-2 bg-[#ff8c00] hover:bg-[#e67e00] text-black font-black uppercase tracking-wider text-xs rounded-xl transition-all shadow-lg flex items-center justify-center gap-1.5 flex-shrink-0"
+                      >
+                        <Icon name="external-link" size={13} />
+                        <span>Open Courier Portal</span>
+                      </a>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* Sender Reference Outgoing Photos */}
               {inspectingDispatch.photos && inspectingDispatch.photos.length > 0 && (

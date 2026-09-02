@@ -591,7 +591,8 @@ export interface UserBranchAssignment {
   updatedAt: string;
 }
 
-export type PermissionAction = 'View' | 'Create' | 'Edit' | 'Delete' | 'Approve' | 'Print' | 'Export';
+export type PermissionAction = 'View' | 'Create' | 'Edit' | 'Delete' | 'Approve' | 'Process' | 'Print' | 'Export';
+export type PermissionState = 'allow' | 'deny' | 'inherit';
 
 export type PermissionCategory = 
   | 'SYSTEM ADMINISTRATION'
@@ -633,6 +634,43 @@ export interface UserRoleAssignment {
   roleId: string;
   roleName: string;
   updatedAt: string;
+}
+
+export type DeviceInterface = 'desktop' | 'phone' | 'tablet' | 'terminal';
+
+export interface UserDeviceAccess {
+  desktop: boolean;
+  phone: boolean;
+  tablet: boolean;
+  terminal: boolean;
+}
+
+export interface UserPermissionOverride {
+  userId: string;
+  userEmail: string;
+  physicalLocation?: string;
+  branchId?: string;
+  branchName?: string;
+  deviceAccess?: UserDeviceAccess;
+  permissions?: Record<string, Partial<Record<PermissionAction, PermissionState | boolean>>>;
+  deviceOverrides?: Partial<Record<DeviceInterface, {
+    modules?: Record<string, boolean>;
+    actions?: Record<string, Partial<Record<PermissionAction, boolean>>>;
+  }>>;
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+export interface EffectiveUserPermissions {
+  userId: string;
+  userEmail: string;
+  roleName: string;
+  physicalLocation?: string;
+  branchId?: string;
+  branchName?: string;
+  deviceAccess: UserDeviceAccess;
+  modules: Record<string, boolean>;
+  actions: Record<string, Record<PermissionAction, boolean>>;
 }
 
 export interface RoleAuditLogEntry {

@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { CompanyInfo, Branch, ApplicationVersion, UserBranchAssignment } from '../types';
+import { CompanyInfo, Branch, ApplicationVersion } from '../types';
 import { AppUser } from '../auth';
 import { Icon } from './Icon';
 import { companyService } from '../services/companyService';
-import { RolePermissionHub } from './RolePermissionHub';
 import { googleDriveService, GoogleWorkspaceSettings } from '../services/googleDriveService';
 
 interface CompanySettingsHubProps {
@@ -11,7 +10,7 @@ interface CompanySettingsHubProps {
   activeUsers?: AppUser[];
   announce?: (msg: string) => void;
   onVersionUpdated?: (latestVersion: string) => void;
-  initialTab?: 'info' | 'branches' | 'assignments' | 'versions' | 'roles' | 'workspace';
+  initialTab?: 'info' | 'branches' | 'versions' | 'workspace';
 }
 
 export const CompanySettingsHub: React.FC<CompanySettingsHubProps> = ({
@@ -25,7 +24,7 @@ export const CompanySettingsHub: React.FC<CompanySettingsHubProps> = ({
   const isManager = ['Supervisor', 'HR', 'Stock Manager'].includes(currentUser?.role || '');
   const isReadOnly = !isAdmin;
 
-  const [activeTab, setActiveTab] = useState<'info' | 'branches' | 'assignments' | 'versions' | 'roles' | 'workspace'>(initialTab);
+  const [activeTab, setActiveTab] = useState<'info' | 'branches' | 'versions' | 'workspace'>(initialTab);
 
   useEffect(() => {
     if (initialTab) {
@@ -37,7 +36,6 @@ export const CompanySettingsHub: React.FC<CompanySettingsHubProps> = ({
   const [companyInfo, setCompanyInfo] = useState<CompanyInfo>(companyService.getLocalCompanyInfo());
   const [branches, setBranches] = useState<Branch[]>(companyService.getLocalBranches());
   const [versions, setVersions] = useState<ApplicationVersion[]>(companyService.getLocalVersions());
-  const [userAssignments, setUserAssignments] = useState<Record<string, UserBranchAssignment>>(companyService.getLocalUserAssignments());
 
   // Form states for Company Info
   const [infoForm, setInfoForm] = useState<CompanyInfo>(companyInfo);
@@ -79,10 +77,6 @@ export const CompanySettingsHub: React.FC<CompanySettingsHubProps> = ({
   const [editingVersionDesc, setEditingVersionDesc] = useState<{ id: string; description: string } | null>(null);
   const [versionDeleteConfirm, setVersionDeleteConfirm] = useState<ApplicationVersion | null>(null);
 
-  // User Assignment search/filter
-  const [userSearch, setUserSearch] = useState('');
-  const [selectedBranchFilter, setSelectedBranchFilter] = useState<string>('All');
-
   // Subscriptions
   useEffect(() => {
     const unsubCompany = companyService.subscribeCompanyInfo(info => {
@@ -101,15 +95,10 @@ export const CompanySettingsHub: React.FC<CompanySettingsHubProps> = ({
       }
     });
 
-    const unsubAssignments = companyService.subscribeUserAssignments(map => {
-      setUserAssignments(map);
-    });
-
     return () => {
       unsubCompany();
       unsubBranches();
       unsubVersions();
-      unsubAssignments();
     };
   }, []);
 
@@ -212,27 +201,6 @@ export const CompanySettingsHub: React.FC<CompanySettingsHubProps> = ({
     }
   };
 
-  // User Assignment Handler
-  const handleAssignBranch = async (user: AppUser, branchId: string) => {
-    if (isReadOnly) return;
-    const targetBranch = branches.find(b => b.id === branchId);
-    const branchName = targetBranch ? targetBranch.branchName : (branchId === '' ? 'Unassigned' : branchId);
-
-    try {
-      await companyService.assignUserBranch(
-        user.id,
-        user.name,
-        user.email,
-        branchId,
-        branchName
-      );
-      announce?.(`Assigned ${user.name} to branch ${branchName}`);
-    } catch (err) {
-      console.error(err);
-      announce?.('Failed to assign user branch.');
-    }
-  };
-
   // Version Handlers
   const handleAddVersion = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -282,16 +250,6 @@ export const CompanySettingsHub: React.FC<CompanySettingsHubProps> = ({
     }
   };
 
-  // Filtered Users
-  const filteredUsers = activeUsers.filter(u => {
-    const matchesSearch = u.name.toLowerCase().includes(userSearch.toLowerCase()) ||
-      u.email.toLowerCase().includes(userSearch.toLowerCase()) ||
-      u.role.toLowerCase().includes(userSearch.toLowerCase());
-    const assigned = userAssignments[u.id]?.branchId || u.branchId || '';
-    const matchesBranch = selectedBranchFilter === 'All' || assigned === selectedBranchFilter;
-    return matchesSearch && matchesBranch;
-  });
-
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
       {/* Top Header Banner */}
@@ -305,7 +263,7 @@ export const CompanySettingsHub: React.FC<CompanySettingsHubProps> = ({
               <div>
                 <h1 className="text-xl font-black uppercase tracking-wider text-white">Company Settings & Operations</h1>
                 <p className="text-xs text-gray-400 font-mono">
-                  Master hub for Company Details, Multi-Branch Operations, User Assignments, & Version Control
+                  Master hub for Company Details, Multi-Branch Operations, Google Workspace & Version Control
                 </p>
               </div>
             </div>
@@ -356,21 +314,6 @@ export const CompanySettingsHub: React.FC<CompanySettingsHubProps> = ({
           </button>
 
           <button
-            onClick={() => setActiveTab('assignments')}
-            className={`px-4 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center space-x-2 whitespace-nowrap ${
-              activeTab === 'assignments'
-                ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30'
-                : 'bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white'
-            }`}
-          >
-            <Icon name="users" size={16} />
-            <span>User Assignments</span>
-            <span className="px-1.5 py-0.5 bg-white/20 text-white text-[10px] font-mono rounded-full">
-              {activeUsers.length}
-            </span>
-          </button>
-
-          <button
             onClick={() => setActiveTab('versions')}
             className={`px-4 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center space-x-2 whitespace-nowrap ${
               activeTab === 'versions'
@@ -382,21 +325,6 @@ export const CompanySettingsHub: React.FC<CompanySettingsHubProps> = ({
             <span>Version Management</span>
             <span className="px-1.5 py-0.5 bg-emerald-500/20 text-emerald-400 text-[10px] font-mono font-bold rounded-full">
               v{latestVersion}
-            </span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('roles')}
-            className={`px-4 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center space-x-2 whitespace-nowrap ${
-              activeTab === 'roles'
-                ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/30'
-                : 'bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white'
-            }`}
-          >
-            <Icon name="shield-check" size={16} />
-            <span>Roles & Permissions</span>
-            <span className="px-1.5 py-0.5 bg-purple-500/20 text-purple-300 text-[10px] font-mono font-bold rounded-full">
-              Security
             </span>
           </button>
 
@@ -550,15 +478,6 @@ export const CompanySettingsHub: React.FC<CompanySettingsHubProps> = ({
             </div>
           </div>
         </form>
-      )}
-
-      {/* ================= TAB 5: ROLES & PERMISSIONS ================= */}
-      {activeTab === 'roles' && (
-        <RolePermissionHub
-          currentUser={currentUser}
-          activeUsers={activeUsers}
-          announce={announce}
-        />
       )}
 
       {/* ================= TAB 1: COMPANY INFORMATION ================= */}
@@ -852,143 +771,6 @@ export const CompanySettingsHub: React.FC<CompanySettingsHubProps> = ({
                 )}
               </div>
             ))}
-          </div>
-        </div>
-      )}
-
-      {/* ================= TAB 3: USER ASSIGNMENTS ================= */}
-      {activeTab === 'assignments' && (
-        <div className="space-y-6">
-          <div className="bg-neutral-900 border border-white/10 rounded-2xl p-6 shadow-xl space-y-4">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div>
-                <h2 className="text-lg font-black uppercase text-white tracking-wider">User Branch Assignments</h2>
-                <p className="text-xs text-gray-400">
-                  Select and assign registered users to their respective operational branch. Automatic login routing uses this saved assignment.
-                </p>
-              </div>
-
-              <div className="flex items-center space-x-3">
-                <div className="relative">
-                  <input
-                    type="text"
-                    placeholder="Search users..."
-                    value={userSearch}
-                    onChange={e => setUserSearch(e.target.value)}
-                    className="bg-black/60 border border-white/10 rounded-xl pl-9 pr-4 py-2 text-xs text-white focus:outline-none focus:border-blue-500 w-48 md:w-64"
-                  />
-                  <Icon name="search" size={14} className="absolute left-3 top-2.5 text-gray-500" />
-                </div>
-
-                <select
-                  value={selectedBranchFilter}
-                  onChange={e => setSelectedBranchFilter(e.target.value)}
-                  className="bg-black/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
-                >
-                  <option value="All">All Branches</option>
-                  {branches.map(b => (
-                    <option key={b.id} value={b.id}>{b.branchName}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {/* Branch Summary Pill Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 pt-4 border-t border-white/10">
-              {branches.map(b => {
-                const count = activeUsers.filter(u => (userAssignments[u.id]?.branchId || u.branchId) === b.id).length;
-                const assignedNames = activeUsers
-                  .filter(u => (userAssignments[u.id]?.branchId || u.branchId) === b.id)
-                  .map(u => u.name);
-
-                return (
-                  <div key={b.id} className="p-3 bg-black/40 border border-white/5 rounded-xl space-y-1">
-                    <div className="flex justify-between items-center text-xs">
-                      <span className="font-bold text-white truncate">{b.branchName}</span>
-                      <span className="px-2 py-0.5 bg-blue-500/20 text-blue-400 font-mono text-[10px] font-bold rounded-full">
-                        {count} users
-                      </span>
-                    </div>
-                    <div className="text-[11px] text-gray-400 font-mono truncate">
-                      {assignedNames.length > 0 ? (
-                        <span>✓ {assignedNames.join(', ')}</span>
-                      ) : (
-                        <span className="italic text-gray-600">No users assigned</span>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* User Assignment Table */}
-          <div className="bg-neutral-900 border border-white/10 rounded-2xl overflow-hidden shadow-xl">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs font-sans">
-                <thead className="bg-black/50 text-gray-400 font-mono uppercase tracking-wider text-[10px] border-b border-white/10">
-                  <tr>
-                    <th className="p-4">Registered User</th>
-                    <th className="p-4">Email</th>
-                    <th className="p-4">Role</th>
-                    <th className="p-4">Status</th>
-                    <th className="p-4">Assigned Branch</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/5 text-gray-300">
-                  {filteredUsers.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="p-8 text-center text-gray-500 font-mono">
-                        No registered users found matching filter criteria.
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredUsers.map(u => {
-                      const currentBranchId = userAssignments[u.id]?.branchId || u.branchId || '';
-
-                      return (
-                        <tr key={u.id} className="hover:bg-white/5 transition-all">
-                          <td className="p-4 font-bold text-white flex items-center space-x-2">
-                            <span className="w-7 h-7 rounded-full bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400 font-black text-xs">
-                              {u.name.charAt(0).toUpperCase()}
-                            </span>
-                            <span>{u.name}</span>
-                          </td>
-                          <td className="p-4 font-mono text-gray-400">{u.email}</td>
-                          <td className="p-4 font-mono font-bold">
-                            <span className={`px-2 py-0.5 rounded text-[10px] uppercase ${
-                              (u.role === 'Admin' || u.role === 'Administrator') ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' : 'bg-gray-800 text-gray-300'
-                            }`}>
-                              {u.role}
-                            </span>
-                          </td>
-                          <td className="p-4">
-                            <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 font-mono text-[10px] font-bold rounded">
-                              Active
-                            </span>
-                          </td>
-                          <td className="p-4">
-                            <select
-                              disabled={isReadOnly}
-                              value={currentBranchId}
-                              onChange={e => handleAssignBranch(u, e.target.value)}
-                              className="bg-black/60 border border-white/20 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500 disabled:opacity-50"
-                            >
-                              <option value="">-- Unassigned --</option>
-                              {branches.map(b => (
-                                <option key={b.id} value={b.id}>
-                                  {b.branchName} ({b.branchCode})
-                                </option>
-                              ))}
-                            </select>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
           </div>
         </div>
       )}

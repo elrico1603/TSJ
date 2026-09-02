@@ -38,6 +38,7 @@ export const MobileDashboardSummary: React.FC<MobileDashboardSummaryProps> = ({
   const lateEmployeesCount = activeEmployees.filter(e => e.status === 'Out' && e.role === 'Artisan').length ? 1 : 0;
   // Offline pending items
   const offlineCount = offlineSyncService.getQueue().length;
+  const canAccessDispatch = permissionService?.canAccessMode(currentUser, 'dispatch');
 
   return (
     <div className="w-full space-y-6 font-sans mb-8">
@@ -60,6 +61,32 @@ export const MobileDashboardSummary: React.FC<MobileDashboardSummaryProps> = ({
         <p className="text-xs text-gray-400 font-medium mt-1">
           Here is your daily operational summary and workforce status.
         </p>
+
+        {/* Dispatch & Receiving Direct Mobile Tile if user has access */}
+        {canAccessDispatch && (
+          <div
+            onClick={() => onNavigate('dispatch')}
+            className="mt-5 p-4 rounded-2xl bg-gradient-to-r from-[#ff8c00]/20 to-amber-500/10 border border-[#ff8c00]/40 hover:border-[#ff8c00] transition-all cursor-pointer group flex items-center justify-between active:scale-[0.98] touch-manipulation"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-[#ff8c00] text-black flex items-center justify-center font-black shadow-lg shadow-[#ff8c00]/30">
+                <ShoppingBag size={20} />
+              </div>
+              <div>
+                <p className="text-xs font-black uppercase tracking-wider text-white">
+                  Dispatch & Receiving Hub
+                </p>
+                <p className="text-[11px] text-amber-200/80">
+                  Manage incoming shipments, piece verification & waybills
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-1 text-[#ff8c00] font-black text-xs uppercase tracking-wider">
+              <span>Open</span>
+              <ChevronRight size={16} />
+            </div>
+          </div>
+        )}
 
         {/* High-Impact Responsive Key Metrics Grid */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4 mt-6">

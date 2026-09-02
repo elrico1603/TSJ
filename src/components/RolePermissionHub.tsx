@@ -118,12 +118,26 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
     email: '',
     branchId: '',
     branchName: '',
+    physicalLocation: '',
     pin: '',
     roleId: '',
     roleName: '',
     department: 'Operations',
-    active: true
+    active: true,
+    deviceAccess: {
+      desktop: true,
+      phone: true,
+      tablet: false,
+      terminal: false
+    }
   });
+
+  const [userPermissionOverridesBuffer, setUserPermissionOverridesBuffer] = useState<
+    Record<string, Partial<Record<PermissionAction, 'allow' | 'deny' | 'inherit'>>>
+  >({});
+  const [userModalPermSearch, setUserModalPermSearch] = useState('');
+  const [userModalCategoryFilter, setUserModalCategoryFilter] = useState('ALL');
+  const [isSavingUser, setIsSavingUser] = useState(false);
 
   const [deleteConfirmUser, setDeleteConfirmUser] = useState<AppUser | null>(null);
   const [showPasswordIds, setShowPasswordIds] = useState<Record<string, boolean>>({});
@@ -173,7 +187,7 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
         // Construct fallback empty matrix
         const empty: Record<string, Record<PermissionAction, boolean>> = {};
         PERMISSION_CATEGORIES_CONFIG.flatMap(c => c.modules).forEach(m => {
-          empty[m] = { View: false, Create: false, Edit: false, Delete: false, Approve: false, Print: false, Export: false };
+          empty[m] = { View: false, Create: false, Edit: false, Delete: false, Approve: false, Process: false, Print: false, Export: false };
         });
         setMatrixBuffer(empty);
       }
@@ -206,7 +220,7 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
     setMatrixBuffer(prev => {
       const copy = JSON.parse(JSON.stringify(prev));
       if (!copy[moduleName]) {
-        copy[moduleName] = { View: false, Create: false, Edit: false, Delete: false, Approve: false, Print: false, Export: false };
+        copy[moduleName] = { View: false, Create: false, Edit: false, Delete: false, Approve: false, Process: false, Print: false, Export: false };
       }
       copy[moduleName][action] = !copy[moduleName][action];
       return copy;
@@ -224,7 +238,7 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
       const copy = JSON.parse(JSON.stringify(prev));
       group.modules.forEach(m => {
         if (!copy[m]) {
-          copy[m] = { View: false, Create: false, Edit: false, Delete: false, Approve: false, Print: false, Export: false };
+          copy[m] = { View: false, Create: false, Edit: false, Delete: false, Approve: false, Process: false, Print: false, Export: false };
         }
         ALL_PERMISSION_ACTIONS.forEach(act => {
           copy[m][act] = enable;
@@ -475,28 +489,108 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
   // Open Edit User Modal
   const handleOpenEditUser = (user: AppUser) => {
     setEditingUser(user);
-    const assignedRoleId = user.roleId || roles.find(r => r.roleName.toLowerCase() === (user.role || '').toLowerCase())?.id || roles[0]?.id || '';
+    const assignedRoleId = user.roleId || userRolesMap[user.id || user.email]?.roleId || roles.find(r => r.roleName.toLowerCase() === (user.role || '').toLowerCase())?.id || roles[0]?.id || '';
     const userBranch = branches.find(b => b.id === user.branchId || b.branchName === user.branchName) || branches[0];
+    const userOverride = permissionService.getUserOverride(user.id || user.email);
 
     setEditUserForm({
       name: user.name || `${user.firstName || ''} ${user.lastName || ''}`.trim(),
       email: user.email || '',
-      branchId: user.branchId || userBranch?.id || '',
-      branchName: user.branchName || userBranch?.branchName || '',
+      branchId: user.branchId || userOverride?.branchId || userBranch?.id || '',
+      branchName: user.branchName || userOverride?.branchName || userBranch?.branchName || '',
+      physicalLocation: user.physicalLocation || userOverride?.physicalLocation || '',
       pin: user.pin || '',
       roleId: assignedRoleId,
       roleName: user.role || 'Employee',
       department: user.department || 'Operations',
-      active: user.active !== undefined ? user.active : true
+      active: user.active !== undefined ? user.active : true,
+      deviceAccess: userOverride?.deviceAccess || user.deviceAccess || {
+        desktop: true,
+        phone: true,
+        tablet: false,
+        terminal: false
+      }
     });
+
+    // Populate user permissions buffer:
+    const initialBuffer: Record<string, Partial<Record<PermissionAction, 'allow' | 'deny' | 'inherit'>>> = {};
+    PERMISSION_CATEGORIES_CONFIG.flatMap(c => c.modules).forEach(moduleName => {
+      initialBuffer[moduleName] = {};
+      ALL_PERMISSION_ACTIONS.forEach(act => {
+        const overrideVal = userOverride?.permissions?.[moduleName]?.[act];
+        if (overrideVal === 'allow' || overrideVal === true) {
+          initialBuffer[moduleName]![act] = 'allow';
+        } else if (overrideVal === 'deny' || overrideVal === false) {
+          initialBuffer[moduleName]![act] = 'deny';
+        } else {
+          initialBuffer[moduleName]![act] = 'inherit';
+        }
+      });
+    });
+    setUserPermissionOverridesBuffer(initialBuffer);
+    setUserModalPermSearch('');
+    setUserModalCategoryFilter('ALL');
     setShowEditUserModal(true);
   };
 
-  // Save Edit User
+  // 3-state Permission Cell Cycling
+  const cycleUserCellState = (moduleName: string, action: PermissionAction) => {
+    if (isReadOnly) return;
+    setUserPermissionOverridesBuffer(prev => {
+      const current = prev[moduleName]?.[action] || 'inherit';
+      let next: 'allow' | 'deny' | 'inherit' = 'inherit';
+      if (current === 'inherit') next = 'allow';
+      else if (current === 'allow') next = 'deny';
+      else if (current === 'deny') next = 'inherit';
+
+      return {
+        ...prev,
+        [moduleName]: {
+          ...(prev[moduleName] || {}),
+          [action]: next
+        }
+      };
+    });
+  };
+
+  const handleResetUserPermissionsToInherit = () => {
+    const next: Record<string, Partial<Record<PermissionAction, 'allow' | 'deny' | 'inherit'>>> = {};
+    PERMISSION_CATEGORIES_CONFIG.flatMap(c => c.modules).forEach(moduleName => {
+      next[moduleName] = {};
+      ALL_PERMISSION_ACTIONS.forEach(act => {
+        next[moduleName]![act] = 'inherit';
+      });
+    });
+    setUserPermissionOverridesBuffer(next);
+  };
+
+  const handleSetAllUserPermissions = (state: 'allow' | 'deny') => {
+    const next: Record<string, Partial<Record<PermissionAction, 'allow' | 'deny' | 'inherit'>>> = {};
+    PERMISSION_CATEGORIES_CONFIG.flatMap(c => c.modules).forEach(moduleName => {
+      next[moduleName] = {};
+      ALL_PERMISSION_ACTIONS.forEach(act => {
+        next[moduleName]![act] = state;
+      });
+    });
+    setUserPermissionOverridesBuffer(next);
+  };
+
+  // Save Edit User with Admin Lockout Protection
   const handleEditUserSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isReadOnly || !editingUser) return;
 
+    // Administrator Lockout Protection
+    const isEditingSelf = editingUser.email.toLowerCase().trim() === currentUser?.email?.toLowerCase().trim() ||
+                          editingUser.id === currentUser?.id;
+    if (isEditingSelf) {
+      if (editUserForm.active === false) {
+        alert('Administrator Protection: You cannot deactivate your own active administrator account.');
+        return;
+      }
+    }
+
+    setIsSavingUser(true);
     try {
       const selectedRole = roles.find(r => r.id === editUserForm.roleId);
       const roleName = selectedRole ? selectedRole.roleName : editUserForm.roleName;
@@ -520,8 +614,10 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
         roleId: roleId,
         branchId,
         branchName,
+        physicalLocation: editUserForm.physicalLocation.trim(),
         department: editUserForm.department,
-        active: editUserForm.active
+        active: editUserForm.active,
+        deviceAccess: editUserForm.deviceAccess
       };
 
       if (updateActiveUser) {
@@ -536,6 +632,18 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
           .update(updates);
       }
 
+      // Persist user-specific override to permissionService
+      await permissionService.saveUserOverride({
+        userId: editingUser.id,
+        userEmail: editUserForm.email.trim().toLowerCase(),
+        branchId,
+        branchName,
+        physicalLocation: editUserForm.physicalLocation.trim(),
+        deviceAccess: editUserForm.deviceAccess,
+        permissions: userPermissionOverridesBuffer,
+        updatedBy: currentUser?.name || 'Administrator'
+      }, currentUser?.name || 'Administrator');
+
       if (roleId && roleId !== editingUser.roleId) {
         await permissionService.assignUserRole(
           editingUser.id,
@@ -546,12 +654,14 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
         );
       }
 
-      announce?.(`User ${editUserForm.name} updated.`);
+      announce?.(`User ${editUserForm.name} permissions and access updated successfully.`);
       setShowEditUserModal(false);
       setEditingUser(null);
     } catch (err: any) {
       console.error('Failed to update user:', err);
       announce?.(err.message || 'Failed to update user.');
+    } finally {
+      setIsSavingUser(false);
     }
   };
 
@@ -1611,157 +1721,450 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
         </div>
       )}
 
-      {/* EDIT USER MODAL */}
+      {/* EDIT USER MODAL - UNIFIED RBAC & ACCESS EDITOR */}
       {showEditUserModal && editingUser && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-neutral-900 border border-white/10 rounded-3xl w-full max-w-lg p-6 space-y-5 shadow-2xl max-h-[90vh] flex flex-col">
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-3 md:p-6">
+          <div className="bg-neutral-900 border border-white/10 rounded-3xl w-full max-w-6xl max-h-[94vh] p-5 md:p-6 space-y-4 shadow-2xl flex flex-col overflow-hidden">
+            {/* Modal Header */}
             <div className="flex justify-between items-center pb-3 border-b border-white/10 shrink-0">
-              <div className="flex items-center gap-2.5">
-                <span className="p-2 bg-purple-500/20 text-purple-400 rounded-xl">
-                  <Icon name="edit-3" size={18} />
+              <div className="flex items-center gap-3">
+                <span className="p-2.5 bg-purple-500/20 text-purple-400 rounded-2xl border border-purple-500/30">
+                  <Icon name="shield" size={22} />
                 </span>
                 <div>
-                  <h3 className="text-base font-black uppercase tracking-wider text-white">Edit User Profile</h3>
-                  <p className="text-xs text-gray-400">Modify user parameters, branch assignment, and credentials</p>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-base font-black uppercase tracking-wider text-white">
+                      User Permissions & Access Editor
+                    </h3>
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                      {editingUser.name}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-mono text-gray-400 bg-white/5 border border-white/10">
+                      {editingUser.email}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-400">
+                    Manage hardware device authorization, organizational depot assignments, and granular action overrides.
+                  </p>
                 </div>
               </div>
-              <button onClick={() => setShowEditUserModal(false)} className="text-gray-400 hover:text-white">
+              <button
+                onClick={() => setShowEditUserModal(false)}
+                className="p-2 text-gray-400 hover:text-white hover:bg-white/10 rounded-xl transition-colors"
+              >
                 <Icon name="x" size={20} />
               </button>
             </div>
 
-            <form onSubmit={handleEditUserSubmit} className="space-y-4 flex flex-col flex-1 overflow-hidden">
-              <div className="space-y-4 flex-1 overflow-y-auto custom-scrollbar pr-1">
-                {/* Full Name */}
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-gray-300 uppercase">Full Name</label>
-                  <input
-                    type="text"
-                    required
-                    value={editUserForm.name}
-                    onChange={e => setEditUserForm({ ...editUserForm, name: e.target.value })}
-                    className="w-full bg-black/60 border border-white/10 rounded-xl p-3 text-xs text-white focus:outline-none focus:border-purple-500"
-                  />
-                </div>
+            <form onSubmit={handleEditUserSubmit} className="flex flex-col flex-1 overflow-hidden space-y-4">
+              {/* Two-Column Responsive Layout */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 flex-1 overflow-hidden">
+                {/* LEFT COLUMN: User Info, Device Access, Branch & Location */}
+                <div className="lg:col-span-5 space-y-4 overflow-y-auto custom-scrollbar pr-1">
+                  {/* CARD 1: User Identity & Credentials */}
+                  <div className="bg-black/40 border border-white/10 rounded-2xl p-4 space-y-3">
+                    <div className="flex items-center gap-2 pb-2 border-b border-white/10">
+                      <Icon name="user" size={14} className="text-purple-400" />
+                      <h4 className="text-xs font-black uppercase tracking-wider text-white">User Identity</h4>
+                    </div>
 
-                {/* Email Address */}
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-gray-300 uppercase">Email Address</label>
-                  <input
-                    type="email"
-                    required
-                    value={editUserForm.email}
-                    onChange={e => setEditUserForm({ ...editUserForm, email: e.target.value })}
-                    className="w-full bg-black/60 border border-white/10 rounded-xl p-3 text-xs text-white focus:outline-none focus:border-purple-500"
-                  />
-                </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="space-y-1 sm:col-span-2">
+                        <label className="text-[11px] font-bold text-gray-400 uppercase">Full Name</label>
+                        <input
+                          type="text"
+                          required
+                          value={editUserForm.name}
+                          onChange={e => setEditUserForm({ ...editUserForm, name: e.target.value })}
+                          className="w-full bg-black/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500 font-bold"
+                        />
+                      </div>
 
-                {/* Branch / Depot */}
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-gray-300 uppercase">Branch / Depot</label>
-                  <select
-                    value={editUserForm.branchId}
-                    onChange={e => {
-                      const selected = branches.find(b => b.id === e.target.value);
-                      setEditUserForm({
-                        ...editUserForm,
-                        branchId: e.target.value,
-                        branchName: selected ? selected.branchName : ''
-                      });
-                    }}
-                    className="w-full bg-black/60 border border-white/10 rounded-xl p-3 text-xs text-white focus:outline-none focus:border-purple-500"
-                  >
-                    {branches.map(b => (
-                      <option key={b.id} value={b.id}>
-                        {b.branchName} ({b.branchCode})
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                      <div className="space-y-1 sm:col-span-2">
+                        <label className="text-[11px] font-bold text-gray-400 uppercase">Email Address</label>
+                        <input
+                          type="email"
+                          required
+                          value={editUserForm.email}
+                          onChange={e => setEditUserForm({ ...editUserForm, email: e.target.value })}
+                          className="w-full bg-black/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500 font-mono"
+                        />
+                      </div>
 
-                {/* Role */}
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-gray-300 uppercase">Assigned Role</label>
-                  <select
-                    value={editUserForm.roleId}
-                    onChange={e => {
-                      const selected = roles.find(r => r.id === e.target.value);
-                      setEditUserForm({
-                        ...editUserForm,
-                        roleId: e.target.value,
-                        roleName: selected ? selected.roleName : ''
-                      });
-                    }}
-                    className="w-full bg-black/60 border border-white/10 rounded-xl p-3 text-xs text-white focus:outline-none focus:border-purple-500 font-bold"
-                  >
-                    {roles.map(r => (
-                      <option key={r.id} value={r.id}>
-                        {r.roleName} {r.isSystemDefault ? '(Default)' : ''}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-bold text-gray-400 uppercase">Assigned Role</label>
+                        <select
+                          value={editUserForm.roleId}
+                          onChange={e => {
+                            const selected = roles.find(r => r.id === e.target.value);
+                            setEditUserForm({
+                              ...editUserForm,
+                              roleId: e.target.value,
+                              roleName: selected ? selected.roleName : ''
+                            });
+                          }}
+                          className="w-full bg-black/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500 font-bold"
+                        >
+                          {roles.map(r => (
+                            <option key={r.id} value={r.id}>
+                              {r.roleName} {r.isSystemDefault ? '(Default)' : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
 
-                {/* Password / PIN */}
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-gray-300 uppercase">PIN / Password</label>
-                  <div className="relative">
-                    <input
-                      type={showEditPin ? 'text' : 'password'}
-                      required
-                      value={editUserForm.pin}
-                      onChange={e => setEditUserForm({ ...editUserForm, pin: e.target.value })}
-                      className="w-full bg-black/60 border border-white/10 rounded-xl p-3 pr-10 text-xs text-white font-mono focus:outline-none focus:border-purple-500"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowEditPin(!showEditPin)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
-                    >
-                      <Icon name={showEditPin ? 'eye-off' : 'eye'} size={16} />
-                    </button>
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-bold text-gray-400 uppercase">Department</label>
+                        <input
+                          type="text"
+                          value={editUserForm.department}
+                          onChange={e => setEditUserForm({ ...editUserForm, department: e.target.value })}
+                          className="w-full bg-black/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-bold text-gray-400 uppercase">PIN / Password</label>
+                        <div className="relative">
+                          <input
+                            type={showEditPin ? 'text' : 'password'}
+                            required
+                            value={editUserForm.pin}
+                            onChange={e => setEditUserForm({ ...editUserForm, pin: e.target.value })}
+                            className="w-full bg-black/60 border border-white/10 rounded-xl pl-3 pr-9 py-2 text-xs text-white font-mono focus:outline-none focus:border-purple-500"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowEditPin(!showEditPin)}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
+                          >
+                            <Icon name={showEditPin ? 'eye-off' : 'eye'} size={14} />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-bold text-gray-400 uppercase">Account Status</label>
+                        <select
+                          value={editUserForm.active ? 'active' : 'suspended'}
+                          onChange={e => setEditUserForm({ ...editUserForm, active: e.target.value === 'active' })}
+                          className="w-full bg-black/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500 font-bold"
+                        >
+                          <option value="active">Active</option>
+                          <option value="suspended">Suspended</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* CARD 2: Explicit Device Access */}
+                  <div className="bg-black/40 border border-white/10 rounded-2xl p-4 space-y-3">
+                    <div className="flex items-center justify-between pb-2 border-b border-white/10">
+                      <div className="flex items-center gap-2">
+                        <Icon name="monitor" size={14} className="text-purple-400" />
+                        <h4 className="text-xs font-black uppercase tracking-wider text-white">Device Access</h4>
+                      </div>
+                      <span className="text-[10px] text-gray-400 font-mono">Hardware Guards</span>
+                    </div>
+
+                    <p className="text-[11px] text-gray-400">
+                      Controls which physical device interfaces this user is authorized to sign into and access.
+                    </p>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      {[
+                        { key: 'phone', label: '1. Phone', sub: 'Mobile Interface', icon: 'smartphone' },
+                        { key: 'tablet', label: '2. Tablet', sub: 'Tablet / iPad', icon: 'tablet' },
+                        { key: 'desktop', label: '3. Desktop', sub: 'PC / Mac Screen', icon: 'monitor' }
+                      ].map(dev => {
+                        const isAllowed = !!editUserForm.deviceAccess[dev.key as keyof typeof editUserForm.deviceAccess];
+                        return (
+                          <button
+                            type="button"
+                            key={dev.key}
+                            onClick={() => {
+                              setEditUserForm({
+                                ...editUserForm,
+                                deviceAccess: {
+                                  ...editUserForm.deviceAccess,
+                                  [dev.key]: !isAllowed
+                                }
+                              });
+                            }}
+                            className={`flex flex-col items-center justify-center p-3 rounded-xl border text-center transition-all cursor-pointer ${
+                              isAllowed
+                                ? 'bg-purple-600/20 border-purple-500 text-white shadow-md'
+                                : 'bg-black/30 border-white/10 text-gray-500 hover:text-gray-300'
+                            }`}
+                          >
+                            <Icon name={dev.icon as any} size={20} className={isAllowed ? 'text-purple-400 mb-1' : 'text-gray-500 mb-1'} />
+                            <span className="text-xs font-black uppercase">{dev.label}</span>
+                            <span className="text-[10px] text-gray-400 font-mono mt-0.5">{dev.sub}</span>
+                            <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full mt-2 ${
+                              isAllowed ? 'bg-purple-500/40 text-purple-200' : 'bg-white/5 text-gray-500'
+                            }`}>
+                              {isAllowed ? 'ENABLED' : 'DISABLED'}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* CARD 3: Location & Organisational Structure */}
+                  <div className="bg-black/40 border border-white/10 rounded-2xl p-4 space-y-3">
+                    <div className="flex items-center gap-2 pb-2 border-b border-white/10">
+                      <Icon name="map-pin" size={14} className="text-blue-400" />
+                      <h4 className="text-xs font-black uppercase tracking-wider text-white">Location & Branch Structure</h4>
+                    </div>
+
+                    <div className="space-y-3">
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-bold text-gray-300 uppercase flex items-center justify-between">
+                          <span>Organisational Branch</span>
+                          <span className="text-[10px] text-gray-500 font-normal">Reporting & Depot ID</span>
+                        </label>
+                        <select
+                          value={editUserForm.branchId}
+                          onChange={e => {
+                            const selected = branches.find(b => b.id === e.target.value);
+                            setEditUserForm({
+                              ...editUserForm,
+                              branchId: e.target.value,
+                              branchName: selected ? selected.branchName : ''
+                            });
+                          }}
+                          className="w-full bg-black/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500 font-bold"
+                        >
+                          {branches.map(b => (
+                            <option key={b.id} value={b.id}>
+                              {b.branchName} ({b.branchCode})
+                            </option>
+                          ))}
+                        </select>
+                        <p className="text-[10px] text-gray-500">
+                          The official branch/depot the user is assigned to for system records (e.g. Bloemfontein Central).
+                        </p>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-bold text-gray-300 uppercase flex items-center justify-between">
+                          <span>Physical Location (Optional)</span>
+                          <span className="text-[10px] text-gray-500 font-normal">Actual Workplace</span>
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Cape Town (working remotely or stationed at Cape Town depot)"
+                          value={editUserForm.physicalLocation}
+                          onChange={e => setEditUserForm({ ...editUserForm, physicalLocation: e.target.value })}
+                          className="w-full bg-black/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500"
+                        />
+                        <p className="text-[10px] text-gray-500">
+                          The physical city or workshop where the person is located (stored distinctly from organisational branch).
+                        </p>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
-                {/* Department */}
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-gray-300 uppercase">Department</label>
-                  <input
-                    type="text"
-                    value={editUserForm.department}
-                    onChange={e => setEditUserForm({ ...editUserForm, department: e.target.value })}
-                    className="w-full bg-black/60 border border-white/10 rounded-xl p-3 text-xs text-white focus:outline-none focus:border-purple-500"
-                  />
-                </div>
+                {/* RIGHT COLUMN: Granular Module & Action Permissions Matrix */}
+                <div className="lg:col-span-7 flex flex-col bg-black/40 border border-white/10 rounded-2xl p-4 overflow-hidden space-y-3">
+                  {/* Explanatory Banner */}
+                  <div className="bg-purple-950/30 border border-purple-500/30 rounded-xl p-3 flex items-start gap-2.5">
+                    <Icon name="info" size={16} className="text-purple-400 shrink-0 mt-0.5" />
+                    <div className="text-xs text-purple-200 leading-relaxed">
+                      <strong>Inherited permissions</strong> come from the user's role (<strong>{editUserForm.roleName}</strong>).
+                      You can override any specific action below. Clicking cycles between <strong>Inherited (—)</strong>, <strong>Allowed (✓)</strong>, and <strong>Denied (✕)</strong>.
+                    </div>
+                  </div>
 
-                {/* Status Toggle */}
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-gray-300 uppercase">Account Status</label>
-                  <select
-                    value={editUserForm.active ? 'active' : 'suspended'}
-                    onChange={e => setEditUserForm({ ...editUserForm, active: e.target.value === 'active' })}
-                    className="w-full bg-black/60 border border-white/10 rounded-xl p-3 text-xs text-white focus:outline-none focus:border-purple-500"
-                  >
-                    <option value="active">Active</option>
-                    <option value="suspended">Suspended</option>
-                  </select>
+                  {/* Filter & Quick Action Bar */}
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+                    <div className="flex items-center gap-2 flex-1">
+                      <div className="relative flex-1">
+                        <input
+                          type="text"
+                          placeholder="Filter modules..."
+                          value={userModalPermSearch}
+                          onChange={e => setUserModalPermSearch(e.target.value)}
+                          className="w-full bg-black/60 border border-white/10 rounded-xl pl-8 pr-3 py-1.5 text-xs text-white focus:outline-none focus:border-purple-500"
+                        />
+                        <Icon name="search" size={13} className="absolute left-2.5 top-2 text-gray-500" />
+                      </div>
+
+                      <select
+                        value={userModalCategoryFilter}
+                        onChange={e => setUserModalCategoryFilter(e.target.value)}
+                        className="bg-black/60 border border-white/10 rounded-xl px-2.5 py-1.5 text-xs text-gray-300 focus:outline-none focus:border-purple-500"
+                      >
+                        <option value="ALL">All Categories</option>
+                        {PERMISSION_CATEGORIES_CONFIG.map(c => (
+                          <option key={c.category} value={c.category}>{c.category}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={handleResetUserPermissionsToInherit}
+                        className="px-2.5 py-1.5 bg-white/5 hover:bg-white/10 text-gray-300 border border-white/10 rounded-xl text-[10px] font-bold uppercase transition-all"
+                        title="Reset all overrides back to role defaults"
+                      >
+                        Reset All to Inherit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSetAllUserPermissions('allow')}
+                        className="px-2.5 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 rounded-xl text-[10px] font-bold uppercase transition-all"
+                      >
+                        Allow All
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSetAllUserPermissions('deny')}
+                        className="px-2.5 py-1.5 bg-red-600/20 hover:bg-red-600/30 text-red-300 border border-red-500/30 rounded-xl text-[10px] font-bold uppercase transition-all"
+                      >
+                        Deny All
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 3-State Legend */}
+                  <div className="flex items-center gap-4 text-[10px] font-mono text-gray-400 px-1">
+                    <span className="flex items-center gap-1">
+                      <span className="w-3.5 h-3.5 rounded bg-emerald-600/30 border border-emerald-500 text-emerald-300 flex items-center justify-center font-bold">✓</span>
+                      <span>Explicit ALLOW</span>
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-3.5 h-3.5 rounded bg-red-600/30 border border-red-500 text-red-300 flex items-center justify-center font-bold">✕</span>
+                      <span>Explicit DENY</span>
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-3.5 h-3.5 rounded bg-white/5 border border-white/15 text-gray-400 flex items-center justify-center font-bold">—</span>
+                      <span>INHERITED (From Role)</span>
+                    </span>
+                  </div>
+
+                  {/* Permissions Matrix Table */}
+                  <div className="flex-1 overflow-y-auto custom-scrollbar border border-white/10 rounded-xl">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-black/70 text-gray-400 font-mono uppercase text-[9px] sticky top-0 z-10 border-b border-white/10">
+                        <tr>
+                          <th className="p-2.5 min-w-[150px]">Module</th>
+                          {ALL_PERMISSION_ACTIONS.map(action => (
+                            <th key={action} className="p-2 text-center min-w-[50px]">{action}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/5">
+                        {PERMISSION_CATEGORIES_CONFIG
+                          .filter(catGroup => userModalCategoryFilter === 'ALL' || userModalCategoryFilter === catGroup.category)
+                          .map(catGroup => {
+                            const filteredMods = catGroup.modules.filter(m =>
+                              m.toLowerCase().includes(userModalPermSearch.toLowerCase())
+                            );
+                            if (filteredMods.length === 0) return null;
+
+                            return (
+                              <React.Fragment key={catGroup.category}>
+                                <tr className="bg-white/5 font-mono text-[10px] text-purple-300 font-bold uppercase tracking-wider">
+                                  <td colSpan={1 + ALL_PERMISSION_ACTIONS.length} className="px-3 py-1.5">
+                                    {catGroup.category}
+                                  </td>
+                                </tr>
+
+                                {filteredMods.map(moduleName => {
+                                  const roleBaseline = rolePermissionsMap[editUserForm.roleId]?.permissions[moduleName];
+
+                                  return (
+                                    <tr key={moduleName} className="hover:bg-white/5 transition-colors">
+                                      <td className="p-2 font-medium text-gray-200 text-[11px]">
+                                        {moduleName}
+                                      </td>
+
+                                      {ALL_PERMISSION_ACTIONS.map(act => {
+                                        const overrideState = userPermissionOverridesBuffer[moduleName]?.[act] || 'inherit';
+                                        const roleVal = roleBaseline?.[act] ?? false;
+
+                                        let buttonClass = 'bg-white/5 border-white/10 text-gray-500 hover:border-white/30';
+                                        let label = '—';
+                                        let title = `Inherited from role (${roleVal ? 'Allowed' : 'Denied'}) - Click to override`;
+
+                                        if (overrideState === 'allow') {
+                                          buttonClass = 'bg-emerald-600/30 border-emerald-500 text-emerald-300 shadow-sm font-black';
+                                          label = '✓';
+                                          title = 'Explicitly ALLOWED (Override) - Click to Deny';
+                                        } else if (overrideState === 'deny') {
+                                          buttonClass = 'bg-red-600/30 border-red-500 text-red-300 shadow-sm font-black';
+                                          label = '✕';
+                                          title = 'Explicitly DENIED (Override) - Click to Inherit';
+                                        } else {
+                                          // Inherited
+                                          if (roleVal) {
+                                            label = '— (✓)';
+                                          } else {
+                                            label = '— (✕)';
+                                          }
+                                        }
+
+                                        return (
+                                          <td key={act} className="p-1 text-center">
+                                            <button
+                                              type="button"
+                                              onClick={() => cycleUserCellState(moduleName, act)}
+                                              title={title}
+                                              className={`w-10 h-7 rounded-lg border text-[10px] font-mono inline-flex items-center justify-center transition-all cursor-pointer ${buttonClass}`}
+                                            >
+                                              {label}
+                                            </button>
+                                          </td>
+                                        );
+                                      })}
+                                    </tr>
+                                  );
+                                })}
+                              </React.Fragment>
+                            );
+                          })}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
 
-              <div className="flex justify-end space-x-2 pt-3 border-t border-white/10 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setShowEditUserModal(false)}
-                  className="px-4 py-2.5 bg-white/10 text-gray-300 text-xs font-bold rounded-xl hover:bg-white/20"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-6 py-2.5 bg-purple-600 hover:bg-purple-500 text-white font-black text-xs uppercase rounded-xl shadow-lg transition-colors"
-                >
-                  Save Profile
-                </button>
+              {/* Modal Footer */}
+              <div className="flex items-center justify-between pt-3 border-t border-white/10 shrink-0">
+                <div className="text-[11px] text-gray-400 font-mono">
+                  * Explicit user overrides take immediate precedence over role baseline permissions.
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowEditUserModal(false)}
+                    className="px-4 py-2.5 bg-white/10 text-gray-300 text-xs font-bold rounded-xl hover:bg-white/20 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSavingUser}
+                    className="px-6 py-2.5 bg-purple-600 hover:bg-purple-500 text-white font-black text-xs uppercase rounded-xl shadow-lg transition-colors flex items-center gap-2"
+                  >
+                    {isSavingUser ? (
+                      <>
+                        <Icon name="clock" size={14} className="animate-spin" />
+                        <span>Saving...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Icon name="check" size={14} />
+                        <span>Save User Permissions & Access</span>
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
             </form>
           </div>

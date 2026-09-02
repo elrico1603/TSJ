@@ -17,8 +17,8 @@ export const APP_VERSION: AppVersionInfo = {
   major: 1,
   minor: 0,
   patch: 0,
-  buildNumber: 29,
-  buildDate: '2026-08-26',
+  buildNumber: 32,
+  buildDate: '2026-09-01',
   appName: 'TS Kanban Management Hub',
   environment: (typeof import.meta !== 'undefined' && (import.meta as any).env?.MODE) || 'production'
 };
@@ -47,8 +47,8 @@ export const getBuildInfoString = (info: AppVersionInfo = APP_VERSION): string =
   return `${getVersionString(info)} (${info.buildDate})`;
 };
 
-export const BUILD_ID = 'BUILD-2026-08-26-DISPATCH-ARCHIVE-V29';
-export const BUILD_TIMESTAMP = '2026-08-26T07:45:00Z';
+export const BUILD_ID = 'BUILD-2026-09-01-UNIFIED-RBAC-V32';
+export const BUILD_TIMESTAMP = '2026-09-01T03:00:00Z';
 export const HAS_FORM_DATA_FIX = true;
 
 export const CURRENT_VERSION_STRING = getVersionString();

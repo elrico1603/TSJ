@@ -5,12 +5,17 @@ import {
   RoleDefinition,
   RolePermissions,
   UserRoleAssignment,
-  RoleAuditLogEntry
+  RoleAuditLogEntry,
+  DeviceInterface,
+  UserDeviceAccess,
+  UserPermissionOverride,
+  EffectiveUserPermissions
 } from '../types';
 
 const STORAGE_ROLES_KEY = 'tsj_roles_v1';
 const STORAGE_ROLE_PERMISSIONS_KEY = 'tsj_role_permissions_v1';
 const STORAGE_USER_ROLES_KEY = 'tsj_user_roles_v1';
+const STORAGE_USER_OVERRIDES_KEY = 'tsj_user_permission_overrides_v1';
 const STORAGE_ROLE_AUDIT_LOGS_KEY = 'tsj_role_audit_logs_v1';
 
 export const ALL_PERMISSION_ACTIONS: PermissionAction[] = [
@@ -19,6 +24,7 @@ export const ALL_PERMISSION_ACTIONS: PermissionAction[] = [
   'Edit',
   'Delete',
   'Approve',
+  'Process',
   'Print',
   'Export'
 ];
@@ -113,6 +119,7 @@ const fullAccessMatrix = (): Record<string, Record<PermissionAction, boolean>> =
       Edit: true,
       Delete: true,
       Approve: true,
+      Process: true,
       Print: true,
       Export: true
     };
@@ -131,6 +138,7 @@ const customMatrix = (allowedModules: string[], actions: PermissionAction[] = ['
       Edit: isAllowed && actions.includes('Edit'),
       Delete: isAllowed && actions.includes('Delete'),
       Approve: isAllowed && actions.includes('Approve'),
+      Process: isAllowed && actions.includes('Process'),
       Print: isAllowed && actions.includes('Print'),
       Export: isAllowed && actions.includes('Export')
     };
@@ -143,7 +151,7 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
   {
     id: 'ROLE-ADMIN',
     roleName: 'Administrator',
-    description: 'Full administrative access to all modules, settings, roles, permissions, and security controls.',
+    description: 'Full administrative access to all modules, settings, roles, permissions, and security controls across all devices.',
     status: 'active',
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
@@ -179,7 +187,7 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
   {
     id: 'ROLE-SUPERVISOR',
     roleName: 'Supervisor',
-    description: 'Operational supervisor monitoring staff clocking, approving leave requests, and requesting stock.',
+    description: 'Operational supervisor monitoring staff clocking, approving leave requests, requesting stock, and dispatch/receiving oversight.',
     status: 'active',
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
@@ -188,7 +196,7 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
   {
     id: 'ROLE-CLOCKING-TERMINAL',
     roleName: 'Clocking Terminal',
-    description: 'Shared reception/locker-room terminal account with access restricted strictly to Clocking Terminal, Employee Search, Leave Application, and QR Scanner.',
+    description: 'Dedicated reception/locker-room terminal account with access restricted strictly to Clocking Terminal, Employee Search, Leave Application, and QR Scanner.',
     status: 'active',
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
@@ -220,7 +228,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, RolePermissions> = {
     roleId: 'ROLE-ADMIN',
     roleName: 'Administrator',
     permissions: fullAccessMatrix(),
-    updatedAt: new Date().toISOString(),
+    updatedAt: '2026-01-01T00:00:00.000Z',
     updatedBy: 'System'
   },
   'ROLE-CLOCKING-TERMINAL': {
@@ -230,7 +238,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, RolePermissions> = {
       ['Clocking', 'Leave Management', 'Employer Registration', 'QR Scan Service'],
       ['View', 'Create']
     ),
-    updatedAt: new Date().toISOString(),
+    updatedAt: '2026-01-01T00:00:00.000Z',
     updatedBy: 'System'
   },
   'ROLE-MANAGER': {
@@ -247,7 +255,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, RolePermissions> = {
       ],
       ['View', 'Create', 'Edit', 'Approve', 'Print', 'Export']
     ),
-    updatedAt: new Date().toISOString(),
+    updatedAt: '2026-01-01T00:00:00.000Z',
     updatedBy: 'System'
   },
   'ROLE-PURCHASING': {
@@ -261,7 +269,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, RolePermissions> = {
       ],
       ['View', 'Create', 'Edit', 'Approve', 'Print', 'Export']
     ),
-    updatedAt: new Date().toISOString(),
+    updatedAt: '2026-01-01T00:00:00.000Z',
     updatedBy: 'System'
   },
   'ROLE-STOCK-MGR': {
@@ -275,7 +283,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, RolePermissions> = {
       ],
       ['View', 'Create', 'Edit', 'Delete', 'Print']
     ),
-    updatedAt: new Date().toISOString(),
+    updatedAt: '2026-01-01T00:00:00.000Z',
     updatedBy: 'System'
   },
   'ROLE-SUPERVISOR': {
@@ -289,17 +297,17 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, RolePermissions> = {
       ],
       ['View', 'Create', 'Edit', 'Approve', 'Print']
     ),
-    updatedAt: new Date().toISOString(),
+    updatedAt: '2026-01-01T00:00:00.000Z',
     updatedBy: 'System'
   },
   'ROLE-EMPLOYEE': {
     roleId: 'ROLE-EMPLOYEE',
     roleName: 'Employee',
     permissions: customMatrix(
-      ['Clocking', 'Leave Management', 'Dispatch Creation', 'Receiving Inspection', 'Dashboard', 'Notifications'],
+      ['Clocking', 'Leave Management', 'Dashboard', 'Notifications'],
       ['View', 'Create']
     ),
-    updatedAt: new Date().toISOString(),
+    updatedAt: '2026-01-01T00:00:00.000Z',
     updatedBy: 'System'
   },
   'ROLE-VIEWER': {
@@ -309,13 +317,27 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, RolePermissions> = {
       ['Dashboard', 'Work Analytics', 'Historical Logs', 'Product Master', 'Inventory', 'Dispatch Creation', 'Receiving Inspection', 'Waybills & Delivery Notes', 'Reports'],
       ['View']
     ),
-    updatedAt: new Date().toISOString(),
+    updatedAt: '2026-01-01T00:00:00.000Z',
     updatedBy: 'System'
   }
 };
 
+// DEFAULT USER OVERRIDES
+// Evaluated deterministically via Explicit User Overrides in the RBAC pipeline
+export const DEFAULT_USER_OVERRIDES: Record<string, UserPermissionOverride> = {};
+
+export interface AuthorizedNavItem {
+  id: string;
+  label: string;
+  icon: string;
+  appMode: string;
+  view?: string;
+  badge?: number;
+  category?: string;
+}
+
 export const permissionService = {
-  // Local storage helpers
+  // ================= STORAGE HELPERS =================
   getLocalRoles(): RoleDefinition[] {
     try {
       const data = localStorage.getItem(STORAGE_ROLES_KEY);
@@ -370,6 +392,27 @@ export const permissionService = {
     }
   },
 
+  getLocalUserOverrides(): Record<string, UserPermissionOverride> {
+    try {
+      const data = localStorage.getItem(STORAGE_USER_OVERRIDES_KEY);
+      if (data) {
+        const parsed = JSON.parse(data);
+        return { ...DEFAULT_USER_OVERRIDES, ...parsed };
+      }
+    } catch (e) {
+      console.warn('Failed to parse local user overrides:', e);
+    }
+    return DEFAULT_USER_OVERRIDES;
+  },
+
+  saveLocalUserOverrides(overrides: Record<string, UserPermissionOverride>): void {
+    try {
+      localStorage.setItem(STORAGE_USER_OVERRIDES_KEY, JSON.stringify(overrides));
+    } catch (e) {
+      console.warn('Failed to save local user overrides:', e);
+    }
+  },
+
   getLocalAuditLogs(): RoleAuditLogEntry[] {
     try {
       const data = localStorage.getItem(STORAGE_ROLE_AUDIT_LOGS_KEY);
@@ -388,42 +431,186 @@ export const permissionService = {
     }
   },
 
-  // Central Permission Check Engine
+  // Retrieve user override record by userId or email
+  getUserOverride(userIdOrEmail: string): UserPermissionOverride | null {
+    if (!userIdOrEmail) return null;
+    const cleanKey = userIdOrEmail.toLowerCase().trim();
+    const overrides = this.getLocalUserOverrides();
+
+    // Match by exact ID or email
+    for (const [key, ov] of Object.entries(overrides)) {
+      const overrideObj = ov as UserPermissionOverride;
+      if (
+        key.toLowerCase() === cleanKey ||
+        overrideObj.userId?.toLowerCase() === cleanKey ||
+        overrideObj.userEmail?.toLowerCase() === cleanKey
+      ) {
+        return overrideObj;
+      }
+    }
+    return null;
+  },
+
+  // Save or update an explicit user permission override
+  async saveUserOverride(override: UserPermissionOverride, adminName: string = 'Administrator'): Promise<UserPermissionOverride> {
+    const overrides = this.getLocalUserOverrides();
+    const key = override.userId || override.userEmail.toLowerCase().trim();
+    const updated: UserPermissionOverride = {
+      ...override,
+      updatedAt: new Date().toISOString(),
+      updatedBy: adminName || 'System Admin'
+    };
+    overrides[key] = updated;
+    this.saveLocalUserOverrides(overrides);
+
+    await this.logAudit(
+      adminName,
+      `USER_PERMISSION_OVERRIDE_SAVED`,
+      `User ${override.userEmail}`,
+      JSON.stringify({ deviceAccess: override.deviceAccess, permissionsCount: Object.keys(override.permissions || {}).length })
+    );
+
+    if (db && APP_ID_PATH) {
+      try {
+        await db.collection('artifacts')
+          .doc(APP_ID_PATH)
+          .collection('public')
+          .doc('userPermissionOverrides')
+          .collection('items')
+          .doc(key)
+          .set(updated);
+
+        await db.collection('userPermissionOverrides').doc(key).set(updated);
+      } catch (e) {
+        console.warn('Firebase userPermissionOverrides sync error:', e);
+      }
+    }
+
+    return updated;
+  },
+
+  async setUserOverride(override: UserPermissionOverride): Promise<UserPermissionOverride> {
+    return this.saveUserOverride(override, override.updatedBy || 'Administrator');
+  },
+
+  // ================= DEVICE CONTEXT EVALUATION =================
+  canAccessDevice(user: any, deviceContext?: DeviceInterface): boolean {
+    if (!user) return false;
+    if (user.active === false) return false;
+    if (!deviceContext) return true;
+
+    // Administrators always have full device access
+    const role = (user.role || '').trim();
+    if (role === 'Administrator' || role === 'Admin') return true;
+
+    // Clocking Terminal account is restricted to terminal interface
+    if (this.isClockingTerminalUser(user)) {
+      return deviceContext === 'terminal';
+    }
+
+    // Check user explicit override
+    const override = this.getUserOverride(user.id || user.email);
+    if (override?.deviceAccess && override.deviceAccess[deviceContext] !== undefined) {
+      return !!override.deviceAccess[deviceContext];
+    }
+
+    // Check user direct deviceAccess object if present
+    if (user.deviceAccess && user.deviceAccess[deviceContext] !== undefined) {
+      return !!user.deviceAccess[deviceContext];
+    }
+
+    // Standard defaults: Desktop & Phone enabled, Tablet/Terminal disabled unless assigned
+    if (deviceContext === 'desktop' || deviceContext === 'phone') return true;
+    return false;
+  },
+
+  // ================= DETERMINISTIC PERMISSION CHECK ENGINE =================
+  /**
+   * Evaluates user permission using strict precedence:
+   * 1. Explicit User DENY
+   * 2. Explicit User ALLOW
+   * 3. Device-specific User Permission
+   * 4. Role Permission
+   * 5. Default DENY
+   */
   hasPermission(
     user: any,
     moduleName: string,
-    action: PermissionAction = 'View'
+    action: PermissionAction = 'View',
+    deviceContext?: DeviceInterface
   ): boolean {
     if (!user) return false;
+    if (user.active === false) return false;
 
-    // Administrators always have full permissions
-    if (user.role === 'Admin' || user.role === 'Administrator') return true;
+    // Device access gate: If deviceContext is specified, verify device authorization
+    if (deviceContext && !this.canAccessDevice(user, deviceContext)) {
+      return false;
+    }
 
-    // Retrieve user assigned roleId or match by role name
+    const override = this.getUserOverride(user.id || user.email);
+
+    // 1. Device-specific action override
+    if (deviceContext && override?.deviceOverrides?.[deviceContext]?.actions?.[moduleName]?.[action] !== undefined) {
+      const devActionVal = override.deviceOverrides[deviceContext]!.actions![moduleName]![action];
+      if (devActionVal === false) return false;
+      if (devActionVal === true) return true;
+    }
+
+    // 2. Device-specific module deny
+    if (deviceContext && override?.deviceOverrides?.[deviceContext]?.modules?.[moduleName] === false) {
+      return false;
+    }
+
+    // 3. Explicit User Overrides (DENY / ALLOW / INHERIT)
+    const userVal = override?.permissions?.[moduleName]?.[action];
+    if (userVal !== undefined) {
+      if (userVal === 'deny' || userVal === false) return false;
+      if (userVal === 'allow' || userVal === true) return true;
+      // If userVal === 'inherit', continue to role permission check
+    }
+
+    // 4. User direct permissions field fallback
+    const directVal = user?.userPermissions?.[moduleName]?.[action];
+    if (directVal !== undefined) {
+      if (directVal === 'deny' || directVal === false) return false;
+      if (directVal === 'allow' || directVal === true) return true;
+    }
+
+    if (user.permissions && user.permissions[moduleName] !== undefined) {
+      if (typeof user.permissions[moduleName] === 'boolean' && action === 'View') {
+        return user.permissions[moduleName];
+      }
+    }
+
+    // 5. Role Permission Baseline
+    const role = (user.role || '').trim();
+    if (role === 'Administrator' || role === 'Admin') {
+      return true;
+    }
+
     const userRoles = this.getLocalUserRoles();
-    const assigned = userRoles[user.id];
-    let roleId = assigned?.roleId;
+    const assigned = userRoles[user.id || user.email];
+    let roleId = assigned?.roleId || user.roleId;
 
     if (!roleId) {
-      // Find default matching role by roleName
       const roles = this.getLocalRoles();
-      const matched = roles.find(r => r.roleName.toLowerCase() === (user.role || '').toLowerCase());
+      const matched = roles.find(r => r.roleName.toLowerCase() === role.toLowerCase());
       if (matched) roleId = matched.id;
     }
 
     if (!roleId) {
-      // Fallback matching logic for standard roles
-      if (user.role === 'Manager') roleId = 'ROLE-MANAGER';
-      else if (user.role === 'Purchasing') roleId = 'ROLE-PURCHASING';
-      else if (user.role === 'Stock Manager') roleId = 'ROLE-STOCK-MGR';
-      else if (user.role === 'Supervisor') roleId = 'ROLE-SUPERVISOR';
-      else if (user.role === 'Employee') roleId = 'ROLE-EMPLOYEE';
-      else if (user.role === 'Viewer') roleId = 'ROLE-VIEWER';
+      if (role === 'Manager') roleId = 'ROLE-MANAGER';
+      else if (role === 'Purchasing') roleId = 'ROLE-PURCHASING';
+      else if (role === 'Stock Manager') roleId = 'ROLE-STOCK-MGR';
+      else if (role === 'Supervisor') roleId = 'ROLE-SUPERVISOR';
+      else if (role === 'Clocking Terminal' || role === 'Clocking Kiosk') roleId = 'ROLE-CLOCKING-TERMINAL';
+      else if (role === 'Employee' || role === 'Artisan') roleId = 'ROLE-EMPLOYEE';
+      else if (role === 'Viewer') roleId = 'ROLE-VIEWER';
       else return false;
     }
 
-    const allPermissions = this.getLocalRolePermissions();
-    const rolePerms = allPermissions[roleId];
+    const allRolePerms = this.getLocalRolePermissions();
+    const rolePerms = allRolePerms[roleId];
 
     if (!rolePerms || !rolePerms.permissions[moduleName]) {
       return false;
@@ -432,7 +619,447 @@ export const permissionService = {
     return !!rolePerms.permissions[moduleName][action];
   },
 
-  // Audit Log Entry Logger
+  // Alias for granular action checks
+  canPerform(
+    user: any,
+    moduleName: string,
+    action: PermissionAction,
+    deviceContext?: DeviceInterface
+  ): boolean {
+    return this.hasPermission(user, moduleName, action, deviceContext);
+  },
+
+  // ================= MODULE & ROUTE ACCESS ENGINE =================
+  canAccessMode(user: any, mode: string, deviceContext?: DeviceInterface): boolean {
+    if (!user) return false;
+    if (user.active === false) return false;
+
+    // AI chat is accessible to all authenticated active users on authorized devices
+    if (mode === 'gemini_chat' || mode === 'ai_assistant') {
+      return this.canAccessDevice(user, deviceContext);
+    }
+
+    const role = (user.role || '').trim();
+    if (role === 'Administrator' || role === 'Admin') {
+      return this.canAccessDevice(user, deviceContext);
+    }
+
+    if (this.isClockingTerminalUser(user)) {
+      return ['clocking_terminal', 'employee', 'leave', 'qr_scan_service'].includes(mode);
+    }
+
+    // Device access gate
+    if (deviceContext && !this.canAccessDevice(user, deviceContext)) {
+      return false;
+    }
+
+    // Evaluate required module view permissions for each application mode
+    switch (mode) {
+      case 'clocking_terminal':
+        return this.hasPermission(user, 'Clocking', 'View', deviceContext);
+
+      case 'employee':
+        return this.hasPermission(user, 'Clocking', 'View', deviceContext) ||
+               this.hasPermission(user, 'Dashboard', 'View', deviceContext);
+
+      case 'qr_scan_service':
+        return this.hasPermission(user, 'QR Scan Service', 'View', deviceContext);
+
+      case 'dispatch':
+      case 'dispatches':
+      case 'mobile_dispatches':
+        return this.hasPermission(user, 'Dispatch Creation', 'View', deviceContext) ||
+               this.hasPermission(user, 'Receiving Inspection', 'View', deviceContext) ||
+               this.hasPermission(user, 'Discrepancy Management', 'View', deviceContext) ||
+               this.hasPermission(user, 'Waybills & Delivery Notes', 'View', deviceContext);
+
+      case 'purchase_orders':
+        return this.hasPermission(user, 'Purchase Orders', 'View', deviceContext) ||
+               this.hasPermission(user, 'Goods Receiving', 'View', deviceContext) ||
+               this.hasPermission(user, 'Stock Requests', 'View', deviceContext);
+
+      case 'product_master':
+        return this.hasPermission(user, 'Product Master', 'View', deviceContext);
+
+      case 'orders':
+        return this.hasPermission(user, 'Inventory', 'View', deviceContext) ||
+               this.hasPermission(user, 'Basket', 'View', deviceContext);
+
+      case 'kanban':
+      case 'template_designer':
+        return this.hasPermission(user, 'Kanban Designer', 'View', deviceContext) ||
+               this.hasPermission(user, 'Print Templates', 'View', deviceContext);
+
+      case 'admin':
+        return this.hasPermission(user, 'Employer Registration', 'View', deviceContext) ||
+               this.hasPermission(user, 'Archive Profiles', 'View', deviceContext);
+
+      case 'analytics':
+        return this.hasPermission(user, 'Work Analytics', 'View', deviceContext) ||
+               this.hasPermission(user, 'Generate Reports', 'View', deviceContext) ||
+               this.hasPermission(user, 'Historical Logs', 'View', deviceContext);
+
+      case 'leave':
+        return this.hasPermission(user, 'Leave Management', 'View', deviceContext);
+
+      case 'system_admin':
+        return this.hasPermission(user, 'Roles & Permissions', 'View', deviceContext) ||
+               this.hasPermission(user, 'System Audit Log', 'View', deviceContext);
+
+      case 'company_settings':
+        return this.hasPermission(user, 'Company Information', 'View', deviceContext) ||
+               this.hasPermission(user, 'Branch Management', 'View', deviceContext);
+
+      case 'mobile':
+        return this.hasPermission(user, 'Dashboard', 'View', deviceContext);
+
+      default:
+        return false;
+    }
+  },
+
+  // ================= UNIFIED NAVIGATION GENERATOR =================
+  getAuthorizedNavigationItems(
+    user: any,
+    deviceContext: DeviceInterface = 'desktop'
+  ): AuthorizedNavItem[] {
+    if (!user || user.active === false) return [];
+    if (!this.canAccessDevice(user, deviceContext)) return [];
+
+    const allNavCandidates: AuthorizedNavItem[] = [
+      {
+        id: 'employee_terminal',
+        label: 'Clocking Terminal',
+        icon: 'clock',
+        appMode: 'employee',
+        view: 'dashboard',
+        category: 'Artisan Terminal'
+      },
+      {
+        id: 'qr_scan',
+        label: 'QR Scan Service',
+        icon: 'scan',
+        appMode: 'qr_scan_service',
+        view: 'dashboard',
+        category: 'Artisan Terminal'
+      },
+      {
+        id: 'gemini_ai',
+        label: 'Gemini AI Hub',
+        icon: 'bot',
+        appMode: 'gemini_chat',
+        category: 'AI Intelligence'
+      },
+      {
+        id: 'dispatch',
+        label: 'Dispatch & Receiving',
+        icon: 'truck',
+        appMode: 'dispatch',
+        view: 'dashboard',
+        category: 'Management Hub'
+      },
+      {
+        id: 'product_master',
+        label: 'Product Master',
+        icon: 'box',
+        appMode: 'product_master',
+        category: 'Management Hub'
+      },
+      {
+        id: 'purchase_orders',
+        label: 'Purchase Orders',
+        icon: 'file-text',
+        appMode: 'purchase_orders',
+        category: 'Management Hub'
+      },
+      {
+        id: 'kanban_designer',
+        label: 'Kanban Designer',
+        icon: 'layout-template',
+        appMode: 'template_designer',
+        category: 'Management Hub'
+      },
+      {
+        id: 'orders',
+        label: 'Procurement & Orders',
+        icon: 'banknote',
+        appMode: 'orders',
+        view: 'dashboard',
+        category: 'Management Hub'
+      },
+      {
+        id: 'employer_reg',
+        label: 'Employer Registration',
+        icon: 'users',
+        appMode: 'admin',
+        view: 'dashboard',
+        category: 'Management Hub'
+      },
+      {
+        id: 'analytics',
+        label: 'Work Analytics',
+        icon: 'bar-chart-3',
+        appMode: 'analytics',
+        view: 'dashboard',
+        category: 'Management Hub'
+      },
+      {
+        id: 'leave',
+        label: 'Leave Management',
+        icon: 'calendar',
+        appMode: 'leave',
+        view: 'dashboard',
+        category: 'Management Hub'
+      },
+      {
+        id: 'system_admin',
+        label: 'System Admin',
+        icon: 'shield',
+        appMode: 'system_admin',
+        view: 'dashboard',
+        category: 'System'
+      },
+      {
+        id: 'company_settings',
+        label: 'Company Settings',
+        icon: 'settings',
+        appMode: 'company_settings',
+        view: 'dashboard',
+        category: 'System'
+      }
+    ];
+
+    // Filter candidate items through strict permission evaluation for the specified device context
+    return allNavCandidates.filter(item => this.canAccessMode(user, item.appMode, deviceContext));
+  },
+
+  // ================= AUTHORIZED PHONE NAVIGATION GENERATOR =================
+  getAuthorizedPhoneNavItems(
+    user: any,
+    options: { basketCount?: number; unreadNotifications?: number } = {}
+  ): Array<{
+    id: string;
+    label: string;
+    icon: string;
+    badge?: number;
+    targetMode?: string;
+    isModal?: boolean;
+    modalTarget?: 'profile' | 'notifications';
+  }> {
+    if (!user || user.active === false) return [];
+    if (!this.canAccessDevice(user, 'phone')) return [];
+
+    const items: Array<{
+      id: string;
+      label: string;
+      icon: string;
+      badge?: number;
+      targetMode?: string;
+      isModal?: boolean;
+      modalTarget?: 'profile' | 'notifications';
+    }> = [];
+
+    // 1. Clocking (if authorized for Clocking module on phone)
+    if (this.hasPermission(user, 'Clocking', 'View', 'phone')) {
+      items.push({
+        id: 'clocking',
+        label: 'Clocking',
+        icon: 'clock',
+        targetMode: 'employee'
+      });
+    }
+
+    // 2. QR Scan (if authorized on phone)
+    if (this.hasPermission(user, 'QR Scan Service', 'View', 'phone')) {
+      items.push({
+        id: 'qr_scan',
+        label: 'QR Scan',
+        icon: 'scan',
+        targetMode: 'qr_scan_service'
+      });
+    }
+
+    // 3. Dispatch & Receiving (if authorized for dispatch on phone)
+    if (this.canAccessMode(user, 'dispatch', 'phone')) {
+      items.push({
+        id: 'dispatches',
+        label: 'Dispatches',
+        icon: 'truck',
+        targetMode: 'dispatch'
+      });
+    }
+
+    // 4. Basket (if authorized for orders or QR scan and has basket items)
+    if (options.basketCount && options.basketCount > 0 && this.hasPermission(user, 'Procurement & Orders', 'View', 'phone')) {
+      items.push({
+        id: 'basket',
+        label: 'Basket',
+        icon: 'shopping-bag',
+        badge: options.basketCount,
+        targetMode: 'qr_scan_service'
+      });
+    }
+
+    // 5. Procurement / Orders (if authorized on phone)
+    if (this.canAccessMode(user, 'orders', 'phone') && !items.some(i => i.id === 'dispatches')) {
+      items.push({
+        id: 'orders',
+        label: 'Orders',
+        icon: 'banknote',
+        targetMode: 'orders'
+      });
+    }
+
+    // 6. Management / Hub (if admin or manager with template designer or admin access)
+    if ((this.canAccessMode(user, 'template_designer', 'phone') || this.canAccessMode(user, 'admin', 'phone')) && items.length < 3) {
+      items.push({
+        id: 'management',
+        label: 'Hub',
+        icon: 'layout-template',
+        targetMode: this.canAccessMode(user, 'template_designer', 'phone') ? 'template_designer' : 'admin'
+      });
+    }
+
+    // 7. Work Analytics (if authorized on phone)
+    if (this.canAccessMode(user, 'analytics', 'phone') && items.length < 3) {
+      items.push({
+        id: 'analytics',
+        label: 'Analytics',
+        icon: 'bar-chart-3',
+        targetMode: 'analytics'
+      });
+    }
+
+    // 8. Alerts / Notifications (if unread notifications exist or explicitly relevant)
+    if (options.unreadNotifications && options.unreadNotifications > 0) {
+      items.push({
+        id: 'notifications',
+        label: 'Alerts',
+        icon: 'bell',
+        badge: options.unreadNotifications,
+        isModal: true,
+        modalTarget: 'notifications'
+      });
+    }
+
+    // 9. Profile (Standard utility for all authenticated users)
+    items.push({
+      id: 'profile',
+      label: 'Profile',
+      icon: 'user',
+      isModal: true,
+      modalTarget: 'profile'
+    });
+
+    return items;
+  },
+
+  // ================= INITIAL ROUTING =================
+  getInitialModeAndView(user: any, deviceContext: DeviceInterface = 'desktop'): { appMode: string; view: string } {
+    if (!user || user.active === false) {
+      return { appMode: 'restricted', view: 'restricted' };
+    }
+
+    if (this.isClockingTerminalUser(user)) {
+      return { appMode: 'clocking_terminal', view: 'clocking' };
+    }
+
+    // Priority 1: Check if user has primary dispatch authorization (e.g. Depot / Receiving Officer)
+    if (
+      this.canAccessMode(user, 'dispatch', deviceContext) &&
+      !this.hasPermission(user, 'Clocking', 'View', deviceContext)
+    ) {
+      return { appMode: 'dispatch', view: 'dashboard' };
+    }
+
+    // Priority 2: Standard employee clocking/dashboard
+    if (this.canAccessMode(user, 'employee', deviceContext)) {
+      return { appMode: 'employee', view: 'dashboard' };
+    }
+
+    // Priority 3: Purchase orders
+    if (this.canAccessMode(user, 'purchase_orders', deviceContext)) {
+      return { appMode: 'purchase_orders', view: 'purchase_orders' };
+    }
+
+    // Priority 4: Dispatch
+    if (this.canAccessMode(user, 'dispatch', deviceContext)) {
+      return { appMode: 'dispatch', view: 'dashboard' };
+    }
+
+    // Fallback: Check all authorized navigation items
+    const authorized = this.getAuthorizedNavigationItems(user, deviceContext);
+    if (authorized.length > 0) {
+      return { appMode: authorized[0].appMode, view: authorized[0].view || 'dashboard' };
+    }
+
+    return { appMode: 'restricted', view: 'restricted' };
+  },
+
+  // ================= EFFECTIVE PERMISSIONS COMPUTATION =================
+  getEffectiveUserPermissions(user: any): EffectiveUserPermissions {
+    const email = (user?.email || '').toLowerCase().trim();
+    const userId = user?.id || '';
+    const role = (user?.role || 'Employee').trim();
+    const override = this.getUserOverride(userId || email);
+
+    const deviceAccess: UserDeviceAccess = override?.deviceAccess || user?.deviceAccess || {
+      desktop: true,
+      phone: true,
+      tablet: false,
+      terminal: false
+    };
+
+    const modules: Record<string, boolean> = {};
+    const actions: Record<string, Record<PermissionAction, boolean>> = {};
+
+    ALL_MODULE_NAMES.forEach(mod => {
+      actions[mod] = {
+        View: this.hasPermission(user, mod, 'View'),
+        Create: this.hasPermission(user, mod, 'Create'),
+        Edit: this.hasPermission(user, mod, 'Edit'),
+        Delete: this.hasPermission(user, mod, 'Delete'),
+        Approve: this.hasPermission(user, mod, 'Approve'),
+        Process: this.hasPermission(user, mod, 'Process'),
+        Print: this.hasPermission(user, mod, 'Print'),
+        Export: this.hasPermission(user, mod, 'Export')
+      };
+      modules[mod] = actions[mod].View;
+    });
+
+    return {
+      userId,
+      userEmail: email,
+      roleName: role,
+      physicalLocation: override?.physicalLocation || user?.physicalLocation || 'Bloemfontein',
+      branchId: override?.branchId || user?.branchId || 'BFN-01',
+      branchName: override?.branchName || user?.branchName || 'Bloemfontein Central',
+      deviceAccess,
+      modules,
+      actions
+    };
+  },
+
+  // ================= HELPERS & AUDIT =================
+  isClockingTerminalUser(user: any): boolean {
+    if (!user) return false;
+    const role = (user.role || '').trim();
+    const email = (user.email || '').trim().toLowerCase();
+    return (
+      role === 'Clocking Kiosk' ||
+      role === 'Clocking Terminal' ||
+      role === 'Clocking' ||
+      email === 'clocking@tsjoinery.co.za'
+    );
+  },
+
+  getGreeting(firstName?: string, date: Date = new Date()): string {
+    const hour = date.getHours();
+    const timeGreeting = hour < 12 ? 'Good Morning' : hour < 17 ? 'Good Afternoon' : 'Good Evening';
+    const name = (firstName || '').trim() || 'User';
+    return `${timeGreeting}, ${name}`;
+  },
+
   async logAudit(administrator: string, action: string, previousValue: string, newValue: string): Promise<RoleAuditLogEntry> {
     const now = new Date();
     const entry: RoleAuditLogEntry = {
@@ -484,94 +1111,78 @@ export const permissionService = {
     const updatedRoles = [...roles, newRole];
     this.saveLocalRoles(updatedRoles);
 
-    // Initialize blank permissions matrix for new role
-    const allPermsMap = this.getLocalRolePermissions();
-    const blankMatrix: Record<string, Record<PermissionAction, boolean>> = {};
-    ALL_MODULE_NAMES.forEach(mod => {
-      blankMatrix[mod] = {
-        View: false,
-        Create: false,
-        Edit: false,
-        Delete: false,
-        Approve: false,
-        Print: false,
-        Export: false
-      };
-    });
-
+    const permissionsMap = this.getLocalRolePermissions();
     const newRolePerms: RolePermissions = {
       roleId: newRole.id,
       roleName: newRole.roleName,
-      permissions: blankMatrix,
+      permissions: customMatrix(['Dashboard'], ['View']),
       updatedAt: new Date().toISOString(),
       updatedBy: adminName
     };
+    permissionsMap[newRole.id] = newRolePerms;
+    this.saveLocalRolePermissions(permissionsMap);
 
-    allPermsMap[newRole.id] = newRolePerms;
-    this.saveLocalRolePermissions(allPermsMap);
+    await this.logAudit(adminName, 'ROLE_CREATED', 'None', `Created role ${newRole.roleName} (${newRole.id})`);
 
     if (db && APP_ID_PATH) {
       try {
-        await db.collection('roles').doc(newRole.id).set(newRole);
-        await db.collection('rolePermissions').doc(newRole.id).set(newRolePerms);
-
         await db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('roles').collection('items').doc(newRole.id).set(newRole);
+        await db.collection('roles').doc(newRole.id).set(newRole);
         await db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('rolePermissions').collection('items').doc(newRole.id).set(newRolePerms);
+        await db.collection('rolePermissions').doc(newRole.id).set(newRolePerms);
       } catch (e) {
-        console.warn('Firebase createRole error:', e);
+        console.warn('Firebase createRole sync error:', e);
       }
     }
 
-    await this.logAudit(adminName, 'Role Created', 'None', `Created role "${newRole.roleName}" (${newRole.id})`);
     return newRole;
   },
 
-  async updateRole(roleId: string, updates: Partial<RoleDefinition>, adminName: string): Promise<RoleDefinition | null> {
+  async updateRole(roleId: string, updates: Partial<RoleDefinition>, adminName: string): Promise<void> {
     const roles = this.getLocalRoles();
     const idx = roles.findIndex(r => r.id === roleId);
-    if (idx === -1) return null;
+    if (idx === -1) return;
 
-    const prevRole = roles[idx];
+    const oldRole = roles[idx];
     const updatedRole: RoleDefinition = {
-      ...prevRole,
+      ...oldRole,
       ...updates,
       updatedAt: new Date().toISOString()
     };
-
     roles[idx] = updatedRole;
     this.saveLocalRoles(roles);
 
-    if (db && APP_ID_PATH) {
-      try {
-        await db.collection('roles').doc(roleId).set(updatedRole, { merge: true });
-        await db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('roles').collection('items').doc(roleId).set(updatedRole, { merge: true });
-      } catch (e) {
-        console.warn('Firebase updateRole error:', e);
+    if (updates.roleName && updates.roleName !== oldRole.roleName) {
+      const permsMap = this.getLocalRolePermissions();
+      if (permsMap[roleId]) {
+        permsMap[roleId].roleName = updates.roleName;
+        permsMap[roleId].updatedAt = new Date().toISOString();
+        permsMap[roleId].updatedBy = adminName;
+        this.saveLocalRolePermissions(permsMap);
       }
     }
 
-    await this.logAudit(
-      adminName,
-      'Role Edited',
-      `Name: ${prevRole.roleName}, Status: ${prevRole.status}`,
-      `Name: ${updatedRole.roleName}, Status: ${updatedRole.status}`
-    );
+    await this.logAudit(adminName, 'ROLE_UPDATED', JSON.stringify(oldRole), JSON.stringify(updatedRole));
 
-    return updatedRole;
+    if (db && APP_ID_PATH) {
+      try {
+        await db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('roles').collection('items').doc(roleId).update(updatedRole);
+        await db.collection('roles').doc(roleId).update(updatedRole);
+      } catch (e) {
+        console.warn('Firebase updateRole sync error:', e);
+      }
+    }
   },
 
-  async duplicateRole(roleId: string, newRoleName: string, adminName: string): Promise<RoleDefinition | null> {
+  async duplicateRole(sourceRoleId: string, newRoleName: string, adminName: string): Promise<RoleDefinition | null> {
     const roles = this.getLocalRoles();
-    const sourceRole = roles.find(r => r.id === roleId);
+    const sourceRole = roles.find(r => r.id === sourceRoleId);
     if (!sourceRole) return null;
-
-    const allPermsMap = this.getLocalRolePermissions();
-    const sourcePerms = allPermsMap[roleId];
 
     const duplicatedRole: RoleDefinition = {
       id: `ROLE-${Date.now().toString().slice(-5)}`,
       roleName: newRoleName.trim(),
-      description: `Copy of ${sourceRole.roleName}. ${sourceRole.description}`,
+      description: `Copy of ${sourceRole.roleName}: ${sourceRole.description}`,
       status: 'active',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -581,190 +1192,188 @@ export const permissionService = {
     const updatedRoles = [...roles, duplicatedRole];
     this.saveLocalRoles(updatedRoles);
 
+    const permsMap = this.getLocalRolePermissions();
+    const sourcePerms = permsMap[sourceRoleId] || { permissions: customMatrix(['Dashboard'], ['View']) };
+
     const duplicatedPerms: RolePermissions = {
       roleId: duplicatedRole.id,
       roleName: duplicatedRole.roleName,
-      permissions: sourcePerms ? JSON.parse(JSON.stringify(sourcePerms.permissions)) : customMatrix([]),
+      permissions: JSON.parse(JSON.stringify(sourcePerms.permissions)),
       updatedAt: new Date().toISOString(),
       updatedBy: adminName
     };
+    permsMap[duplicatedRole.id] = duplicatedPerms;
+    this.saveLocalRolePermissions(permsMap);
 
-    allPermsMap[duplicatedRole.id] = duplicatedPerms;
-    this.saveLocalRolePermissions(allPermsMap);
+    await this.logAudit(adminName, 'ROLE_DUPLICATED', sourceRole.roleName, duplicatedRole.roleName);
 
     if (db && APP_ID_PATH) {
       try {
         await db.collection('roles').doc(duplicatedRole.id).set(duplicatedRole);
-        await db.collection('rolePermissions').doc(duplicatedRole.id).set(duplicatedPerms);
-
         await db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('roles').collection('items').doc(duplicatedRole.id).set(duplicatedRole);
+        await db.collection('rolePermissions').doc(duplicatedRole.id).set(duplicatedPerms);
         await db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('rolePermissions').collection('items').doc(duplicatedRole.id).set(duplicatedPerms);
       } catch (e) {
-        console.warn('Firebase duplicateRole error:', e);
+        console.warn('Firebase duplicateRole sync error:', e);
       }
     }
 
-    await this.logAudit(adminName, 'Role Duplicated', `Source Role: ${sourceRole.roleName}`, `New Role: ${duplicatedRole.roleName}`);
     return duplicatedRole;
   },
 
-  async archiveRole(roleId: string, adminName: string): Promise<RoleDefinition | null> {
-    return this.updateRole(roleId, { status: 'archived' }, adminName);
+  async archiveRole(roleId: string, adminName: string): Promise<void> {
+    await this.updateRole(roleId, { status: 'archived' }, adminName);
   },
 
-  async restoreRole(roleId: string, adminName: string): Promise<RoleDefinition | null> {
-    return this.updateRole(roleId, { status: 'active' }, adminName);
+  async restoreRole(roleId: string, adminName: string): Promise<void> {
+    await this.updateRole(roleId, { status: 'active' }, adminName);
   },
 
   async deleteRole(roleId: string, adminName: string): Promise<boolean> {
     const roles = this.getLocalRoles();
-    const roleToDelete = roles.find(r => r.id === roleId);
-    if (!roleToDelete) return false;
-
-    // Prevent deletion of System Default roles
-    if (roleToDelete.isSystemDefault) {
-      throw new Error('System default roles cannot be deleted. You may archive them instead.');
+    const target = roles.find(r => r.id === roleId);
+    if (!target || target.isSystemDefault) {
+      return false;
     }
 
-    const filtered = roles.filter(r => r.id !== roleId);
-    this.saveLocalRoles(filtered);
+    const updatedRoles = roles.filter(r => r.id !== roleId);
+    this.saveLocalRoles(updatedRoles);
 
-    const allPermsMap = this.getLocalRolePermissions();
-    delete allPermsMap[roleId];
-    this.saveLocalRolePermissions(allPermsMap);
+    const permsMap = this.getLocalRolePermissions();
+    delete permsMap[roleId];
+    this.saveLocalRolePermissions(permsMap);
+
+    await this.logAudit(adminName, 'ROLE_DELETED', target.roleName, 'Deleted permanently');
 
     if (db && APP_ID_PATH) {
       try {
         await db.collection('roles').doc(roleId).delete();
-        await db.collection('rolePermissions').doc(roleId).delete();
-
         await db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('roles').collection('items').doc(roleId).delete();
+        await db.collection('rolePermissions').doc(roleId).delete();
         await db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('rolePermissions').collection('items').doc(roleId).delete();
       } catch (e) {
-        console.warn('Firebase deleteRole error:', e);
+        console.warn('Firebase deleteRole sync error:', e);
       }
     }
 
-    await this.logAudit(adminName, 'Role Deleted', `Deleted role "${roleToDelete.roleName}" (${roleId})`, 'Deleted');
     return true;
   },
 
-  // ================= PERMISSION SAVING =================
   async savePermissionsForRole(
     roleId: string,
-    permissionsMatrix: Record<string, Record<PermissionAction, boolean>>,
+    newPermissions: Record<string, Record<PermissionAction, boolean>>,
     adminName: string
-  ): Promise<RolePermissions> {
+  ): Promise<void> {
     const roles = this.getLocalRoles();
-    const role = roles.find(r => r.id === roleId);
-    const roleName = role ? role.roleName : 'Unknown Role';
+    const roleDef = roles.find(r => r.id === roleId);
+    const roleName = roleDef ? roleDef.roleName : roleId;
 
-    const allPermsMap = this.getLocalRolePermissions();
-    const previous = allPermsMap[roleId] ? JSON.stringify(allPermsMap[roleId].permissions) : 'None';
+    const permsMap = this.getLocalRolePermissions();
+    const oldPerms = permsMap[roleId];
 
     const updatedRolePerms: RolePermissions = {
       roleId,
       roleName,
-      permissions: permissionsMatrix,
+      permissions: newPermissions,
       updatedAt: new Date().toISOString(),
       updatedBy: adminName
     };
 
-    allPermsMap[roleId] = updatedRolePerms;
-    this.saveLocalRolePermissions(allPermsMap);
+    permsMap[roleId] = updatedRolePerms;
+    this.saveLocalRolePermissions(permsMap);
+
+    await this.logAudit(
+      adminName,
+      'ROLE_PERMISSIONS_UPDATED',
+      oldPerms ? `Updated matrix for ${roleName}` : 'None',
+      `Saved ${Object.keys(newPermissions).length} module permissions`
+    );
 
     if (db && APP_ID_PATH) {
       try {
         await db.collection('rolePermissions').doc(roleId).set(updatedRolePerms);
         await db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('rolePermissions').collection('items').doc(roleId).set(updatedRolePerms);
       } catch (e) {
-        console.warn('Firebase savePermissionsForRole error:', e);
+        console.warn('Firebase savePermissionsForRole sync error:', e);
       }
     }
-
-    await this.logAudit(
-      adminName,
-      'Permissions Changed',
-      `Role: ${roleName}`,
-      `Updated permissions matrix for role "${roleName}"`
-    );
-
-    return updatedRolePerms;
   },
 
-  // ================= USER ROLE ASSIGNMENTS =================
   async assignUserRole(
     userId: string,
     userName: string,
     userEmail: string,
     roleId: string,
-    adminName: string
+    roleNameOrAdmin?: string,
+    adminName?: string
   ): Promise<UserRoleAssignment> {
     const roles = this.getLocalRoles();
-    const targetRole = roles.find(r => r.id === roleId);
-    const roleName = targetRole ? targetRole.roleName : 'Viewer';
+    const matchedRole = roles.find(r => r.id === roleId);
+    let resolvedRoleName = matchedRole ? matchedRole.roleName : 'Employee';
+    let resolvedAdminName = 'Administrator';
+
+    if (adminName) {
+      resolvedRoleName = roleNameOrAdmin || resolvedRoleName;
+      resolvedAdminName = adminName;
+    } else if (roleNameOrAdmin) {
+      if (roles.some(r => r.roleName.toLowerCase() === roleNameOrAdmin.toLowerCase())) {
+        resolvedRoleName = roleNameOrAdmin;
+      } else {
+        resolvedAdminName = roleNameOrAdmin;
+      }
+    }
 
     const userRoles = this.getLocalUserRoles();
-    const previousValue = userRoles[userId] ? `${userRoles[userId].roleName} (${userRoles[userId].roleId})` : 'Default Role';
+    const oldRole = userRoles[userId]?.roleName || 'Unassigned';
 
-    const newAssignment: UserRoleAssignment = {
+    const assignment: UserRoleAssignment = {
       userId,
       userName,
       userEmail,
       roleId,
-      roleName,
+      roleName: resolvedRoleName,
       updatedAt: new Date().toISOString()
     };
 
-    userRoles[userId] = newAssignment;
+    userRoles[userId] = assignment;
     this.saveLocalUserRoles(userRoles);
+
+    await this.logAudit(resolvedAdminName, 'USER_ROLE_ASSIGNED', `${userName}: ${oldRole}`, `${userName}: ${resolvedRoleName}`);
 
     if (db && APP_ID_PATH) {
       try {
-        // Sync to userRoles collection in Firebase as requested
-        await db.collection('userRoles').doc(userId).set(newAssignment);
-        await db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('userRoles').collection('items').doc(userId).set(newAssignment);
-
-        // Also update user active doc in Firestore
-        await db.collection('artifacts')
-          .doc(APP_ID_PATH)
-          .collection('private')
-          .doc('users')
-          .collection('active')
-          .doc(userId)
-          .set({ role: roleName, roleId }, { merge: true });
+        await db.collection('userRoles').doc(userId).set(assignment);
+        await db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('userRoles').collection('items').doc(userId).set(assignment);
       } catch (e) {
-        console.warn('Firebase assignUserRole error:', e);
+        console.warn('Firebase assignUserRole sync error:', e);
       }
     }
 
-    await this.logAudit(
-      adminName,
-      'User Role Changed',
-      `User: ${userName} (${userEmail}), Old Role: ${previousValue}`,
-      `New Role: ${roleName} (${roleId})`
-    );
-
-    return newAssignment;
+    return assignment;
   },
 
-  // Subscriptions
+  // ================= FIRESTORE SUBSCRIPTIONS =================
   subscribeRoles(callback: (roles: RoleDefinition[]) => void) {
     callback(this.getLocalRoles());
 
     if (db && APP_ID_PATH) {
       try {
-        const unsub = db.collection('roles').onSnapshot(
-          snap => {
-            if (snap && !snap.empty) {
-              const list: RoleDefinition[] = [];
-              snap.forEach(d => list.push(d.data() as RoleDefinition));
-              this.saveLocalRoles(list);
-              callback(list);
-            }
-          },
-          err => console.warn('Roles subscription error:', err)
-        );
+        const unsub = db.collection('artifacts')
+          .doc(APP_ID_PATH)
+          .collection('public')
+          .doc('roles')
+          .collection('items')
+          .onSnapshot(
+            snap => {
+              if (snap && !snap.empty) {
+                const list: RoleDefinition[] = [];
+                snap.forEach(d => list.push(d.data() as RoleDefinition));
+                this.saveLocalRoles(list);
+                callback(list);
+              }
+            },
+            err => console.warn('Roles subscription error:', err)
+          );
         return unsub;
       } catch (e) {
         console.warn('Unable to subscribe to roles collection:', e);
@@ -774,7 +1383,7 @@ export const permissionService = {
     return () => {};
   },
 
-  subscribeRolePermissions(callback: (map: Record<string, RolePermissions>) => void) {
+  subscribeRolePermissions(callback: (perms: Record<string, RolePermissions>) => void) {
     callback(this.getLocalRolePermissions());
 
     if (db && APP_ID_PATH) {
@@ -785,13 +1394,13 @@ export const permissionService = {
               const map: Record<string, RolePermissions> = {};
               snap.forEach(d => {
                 const data = d.data() as RolePermissions;
-                map[data.roleId] = data;
+                map[data.roleId || d.id] = data;
               });
               this.saveLocalRolePermissions(map);
               callback(map);
             }
           },
-          err => console.warn('Role permissions subscription error:', err)
+          err => console.warn('RolePermissions subscription error:', err)
         );
         return unsub;
       } catch (e) {
@@ -802,7 +1411,7 @@ export const permissionService = {
     return () => {};
   },
 
-  subscribeUserRoles(callback: (map: Record<string, UserRoleAssignment>) => void) {
+  subscribeUserRoles(callback: (userRoles: Record<string, UserRoleAssignment>) => void) {
     callback(this.getLocalUserRoles());
 
     if (db && APP_ID_PATH) {
@@ -813,17 +1422,45 @@ export const permissionService = {
               const map: Record<string, UserRoleAssignment> = {};
               snap.forEach(d => {
                 const data = d.data() as UserRoleAssignment;
-                map[data.userId] = data;
+                map[data.userId || d.id] = data;
               });
               this.saveLocalUserRoles(map);
               callback(map);
             }
           },
-          err => console.warn('User roles subscription error:', err)
+          err => console.warn('UserRoles subscription error:', err)
         );
         return unsub;
       } catch (e) {
         console.warn('Unable to subscribe to userRoles collection:', e);
+      }
+    }
+
+    return () => {};
+  },
+
+  subscribeUserOverrides(callback: (overrides: Record<string, UserPermissionOverride>) => void) {
+    callback(this.getLocalUserOverrides());
+
+    if (db && APP_ID_PATH) {
+      try {
+        const unsub = db.collection('userPermissionOverrides').onSnapshot(
+          snap => {
+            if (snap && !snap.empty) {
+              const map: Record<string, UserPermissionOverride> = { ...DEFAULT_USER_OVERRIDES };
+              snap.forEach(d => {
+                const data = d.data() as UserPermissionOverride;
+                map[data.userId || data.userEmail || d.id] = data;
+              });
+              this.saveLocalUserOverrides(map);
+              callback(map);
+            }
+          },
+          err => console.warn('UserOverrides subscription error:', err)
+        );
+        return unsub;
+      } catch (e) {
+        console.warn('Unable to subscribe to userPermissionOverrides collection:', e);
       }
     }
 
@@ -854,153 +1491,6 @@ export const permissionService = {
     }
 
     return () => {};
-  },
-
-  // ================= TS HUB PHASE 2 ROLE & PERMISSION HELPERS =================
-  isClockingTerminalUser(user: any): boolean {
-    if (!user) return false;
-    const role = (user.role || '').trim();
-    const email = (user.email || '').trim().toLowerCase();
-    return (
-      role === 'Clocking Kiosk' || 
-      role === 'Clocking Terminal' || 
-      role === 'Clocking' || 
-      email === 'clocking@tsjoinery.co.za'
-    );
-  },
-
-  getGreeting(firstName?: string, date: Date = new Date()): string {
-    const hour = date.getHours();
-    const timeGreeting = hour < 12 ? 'Good Morning' : hour < 17 ? 'Good Afternoon' : 'Good Evening';
-    const name = (firstName || '').trim() || 'User';
-    return `${timeGreeting}, ${name}`;
-  },
-
-  canAccessMode(roleOrUser: any, mode: string): boolean {
-    if (mode === 'gemini_chat' || mode === 'ai_assistant') return true;
-    const role = typeof roleOrUser === 'string' ? roleOrUser : roleOrUser?.role || '';
-    const normRole = (role || '').trim();
-    if (normRole === 'Administrator' || normRole === 'Admin') return true;
-    if (normRole === 'Clocking Kiosk' || normRole === 'Clocking Terminal' || normRole === 'Clocking') {
-      return ['clocking_terminal', 'employee', 'leave', 'qr_scan_service'].includes(mode);
-    }
-
-    if (mode === 'dispatch' || mode === 'dispatches' || mode === 'mobile_dispatches') {
-      if (['Manager', 'Purchasing', 'Stock Manager', 'Supervisor'].includes(normRole)) return true;
-      if (typeof roleOrUser === 'object' && roleOrUser !== null) {
-        return this.hasPermission(roleOrUser, 'Dispatch Creation', 'View') || 
-               this.hasPermission(roleOrUser, 'Receiving Inspection', 'View');
-      }
-      return false;
-    }
-
-    switch (normRole) {
-      case 'Manager':
-        return ['clocking_terminal', 'admin', 'employee', 'analytics', 'leave', 'qr_scan_service', 'orders', 'dispatch', 'dispatches', 'mobile_dispatches'].includes(mode);
-      case 'HR':
-        return ['clocking_terminal', 'admin', 'employee', 'leave'].includes(mode);
-      case 'Purchasing':
-        return ['clocking_terminal', 'purchase_orders', 'orders', 'product_master', 'kanban', 'dispatch', 'dispatches', 'mobile_dispatches', 'qr_scan_service'].includes(mode);
-      case 'Stock Manager':
-        return ['clocking_terminal', 'product_master', 'purchase_orders', 'dispatch', 'dispatches', 'mobile_dispatches', 'qr_scan_service'].includes(mode);
-      case 'Supervisor':
-        return ['clocking_terminal', 'admin', 'employee', 'analytics', 'leave', 'qr_scan_service', 'dispatch', 'dispatches', 'mobile_dispatches'].includes(mode);
-      case 'Employee':
-      case 'Artisan':
-        return ['clocking_terminal', 'employee', 'leave'].includes(mode);
-      default:
-        return false;
-    }
-  },
-
-  canAccessView(role: string, viewName: string): boolean {
-    const normRole = (role || '').trim();
-    if (normRole === 'Administrator' || normRole === 'Admin') return true;
-    if (normRole === 'Clocking Kiosk' || normRole === 'Clocking Terminal' || normRole === 'Clocking') {
-      return ['clocking', 'employee_search', 'leave', 'qr_scan', 'personal_pin_entry', 'scanning'].includes(viewName);
-    }
-
-    switch (normRole) {
-      case 'Manager':
-        return ['dashboard', 'attendance', 'leave', 'reports', 'notifications', 'clocking', 'employee_status'].includes(viewName);
-      case 'HR':
-        return ['employees', 'attendance', 'leave', 'notifications', 'clocking'].includes(viewName);
-      case 'Purchasing':
-        return ['purchase_orders', 'suppliers', 'qr_ordering', 'warehouse', 'kanban', 'stock_requests', 'product_master', 'notifications'].includes(viewName);
-      case 'Employee':
-      case 'Artisan':
-        return ['emp_home', 'my_profile', 'my_leave', 'clocking_history', 'notifications', 'dashboard', 'clocking'].includes(viewName);
-      default:
-        return false;
-    }
-  },
-
-  getInitialModeAndView(user: any): { appMode: string; view: string } {
-    if (this.isClockingTerminalUser(user)) {
-      const res = { appMode: 'clocking_terminal', view: 'clocking' };
-      console.log('[AUTH ROUTING]', {
-        user: user?.email || user?.name || 'Kiosk',
-        role: user?.role,
-        getInitialModeAndViewResult: res
-      });
-      return res;
-    }
-
-    const role = (user?.role || '').trim();
-    const email = (user?.email || '').trim().toLowerCase();
-
-    // Specific employer email accounts explicitly landing on Clocking Terminal
-    const employerEmails = [
-      'elrico@tsjoinery.co.za',
-      'frans@tsjoinery.co.za',
-      'janah@tsjoinery.co.za',
-      'marietjie@tsjoinery.co.za'
-    ];
-
-    let result = { appMode: 'employee', view: 'dashboard' };
-
-    if (employerEmails.includes(email)) {
-      result = { appMode: 'employee', view: 'dashboard' };
-    } else if (role === 'Administrator' || role === 'Admin' || role === 'Manager' || role === 'HR' || role === 'Supervisor') {
-      result = { appMode: 'employee', view: 'dashboard' };
-    } else if (role === 'Purchasing' || role === 'Stock Manager') {
-      result = { appMode: 'purchase_orders', view: 'purchase_orders' };
-    } else if (role === 'Employee' || role === 'Artisan') {
-      result = { appMode: 'employee', view: 'dashboard' };
-    } else {
-      result = { appMode: 'employee', view: 'dashboard' };
-    }
-
-    console.log('[AUTH ROUTING]', {
-      user: email || user?.name || 'User',
-      role: role,
-      getInitialModeAndViewResult: result
-    });
-
-    return result;
-  },
-
-  getAllowedModesForRole(role: string): string[] {
-    const normRole = (role || '').trim();
-    if (normRole === 'Administrator' || normRole === 'Admin') {
-      return ['clocking_terminal', 'admin', 'employee', 'kanban', 'orders', 'product_master', 'purchase_orders', 'dispatch', 'analytics', 'leave', 'qr_scan_service', 'template_designer', 'system_admin', 'company_settings', 'mobile'];
-    }
-    if (normRole === 'Clocking Kiosk' || normRole === 'Clocking Terminal' || normRole === 'Clocking') {
-      return ['clocking_terminal'];
-    }
-    switch (normRole) {
-      case 'Manager':
-        return ['clocking_terminal', 'admin', 'employee', 'analytics', 'leave', 'qr_scan_service', 'orders'];
-      case 'HR':
-        return ['clocking_terminal', 'admin', 'employee', 'leave'];
-      case 'Purchasing':
-        return ['clocking_terminal', 'purchase_orders', 'orders', 'product_master', 'kanban', 'dispatch', 'qr_scan_service'];
-      case 'Employee':
-      case 'Artisan':
-        return ['clocking_terminal', 'employee', 'leave'];
-      default:
-        return ['clocking_terminal', 'employee'];
-    }
   }
 };
 
