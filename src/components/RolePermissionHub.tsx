@@ -6,7 +6,8 @@ import {
   RoleAuditLogEntry,
   PermissionAction,
   PermissionCategory,
-  Branch
+  Branch,
+  DeviceInterface
 } from '../types';
 import { AppUser, authManager, DEFAULT_ACCOUNTS } from '../auth';
 import { Icon } from './Icon';
@@ -40,17 +41,17 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
   deleteActiveUser,
   updateActiveUser,
   announce,
-  initialSubTab = 'matrix'
+  initialSubTab = 'users'
 }) => {
   const isAdmin = currentUser?.role === 'Admin' || currentUser?.role === 'Administrator';
   const isManager = ['Supervisor', 'Manager', 'HR', 'Stock Manager'].includes(currentUser?.role || '');
   const isReadOnly = !isAdmin;
 
-  const [subTab, setSubTab] = useState<'matrix' | 'users' | 'audit'>(initialSubTab);
+  const [subTab, setSubTab] = useState<'users' | 'roles' | 'audit'>(initialSubTab === 'matrix' ? 'roles' : (initialSubTab as any) || 'users');
 
   useEffect(() => {
     if (initialSubTab) {
-      setSubTab(initialSubTab);
+      setSubTab(initialSubTab === 'matrix' ? 'roles' : (initialSubTab as any));
     }
   }, [initialSubTab]);
 
@@ -113,6 +114,7 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
   const [showEditUserModal, setShowEditUserModal] = useState(false);
   const [editingUser, setEditingUser] = useState<AppUser | null>(null);
   const [showEditPin, setShowEditPin] = useState(false);
+  const [selectedDeviceViewTab, setSelectedDeviceViewTab] = useState<DeviceInterface>('phone');
   const [editUserForm, setEditUserForm] = useState({
     name: '',
     email: '',
@@ -129,6 +131,12 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
       phone: true,
       tablet: false,
       terminal: false
+    },
+    deviceViewAccess: {
+      phone: {} as Record<string, boolean>,
+      tablet: {} as Record<string, boolean>,
+      desktop: {} as Record<string, boolean>,
+      terminal: {} as Record<string, boolean>
     }
   });
 
@@ -493,6 +501,13 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
     const userBranch = branches.find(b => b.id === user.branchId || b.branchName === user.branchName) || branches[0];
     const userOverride = permissionService.getUserOverride(user.id || user.email);
 
+    const initialDeviceViewAccess = {
+      phone: { ...(userOverride?.deviceViewAccess?.phone || user.deviceViewAccess?.phone || {}) },
+      tablet: { ...(userOverride?.deviceViewAccess?.tablet || user.deviceViewAccess?.tablet || {}) },
+      desktop: { ...(userOverride?.deviceViewAccess?.desktop || user.deviceViewAccess?.desktop || {}) },
+      terminal: { ...(userOverride?.deviceViewAccess?.terminal || user.deviceViewAccess?.terminal || {}) }
+    };
+
     setEditUserForm({
       name: user.name || `${user.firstName || ''} ${user.lastName || ''}`.trim(),
       email: user.email || '',
@@ -509,7 +524,8 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
         phone: true,
         tablet: false,
         terminal: false
-      }
+      },
+      deviceViewAccess: initialDeviceViewAccess
     });
 
     // Populate user permissions buffer:
@@ -530,6 +546,7 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
     setUserPermissionOverridesBuffer(initialBuffer);
     setUserModalPermSearch('');
     setUserModalCategoryFilter('ALL');
+    setSelectedDeviceViewTab('phone');
     setShowEditUserModal(true);
   };
 
@@ -617,7 +634,8 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
         physicalLocation: editUserForm.physicalLocation.trim(),
         department: editUserForm.department,
         active: editUserForm.active,
-        deviceAccess: editUserForm.deviceAccess
+        deviceAccess: editUserForm.deviceAccess,
+        deviceViewAccess: editUserForm.deviceViewAccess
       };
 
       if (updateActiveUser) {
@@ -640,6 +658,7 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
         branchName,
         physicalLocation: editUserForm.physicalLocation.trim(),
         deviceAccess: editUserForm.deviceAccess,
+        deviceViewAccess: editUserForm.deviceViewAccess,
         permissions: userPermissionOverridesBuffer,
         updatedBy: currentUser?.name || 'Administrator'
       }, currentUser?.name || 'Administrator');
@@ -844,21 +863,6 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
         {/* SubTab Navigation */}
         <div className="flex items-center space-x-2 mt-6 pt-4 border-t border-white/10 overflow-x-auto custom-scrollbar">
           <button
-            onClick={() => setSubTab('matrix')}
-            className={`px-4 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center space-x-2 whitespace-nowrap ${
-              subTab === 'matrix'
-                ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/30'
-                : 'bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white'
-            }`}
-          >
-            <Icon name="grid" size={16} />
-            <span>Role Permission Matrix</span>
-            <span className="px-1.5 py-0.5 bg-white/20 text-white text-[10px] font-mono rounded-full">
-              {roles.length} Roles
-            </span>
-          </button>
-
-          <button
             onClick={() => setSubTab('users')}
             className={`px-4 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center space-x-2 whitespace-nowrap ${
               subTab === 'users'
@@ -879,6 +883,21 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
           </button>
 
           <button
+            onClick={() => setSubTab('roles')}
+            className={`px-4 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center space-x-2 whitespace-nowrap ${
+              subTab === 'roles'
+                ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/30'
+                : 'bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white'
+            }`}
+          >
+            <Icon name="shield" size={16} />
+            <span>Role Definitions & Baseline</span>
+            <span className="px-1.5 py-0.5 bg-white/20 text-white text-[10px] font-mono rounded-full">
+              {roles.length} Roles
+            </span>
+          </button>
+
+          <button
             onClick={() => setSubTab('audit')}
             className={`px-4 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center space-x-2 whitespace-nowrap ${
               subTab === 'audit'
@@ -895,8 +914,8 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
         </div>
       </div>
 
-      {/* ================= SUBTAB 1: PERMISSION MATRIX ================= */}
-      {subTab === 'matrix' && (
+      {/* ================= SUBTAB 1: ROLE DEFINITIONS & BASELINE ================= */}
+      {subTab === 'roles' && (
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           {/* Left Column: Role Selector Directory */}
           <div className="lg:col-span-1 space-y-4">
@@ -1857,14 +1876,14 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
                     </div>
                   </div>
 
-                  {/* CARD 2: Explicit Device Access */}
+                  {/* CARD 2: Explicit Device Access (Layer 1 Hardware Gate) */}
                   <div className="bg-black/40 border border-white/10 rounded-2xl p-4 space-y-3">
                     <div className="flex items-center justify-between pb-2 border-b border-white/10">
                       <div className="flex items-center gap-2">
                         <Icon name="monitor" size={14} className="text-purple-400" />
-                        <h4 className="text-xs font-black uppercase tracking-wider text-white">Device Access</h4>
+                        <h4 className="text-xs font-black uppercase tracking-wider text-white">1. Device Access (Layer 1 Gate)</h4>
                       </div>
-                      <span className="text-[10px] text-gray-400 font-mono">Hardware Guards</span>
+                      <span className="text-[10px] text-gray-400 font-mono">Hardware Authorization</span>
                     </div>
 
                     <p className="text-[11px] text-gray-400">
@@ -1906,6 +1925,174 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
                               {isAllowed ? 'ENABLED' : 'DISABLED'}
                             </span>
                           </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* CARD 2.5: Device View Access & Module Visibility (Layer 2 Gate) */}
+                  <div className="bg-black/40 border border-purple-500/30 rounded-2xl p-4 space-y-3">
+                    <div className="flex items-center justify-between pb-2 border-b border-white/10">
+                      <div className="flex items-center gap-2">
+                        <Icon name="layout" size={14} className="text-purple-400" />
+                        <h4 className="text-xs font-black uppercase tracking-wider text-white">2. Device View Access (Layer 2 Gate)</h4>
+                      </div>
+                      <span className="text-[10px] text-purple-300 font-mono font-bold">Module Visibility</span>
+                    </div>
+
+                    <p className="text-[11px] text-gray-400 leading-relaxed">
+                      Controls which specific business modules are visible and accessible to this user on each authorized device.
+                    </p>
+
+                    {/* Device View Selector Tabs */}
+                    <div className="flex items-center gap-1.5 p-1 bg-black/60 rounded-xl border border-white/10">
+                      {(['phone', 'tablet', 'desktop'] as DeviceInterface[]).map(devKey => {
+                        const isDeviceActive = !!editUserForm.deviceAccess[devKey];
+                        const isSelected = selectedDeviceViewTab === devKey;
+                        return (
+                          <button
+                            type="button"
+                            key={devKey}
+                            onClick={() => setSelectedDeviceViewTab(devKey)}
+                            className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold font-mono uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 ${
+                              isSelected
+                                ? 'bg-purple-600 text-white shadow-md'
+                                : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+                            }`}
+                          >
+                            <Icon
+                              name={devKey === 'phone' ? 'smartphone' : devKey === 'tablet' ? 'tablet' : 'monitor'}
+                              size={13}
+                            />
+                            <span>{devKey}</span>
+                            {!isDeviceActive && (
+                              <span className="text-[9px] px-1 py-0.2 bg-red-500/30 text-red-300 rounded font-normal">Off</span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Quick Action Helpers */}
+                    <div className="flex items-center justify-between text-[10px] font-mono text-gray-400 px-0.5">
+                      <span>Configuring: <strong className="text-purple-300 uppercase">{selectedDeviceViewTab} View</strong></span>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const supported = permissionService.getModulesForDevice(selectedDeviceViewTab);
+                            const updatedMap = { ...(editUserForm.deviceViewAccess[selectedDeviceViewTab] || {}) };
+                            supported.forEach(m => { updatedMap[m.id] = true; });
+                            setEditUserForm({
+                              ...editUserForm,
+                              deviceViewAccess: {
+                                ...editUserForm.deviceViewAccess,
+                                [selectedDeviceViewTab]: updatedMap
+                              }
+                            });
+                          }}
+                          className="px-2 py-0.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 rounded border border-emerald-500/30 font-bold"
+                        >
+                          Enable All
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditUserForm({
+                              ...editUserForm,
+                              deviceViewAccess: {
+                                ...editUserForm.deviceViewAccess,
+                                [selectedDeviceViewTab]: {}
+                              }
+                            });
+                          }}
+                          className="px-2 py-0.5 bg-white/5 hover:bg-white/10 text-gray-400 rounded border border-white/10"
+                        >
+                          Reset to Role
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Modules List for Selected Device View */}
+                    <div className="space-y-2 max-h-60 overflow-y-auto custom-scrollbar pr-1">
+                      {permissionService.getModulesForDevice(selectedDeviceViewTab).map(moduleDef => {
+                        const explicitVal = editUserForm.deviceViewAccess[selectedDeviceViewTab]?.[moduleDef.id];
+                        
+                        // Compute effective status
+                        let isEffectiveAllowed = false;
+                        if (explicitVal !== undefined) {
+                          isEffectiveAllowed = !!explicitVal;
+                        } else {
+                          // Inherited from role
+                          const mockUser = {
+                            role: editUserForm.roleName,
+                            roleId: editUserForm.roleId,
+                            active: true,
+                            deviceAccess: editUserForm.deviceAccess
+                          };
+                          isEffectiveAllowed = permissionService.canAccessDeviceView(mockUser, moduleDef.id, selectedDeviceViewTab);
+                        }
+
+                        const isExplicitOverride = explicitVal !== undefined;
+
+                        return (
+                          <div
+                            key={moduleDef.id}
+                            className={`p-2.5 rounded-xl border transition-all flex items-center justify-between gap-3 ${
+                              isEffectiveAllowed
+                                ? 'bg-purple-950/20 border-purple-500/30 text-white'
+                                : 'bg-black/40 border-white/5 text-gray-400'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <div className={`p-1.5 rounded-lg shrink-0 ${isEffectiveAllowed ? 'bg-purple-500/20 text-purple-300' : 'bg-white/5 text-gray-500'}`}>
+                                <Icon name={moduleDef.icon as any || 'box'} size={15} />
+                              </div>
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-xs font-bold truncate text-white">{moduleDef.name}</span>
+                                  <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-white/5 border border-white/10 text-gray-400">
+                                    {moduleDef.category}
+                                  </span>
+                                </div>
+                                <p className="text-[10px] text-gray-400 truncate mt-0.5">{moduleDef.description}</p>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2 shrink-0">
+                              {isExplicitOverride && (
+                                <span className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded ${
+                                  explicitVal ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-red-500/20 text-red-300 border border-red-500/30'
+                                }`}>
+                                  Override
+                                </span>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const current = editUserForm.deviceViewAccess[selectedDeviceViewTab]?.[moduleDef.id];
+                                  const next = current !== undefined ? !current : !isEffectiveAllowed;
+                                  setEditUserForm({
+                                    ...editUserForm,
+                                    deviceViewAccess: {
+                                      ...editUserForm.deviceViewAccess,
+                                      [selectedDeviceViewTab]: {
+                                        ...(editUserForm.deviceViewAccess[selectedDeviceViewTab] || {}),
+                                        [moduleDef.id]: next
+                                      }
+                                    }
+                                  });
+                                }}
+                                className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold uppercase transition-all cursor-pointer ${
+                                  isEffectiveAllowed
+                                    ? 'bg-emerald-600/30 border border-emerald-500 text-emerald-300 hover:bg-emerald-600/50'
+                                    : 'bg-white/5 border border-white/10 text-gray-400 hover:bg-white/10 hover:text-gray-200'
+                                }`}
+                              >
+                                {isEffectiveAllowed ? 'VISIBLE' : 'HIDDEN'}
+                              </button>
+                            </div>
+                          </div>
                         );
                       })}
                     </div>

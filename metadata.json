@@ -1,6 +1,6 @@
 {
   "name": "TS Hub",
   "description": "TimberSmith Workforce & Warehouse Management",
-  "requestFramePermissions": ["camera"],
+  "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

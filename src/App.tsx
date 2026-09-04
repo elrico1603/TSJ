@@ -74,13 +74,20 @@ export default function App() {
   const [currentTime, setCurrentTime] = useState(new Date());
   
   // Navigation State
-  const [appMode, setAppMode] = useState<string>('employee'); 
-  const [isLocked, setIsLocked] = useState(true); 
+  const [currentUser, setCurrentUser] = useState<any>(() => authManager.getStoredSession());
+  const [isLocked, setIsLocked] = useState(() => !authManager.getStoredSession());
+  const [appMode, setAppMode] = useState<string>(() => {
+    const session = authManager.getStoredSession();
+    return session ? permissionService.getInitialModeAndView(session).appMode : 'employee';
+  });
   const [showPinModal, setShowPinModal] = useState(false);
   const [unlockUsername, setUnlockUsername] = useState('');
   const [unlockPassword, setUnlockPassword] = useState('');
   const [pinInput, setPinInput] = useState('');
-  const [view, setView] = useState<string>('dashboard'); 
+  const [view, setView] = useState<string>(() => {
+    const session = authManager.getStoredSession();
+    return session ? permissionService.getInitialModeAndView(session).view : 'dashboard';
+  });
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
   const [actionSubMenu, setActionSubMenu] = useState<'menu' | 'clocking'>('menu');
 
@@ -93,30 +100,14 @@ export default function App() {
     return 'desktop';
   };
 
-  // Responsive Layout Mode, Header Search & Profile Modal State
-  // Pure physical screen-width auto-detection with sanity checks for saved preferences:
-  // - width >= 1024px: Always defaults to 'desktop' (clearing any cached 'phone' in localStorage)
-  // - width >= 768px && < 1024px: Sets 'tablet'
-  // - width < 768px: Sets 'phone'
   const [layoutMode, setLayoutMode] = useState<'desktop' | 'tablet' | 'phone'>(() => {
     if (typeof window !== 'undefined') {
       try {
-        const width = window.innerWidth;
-        if (width >= 1024) {
-          const saved = localStorage.getItem('ts_joinery_layout_mode');
-          if (saved === 'phone') {
-            try { localStorage.setItem('ts_joinery_layout_mode', 'desktop'); } catch (e) {}
-          }
-          return 'desktop';
+        const saved = localStorage.getItem('ts_joinery_layout_mode') as 'desktop' | 'tablet' | 'phone' | null;
+        if (saved && ['desktop', 'tablet', 'phone'].includes(saved)) {
+          return saved;
         }
-        if (width >= 768) {
-          const saved = localStorage.getItem('ts_joinery_layout_mode') as 'desktop' | 'tablet' | 'phone' | null;
-          if (saved && ['desktop', 'tablet'].includes(saved)) {
-            return saved;
-          }
-          return 'tablet';
-        }
-        return 'phone';
+        return getAutoLayoutMode();
       } catch (e) {
         return getAutoLayoutMode();
       }
@@ -129,20 +120,17 @@ export default function App() {
   useEffect(() => {
     const evaluateAndSyncLayout = () => {
       try {
+        const saved = localStorage.getItem('ts_joinery_layout_mode') as 'desktop' | 'tablet' | 'phone' | null;
+        if (saved && ['desktop', 'tablet', 'phone'].includes(saved)) {
+          setLayoutMode(saved);
+          return;
+        }
+
         const width = window.innerWidth;
         if (width >= 1024) {
-          const saved = localStorage.getItem('ts_joinery_layout_mode');
-          if (saved === 'phone') {
-            try { localStorage.setItem('ts_joinery_layout_mode', 'desktop'); } catch (e) {}
-          }
           setLayoutMode('desktop');
         } else if (width >= 768) {
-          const saved = localStorage.getItem('ts_joinery_layout_mode') as 'desktop' | 'tablet' | 'phone' | null;
-          if (saved && ['desktop', 'tablet'].includes(saved)) {
-            setLayoutMode(saved);
-          } else {
-            setLayoutMode('tablet');
-          }
+          setLayoutMode('tablet');
         } else {
           setLayoutMode('phone');
         }
@@ -288,13 +276,12 @@ export default function App() {
   const [isSplashFading, setIsSplashFading] = useState(false);
 
   // User Authentication System
-  const [currentUser, setCurrentUser] = useState<any>(null); 
   const [authView, setAuthView] = useState<'login' | 'register'>('login'); 
   const [authForm, setAuthForm] = useState({ name: '', email: '', password: '', role: 'Artisan', pin: '' });
   const [loginError, setLoginError] = useState('');
   const [isUsersLoading, setIsUsersLoading] = useState(false);
   const [usersLoadError, setUsersLoadError] = useState<string | null>(null);
-  const [activeUsers, setActiveUsers] = useState<AppUser[]>(DEFAULT_ACCOUNTS);
+  const [activeUsers, setActiveUsers] = useState<AppUser[]>(() => authManager.getUsers());
   const [userPermissions, setUserPermissions] = useState<Record<string, Record<string, boolean>>>({});
   const [pendingUsers, setPendingUsers] = useState<AppUser[]>([]);
   const [showAddUserModal, setShowAddUserModal] = useState(false);
@@ -322,25 +309,49 @@ export default function App() {
 
   const updateActiveUser = async (userId: string, updates: Partial<AppUser>) => {
     try {
-      const targetRef = db.collection('artifacts')
-        .doc(APP_ID_PATH)
-        .collection('private')
-        .doc('users')
-        .collection('active')
-        .doc(userId);
-      
-      const doc = await targetRef.get();
-      const userData = doc.exists ? doc.data() : null;
-      const userName = userData?.name || userId;
+      // 1. Immediately synchronize local activeUsers state
+      setActiveUsers(prev => prev.map(u => 
+        (u.id === userId || (u.email && updates.email && u.email.toLowerCase().trim() === updates.email.toLowerCase().trim()))
+          ? { ...u, ...updates }
+          : u
+      ));
 
-      await targetRef.update(updates);
+      // 2. Synchronize internal users pool and cache in authManager
+      authManager.updateUser(userId, updates);
 
+      // 3. If current logged-in user is the modified user, update currentUser state & session
+      setCurrentUser(prev => {
+        if (!prev) return null;
+        if (prev.id === userId || (prev.email && updates.email && prev.email.toLowerCase().trim() === updates.email.toLowerCase().trim())) {
+          const updatedUser = { ...prev, ...updates };
+          authManager.saveSession(updatedUser);
+          return updatedUser;
+        }
+        return prev;
+      });
+
+      // 4. Update Firestore with merge: true so it never throws if document is being initialized
+      if (db && APP_ID_PATH) {
+        try {
+          const targetRef = db.collection('artifacts')
+            .doc(APP_ID_PATH)
+            .collection('private')
+            .doc('users')
+            .collection('active')
+            .doc(userId);
+          await targetRef.set(updates, { merge: true });
+        } catch (dbErr) {
+          console.warn("Firestore active user update warning:", dbErr);
+        }
+      }
+
+      const userName = updates.name || userId;
       let logMsg = `Updated settings for user ${userName}.`;
       if (updates.role) logMsg += ` New Role: ${updates.role}.`;
       if (updates.pin) logMsg += ` PIN / Password changed.`;
       if (updates.permissions) logMsg += ` Permissions updated.`;
 
-      await auditLogger.log('USER_UPDATED', userData?.email || 'N/A', logMsg);
+      await auditLogger.log('USER_UPDATED', updates.email || 'N/A', logMsg);
       announce("User successfully updated.");
     } catch (e) {
       console.error("Failed to update active user:", e);
@@ -602,7 +613,7 @@ export default function App() {
   };
 
   // ==========================================
-  // INITIALIZE FIREBASE STREAMS
+  // INITIALIZE FIREBASE STREAMS & SESSION HYDRATION
   // ==========================================
   useEffect(() => {
     let isMounted = true;
@@ -616,157 +627,219 @@ export default function App() {
           if (isMounted) {
             setIsInitialLoading(false);
           }
-        }, 500);
+        }, 400);
       }
     };
 
-    // Controlled 5-second safety timeout for application initialization
+    // Promptly dismiss splash if local authenticated session or cached user pool is ready.
+    // This decouples application responsiveness from Firestore network stream latency.
+    const hasExistingSession = !!authManager.getStoredSession();
+    const hasExistingUsers = (authManager.getUsers() || []).length > 0;
+    let promptDismissTimer: NodeJS.Timeout | null = null;
+    if (hasExistingSession || hasExistingUsers) {
+      promptDismissTimer = setTimeout(() => {
+        if (isMounted) {
+          dismissSplash();
+        }
+      }, 300);
+    }
+
+    // Fallback safety timeout (5s) in case no local session/cache exists and network is slow
     const safetyTimeout = setTimeout(() => {
       if (!splashDismissed) {
-        console.warn('[AUTH INIT TIMEOUT] Firebase auth/streams initialization timed out after 5s. Reaching login screen.');
+        console.warn('[AUTH INIT TIMEOUT] Firebase auth/streams reached fallback limit. Proceeding with local/cached state.');
         dismissSplash();
       }
     }, 5000);
+
+    // Track active Firestore listeners for reliable, lifecycle-safe unsubscription
+    const unsubs: Array<() => void> = [];
+    const cleanupFirestoreListeners = () => {
+      while (unsubs.length > 0) {
+        const unsub = unsubs.pop();
+        if (unsub) {
+          try {
+            unsub();
+          } catch (e) {
+            console.warn('[FIRESTORE CLEANUP] Error unsubscribing listener:', e);
+          }
+        }
+      }
+    };
 
     let unsubAuth: (() => void) | null = null;
 
     try {
       unsubAuth = auth.onAuthStateChanged(async (u) => {
         if (!isMounted) return;
+
+        // Clean up any prior listeners before establishing fresh subscriptions
+        cleanupFirestoreListeners();
+
         if (u) {
           setIsCloudLive(true);
-          // Listen to artisans list
-          db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('data').collection('employees')
-            .onSnapshot((snap) => {
-              if (!isMounted) return;
-              if (snap.empty) {
-                setEmployees([]);
-              } else {
-                const loaded = snap.docs.map(d => ({ id: d.id, ...d.data() } as Employee));
-                setEmployees(loaded);
-              }
-              dismissSplash();
-            }, err => {
-              console.error("[FIRESTORE INIT ERROR] employees sync error:", err);
-              dismissSplash();
-            });
 
-          // Listen to job cards List
-          db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('data').collection('kanbanCards')
-            .onSnapshot(snap => {
-              if (!isMounted) return;
-              if (!snap.empty) {
-                setKanbanCards(snap.docs.map(d => ({ id: d.id, ...d.data() } as KanbanCard)));
-              } else {
-                setKanbanCards([]);
-              }
-              dismissSplash();
-            }, err => {
-              console.error("[FIRESTORE INIT ERROR] kanbans fetch failure:", err);
-              dismissSplash();
-            });
+          // 1. Listen to employees list
+          try {
+            const unsubEmp = db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('data').collection('employees')
+              .onSnapshot((snap) => {
+                if (!isMounted) return;
+                if (snap.empty) {
+                  setEmployees([]);
+                } else {
+                  const loaded = snap.docs.map(d => ({ id: d.id, ...d.data() } as Employee));
+                  setEmployees(loaded);
+                }
+                dismissSplash();
+              }, err => {
+                console.warn("[FIRESTORE SYNC] employees sync notice:", err);
+                dismissSplash();
+              });
+            unsubs.push(() => { if (unsubEmp) unsubEmp(); });
+          } catch (e) {
+            console.warn('[FIRESTORE SYNC] Could not subscribe to employees:', e);
+          }
 
-          // Listen for templates
-          db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('data').collection('kanbanTemplates')
-            .onSnapshot(snap => {
-              if (!isMounted) return;
-              if (!snap.empty) {
-                setKanbanTemplates(snap.docs.map(d => ({ id: d.id, ...d.data() } as KanbanTemplate)));
-              } else {
+          // 2. Listen to job cards list
+          try {
+            const unsubCards = db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('data').collection('kanbanCards')
+              .onSnapshot(snap => {
+                if (!isMounted) return;
+                if (!snap.empty) {
+                  setKanbanCards(snap.docs.map(d => ({ id: d.id, ...d.data() } as KanbanCard)));
+                } else {
+                  setKanbanCards([]);
+                }
+                dismissSplash();
+              }, err => {
+                console.warn("[FIRESTORE SYNC] kanbans sync notice:", err);
+                dismissSplash();
+              });
+            unsubs.push(() => { if (unsubCards) unsubCards(); });
+          } catch (e) {
+            console.warn('[FIRESTORE SYNC] Could not subscribe to kanban cards:', e);
+          }
+
+          // 3. Listen for templates
+          try {
+            const unsubTemplates = db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('data').collection('kanbanTemplates')
+              .onSnapshot(snap => {
+                if (!isMounted) return;
+                if (!snap.empty) {
+                  setKanbanTemplates(snap.docs.map(d => ({ id: d.id, ...d.data() } as KanbanTemplate)));
+                } else {
+                  setKanbanTemplates([DEFAULT_SAMPLE_TEMPLATE]);
+                }
+                dismissSplash();
+              }, err => {
+                console.warn("[FIRESTORE SYNC] templates sync notice, falling back:", err);
                 setKanbanTemplates([DEFAULT_SAMPLE_TEMPLATE]);
-              }
-              dismissSplash();
-            }, err => {
-              console.error("[FIRESTORE INIT ERROR] Templates fail, falling back:", err);
-              setKanbanTemplates([DEFAULT_SAMPLE_TEMPLATE]);
-              dismissSplash();
-            });
+                dismissSplash();
+              });
+            unsubs.push(() => { if (unsubTemplates) unsubTemplates(); });
+          } catch (e) {
+            console.warn('[FIRESTORE SYNC] Could not subscribe to templates:', e);
+          }
 
-          // Users administration registration listening
+          // 4. Users administration registration listening
           setIsUsersLoading(true);
           setUsersLoadError(null);
-          db.collection('artifacts').doc(APP_ID_PATH).collection('private').doc('users').collection('active')
-            .onSnapshot(async snap => {
-              if (!isMounted) return;
-              setIsUsersLoading(false);
-              setUsersLoadError(null);
-              if (!snap.empty) {
-                const users = snap.docs.map(d => {
-                  const data = d.data();
-                  const defaultAcc = DEFAULT_ACCOUNTS.find(def => def.email.toLowerCase() === (data.email || '').toLowerCase());
-                  const fallbackPin = defaultAcc ? defaultAcc.pin : '1234';
-                  return {
-                    id: d.id,
-                    ...data,
-                    firstName: data.firstName || data.name?.split(' ')[0] || 'User',
-                    lastName: data.lastName || data.name?.split(' ').slice(1).join(' ') || '',
-                    email: data.email || '',
-                    role: data.role || 'Employee',
-                    department: data.department || 'Operations',
-                    active: data.active !== undefined ? data.active : true,
-                    pin: data.pin || fallbackPin,
-                    isApproved: data.isApproved !== undefined ? data.isApproved : true
-                  } as AppUser;
-                });
-                const mergedUsers = authManager.setUsers(users);
-                setActiveUsers(mergedUsers);
-                console.log('[TSHUB USERS] snapshot received, merged user count:', mergedUsers.length);
-                
-                // Load custom permission overrides from users directly
-                const perms: Record<string, Record<string, boolean>> = {};
-                mergedUsers.forEach(u => {
-                  if ((u as any).permissions) {
-                    perms[u.id] = (u as any).permissions;
-                  }
-                });
-                setUserPermissions(perms);
-              } else {
-                // Seed default role users if Firestore user collection is empty
-                const defaultAccounts = authManager.setUsers([]);
-                setActiveUsers(defaultAccounts);
-                console.log('[TSHUB USERS] snapshot empty, seeded default user count:', defaultAccounts.length);
-                try {
-                  for (const acc of defaultAccounts) {
-                    await db.collection('artifacts').doc(APP_ID_PATH).collection('private').doc('users').collection('active').doc(acc.id).set(acc);
-                  }
-                } catch (e) {
-                  console.warn('Unable to seed default role accounts:', e);
-                }
-              }
-              dismissSplash();
-            }, err => {
-              if (isMounted) {
+          try {
+            const unsubUsers = db.collection('artifacts').doc(APP_ID_PATH).collection('private').doc('users').collection('active')
+              .onSnapshot(async snap => {
+                if (!isMounted) return;
                 setIsUsersLoading(false);
-                setUsersLoadError('Unable to load user accounts. Please try again.');
-              }
-              console.error("[FIRESTORE INIT ERROR] Active users sync error:", err);
-              dismissSplash();
-            });
+                setUsersLoadError(null);
+                if (!snap.empty) {
+                  const users = snap.docs.map(d => {
+                    const data = d.data();
+                    const defaultAcc = DEFAULT_ACCOUNTS.find(def => def.email.toLowerCase() === (data.email || '').toLowerCase());
+                    const fallbackPin = defaultAcc ? defaultAcc.pin : '1234';
+                    return {
+                      id: d.id,
+                      ...data,
+                      firstName: data.firstName || data.name?.split(' ')[0] || 'User',
+                      lastName: data.lastName || data.name?.split(' ').slice(1).join(' ') || '',
+                      email: data.email || '',
+                      role: data.role || 'Employee',
+                      department: data.department || 'Operations',
+                      active: data.active !== undefined ? data.active : true,
+                      pin: data.pin || fallbackPin,
+                      isApproved: data.isApproved !== undefined ? data.isApproved : true
+                    } as AppUser;
+                  });
+                  const mergedUsers = authManager.setUsers(users);
+                  setActiveUsers(mergedUsers);
+                  console.log('[TSHUB USERS] sync received, count:', mergedUsers.length);
+                  
+                  // Load custom permission overrides from users directly
+                  const perms: Record<string, Record<string, boolean>> = {};
+                  mergedUsers.forEach(u => {
+                    if ((u as any).permissions) {
+                      perms[u.id] = (u as any).permissions;
+                    }
+                  });
+                  setUserPermissions(perms);
+                } else {
+                  // Seed default role users if Firestore user collection is empty
+                  const defaultAccounts = authManager.setUsers([]);
+                  setActiveUsers(defaultAccounts);
+                  try {
+                    for (const acc of defaultAccounts) {
+                      await db.collection('artifacts').doc(APP_ID_PATH).collection('private').doc('users').collection('active').doc(acc.id).set(acc);
+                    }
+                  } catch (e) {
+                    console.warn('Unable to seed default role accounts:', e);
+                  }
+                }
+                dismissSplash();
+              }, err => {
+                if (isMounted) {
+                  setIsUsersLoading(false);
+                  const localUsers = authManager.getUsers();
+                  setActiveUsers(localUsers);
+                  if (!localUsers || localUsers.length === 0) {
+                    setUsersLoadError('Unable to load user accounts. Please check your connection.');
+                  }
+                }
+                console.warn("[FIRESTORE SYNC] Active users sync using cached state:", err);
+                dismissSplash();
+              });
+            unsubs.push(() => { if (unsubUsers) unsubUsers(); });
+          } catch (e) {
+            console.warn('[FIRESTORE SYNC] Could not subscribe to active users:', e);
+          }
 
-          db.collection('artifacts').doc(APP_ID_PATH).collection('private').doc('users').collection('pending')
-            .onSnapshot(snap => {
-              if (!isMounted) return;
-              if (!snap.empty) {
-                setPendingUsers(snap.docs.map(d => ({ id: d.id, ...d.data() } as AppUser)));
-              } else {
-                setPendingUsers([]);
-              }
-            }, err => {
-              console.error("[FIRESTORE INIT ERROR] Pending users sync error:", err);
-            });
+          // 5. Pending users listening
+          try {
+            const unsubPending = db.collection('artifacts').doc(APP_ID_PATH).collection('private').doc('users').collection('pending')
+              .onSnapshot(snap => {
+                if (!isMounted) return;
+                if (!snap.empty) {
+                  setPendingUsers(snap.docs.map(d => ({ id: d.id, ...d.data() } as AppUser)));
+                } else {
+                  setPendingUsers([]);
+                }
+              }, err => {
+                console.warn("[FIRESTORE SYNC] Pending users sync notice:", err);
+              });
+            unsubs.push(() => { if (unsubPending) unsubPending(); });
+          } catch (e) {
+            console.warn('[FIRESTORE SYNC] Could not subscribe to pending users:', e);
+          }
 
         } else {
           dismissSplash();
           auth.signInAnonymously().catch(e => {
-            console.warn("[AUTH INIT WARNING] Anonymous Sign in denied:", e);
+            console.warn("[AUTH INIT WARNING] Anonymous sign-in notice:", e);
           });
         }
       }, (authErr) => {
-        console.error("[AUTH INIT ERROR] Firebase auth error:", authErr);
+        console.warn("[AUTH INIT NOTICE] Firebase auth event:", authErr);
         dismissSplash();
       });
     } catch (err) {
-      console.error("[AUTH INIT ERROR] Failed to register auth listener:", err);
+      console.warn("[AUTH INIT NOTICE] Failed to register auth listener:", err);
       dismissSplash();
     }
 
@@ -777,7 +850,14 @@ export default function App() {
     return () => {
       isMounted = false;
       clearTimeout(safetyTimeout);
-      if (unsubAuth) unsubAuth();
+      if (promptDismissTimer) clearTimeout(promptDismissTimer);
+      if (unsubAuth) {
+        try {
+          unsubAuth();
+        } catch (_) {}
+        unsubAuth = null;
+      }
+      cleanupFirestoreListeners();
       clearInterval(clockInterval);
     };
   }, []);
@@ -880,13 +960,24 @@ TS Joinery Kanban System`
 
   useEffect(() => {
     const handleCameraStream = async () => {
+      // Guard: Never request camera during app startup, login screen, or unauthenticated/locked state
+      if (isLocked || !currentUser) {
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach(t => t.stop());
+          streamRef.current = null;
+        }
+        return;
+      }
+
       if (view === 'scanning' || isCapturing) {
         try {
-          const media = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: 1280, height: 720 } });
-          streamRef.current = media;
-          if (videoRef.current) {
-            videoRef.current.srcObject = media;
-            videoRef.current.play().catch(e => console.warn("Camera streaming crash saved:", e));
+          if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+            const media = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: 1280, height: 720 } });
+            streamRef.current = media;
+            if (videoRef.current) {
+              videoRef.current.srcObject = media;
+              videoRef.current.play().catch(e => console.warn("Camera streaming crash saved:", e));
+            }
           }
         } catch (e) {
           console.warn("Camera failed to load:", e);
@@ -905,7 +996,7 @@ TS Joinery Kanban System`
         streamRef.current = null;
       }
     };
-  }, [view, isCapturing]);
+  }, [view, isCapturing, isLocked, currentUser]);
 
   // ==========================================
   // TRANSACTION SUBMISSIONS AND EVENTS
@@ -1200,6 +1291,7 @@ TS Joinery Kanban System`
         department: matchedUser.department || 'Operations',
         active: matchedUser.active !== undefined ? matchedUser.active : true
       };
+      authManager.saveSession(normUser);
       setCurrentUser(normUser);
       auditLogger.log('LOCAL_UNLOCK', normUser.email, `Unlocked Management Hub as ${normUser.role}`);
       
@@ -1385,6 +1477,7 @@ TS Joinery Kanban System`
             active: match.active !== undefined ? match.active : true
           };
 
+          authManager.saveSession(normUser);
           setCurrentUser(normUser);
           setIsLocked(false);
           setLoginError('');
@@ -2150,6 +2243,7 @@ TS Joinery Kanban System`
           setPendingAction={setPendingAction}
           setView={setView}
           onSignOut={() => {
+            authManager.clearSession();
             setCurrentUser(null);
             setAppMode('clocking_terminal');
             setIsLocked(true);
@@ -2334,7 +2428,7 @@ TS Joinery Kanban System`
                 <div>
                   <p className="text-[10px] font-black uppercase text-gray-500 tracking-[0.2em] mb-3 xl:mb-4">Artisan Terminal</p>
                   <div className="space-y-2">
-                    {permissionService.canAccessMode(currentUser, 'employee', 'desktop') && (
+                    {permissionService.canAccessMode(currentUser, 'employee', layoutMode) && (
                       <button 
                         onClick={() => { setAppMode('employee'); setView('dashboard'); setSelectedEmployee(null); }} 
                         className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${appMode === 'employee' ? 'bg-[#ff8c00]/10 border border-[#ff8c00]/30 text-[#ff8c00]' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
@@ -2344,7 +2438,7 @@ TS Joinery Kanban System`
                       </button>
                     )}
 
-                    {permissionService.canAccessMode(currentUser, 'qr_scan_service', 'desktop') && (
+                    {permissionService.canAccessMode(currentUser, 'qr_scan_service', layoutMode) && (
                       <button 
                         onClick={() => { setAppMode('qr_scan_service'); setView('dashboard'); }} 
                         className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${appMode === 'qr_scan_service' ? 'bg-purple-600/10 border border-purple-500/30 text-purple-500' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
@@ -2357,7 +2451,7 @@ TS Joinery Kanban System`
                 </div>
 
                 {/* Gemini AI Hub Navigation Section */}
-                {permissionService.canAccessMode(currentUser, 'gemini_chat', 'desktop') && (
+                {permissionService.canAccessMode(currentUser, 'gemini_chat', layoutMode) && (
                   <div>
                     <p className="text-[10px] font-black uppercase text-cyan-400 tracking-[0.2em] mb-3 xl:mb-4 flex items-center gap-1.5">
                       <Icon name="sparkles" size={12} className="text-cyan-400" />
@@ -2379,14 +2473,14 @@ TS Joinery Kanban System`
 
                 {/* Management Hub Section */}
                 {(
-                  permissionService.canAccessMode(currentUser, 'product_master', 'desktop') ||
-                  permissionService.canAccessMode(currentUser, 'purchase_orders', 'desktop') ||
-                  permissionService.canAccessMode(currentUser, 'dispatch', 'desktop') ||
-                  permissionService.canAccessMode(currentUser, 'template_designer', 'desktop') ||
-                  permissionService.canAccessMode(currentUser, 'orders', 'desktop') ||
-                  permissionService.canAccessMode(currentUser, 'admin', 'desktop') ||
-                  permissionService.canAccessMode(currentUser, 'analytics', 'desktop') ||
-                  permissionService.canAccessMode(currentUser, 'leave', 'desktop')
+                  permissionService.canAccessMode(currentUser, 'product_master', layoutMode) ||
+                  permissionService.canAccessMode(currentUser, 'purchase_orders', layoutMode) ||
+                  permissionService.canAccessMode(currentUser, 'dispatch', layoutMode) ||
+                  permissionService.canAccessMode(currentUser, 'template_designer', layoutMode) ||
+                  permissionService.canAccessMode(currentUser, 'orders', layoutMode) ||
+                  permissionService.canAccessMode(currentUser, 'admin', layoutMode) ||
+                  permissionService.canAccessMode(currentUser, 'analytics', layoutMode) ||
+                  permissionService.canAccessMode(currentUser, 'leave', layoutMode)
                 ) && (
                   <div>
                     <div className="flex justify-between items-center mb-3 xl:mb-4">
@@ -2394,7 +2488,7 @@ TS Joinery Kanban System`
                       {isLocked && <span className="p-1 bg-red-500/10 text-red-500 border border-red-500/20 rounded text-[8px] font-bold uppercase tracking-widest font-sans">Locked</span>}
                     </div>
                     <div className="space-y-2 font-sans">
-                      {permissionService.canAccessMode(currentUser, 'product_master', 'desktop') && (
+                      {permissionService.canAccessMode(currentUser, 'product_master', layoutMode) && (
                         <button 
                           disabled={isLocked}
                           onClick={() => { setAppMode('product_master'); }} 
@@ -2405,7 +2499,7 @@ TS Joinery Kanban System`
                         </button>
                       )}
 
-                      {permissionService.canAccessMode(currentUser, 'purchase_orders', 'desktop') && (
+                      {permissionService.canAccessMode(currentUser, 'purchase_orders', layoutMode) && (
                         <button 
                           disabled={isLocked}
                           onClick={() => { setAppMode('purchase_orders'); }} 
@@ -2416,7 +2510,7 @@ TS Joinery Kanban System`
                         </button>
                       )}
 
-                      {permissionService.canAccessMode(currentUser, 'dispatch', 'desktop') && (
+                      {permissionService.canAccessMode(currentUser, 'dispatch', layoutMode) && (
                         <button 
                           disabled={isLocked}
                           onClick={() => { setAppMode('dispatch'); }} 
@@ -2427,7 +2521,7 @@ TS Joinery Kanban System`
                         </button>
                       )}
 
-                      {permissionService.canAccessMode(currentUser, 'template_designer', 'desktop') && (
+                      {permissionService.canAccessMode(currentUser, 'template_designer', layoutMode) && (
                         <button 
                           disabled={isLocked}
                           onClick={() => { setAppMode('template_designer'); }} 
@@ -2438,7 +2532,7 @@ TS Joinery Kanban System`
                         </button>
                       )}
 
-                      {permissionService.canAccessMode(currentUser, 'orders', 'desktop') && (
+                      {permissionService.canAccessMode(currentUser, 'orders', layoutMode) && (
                         <button 
                           disabled={isLocked}
                           onClick={() => { setAppMode('orders'); }} 
@@ -2449,7 +2543,7 @@ TS Joinery Kanban System`
                         </button>
                       )}
 
-                      {permissionService.canAccessMode(currentUser, 'admin', 'desktop') && (
+                      {permissionService.canAccessMode(currentUser, 'admin', layoutMode) && (
                         <button 
                           disabled={isLocked}
                           onClick={() => { setAppMode('admin'); setView('dashboard'); }} 
@@ -2460,7 +2554,7 @@ TS Joinery Kanban System`
                         </button>
                       )}
 
-                      {permissionService.canAccessMode(currentUser, 'analytics', 'desktop') && (
+                      {permissionService.canAccessMode(currentUser, 'analytics', layoutMode) && (
                         <button 
                           disabled={isLocked}
                           onClick={() => { setAppMode('analytics'); setView('dashboard'); }} 
@@ -2471,7 +2565,7 @@ TS Joinery Kanban System`
                         </button>
                       )}
 
-                      {permissionService.canAccessMode(currentUser, 'leave', 'desktop') && (
+                      {permissionService.canAccessMode(currentUser, 'leave', layoutMode) && (
                         <button 
                           disabled={isLocked}
                           onClick={() => { setAppMode('leave'); setView('dashboard'); }} 
@@ -2504,7 +2598,7 @@ TS Joinery Kanban System`
                   </button>
                 ) : (
                   <button 
-                    onClick={() => { setIsLocked(true); setAppMode('employee'); setCurrentUser(null); }} 
+                    onClick={() => { authManager.clearSession(); setIsLocked(true); setAppMode('employee'); setCurrentUser(null); }} 
                     className="w-full py-3.5 xl:py-4 bg-red-600/10 border border-red-500/30 hover:bg-red-600/20 rounded-2xl text-xs font-black uppercase tracking-widest text-red-500 transition-all flex items-center justify-center space-x-3 font-sans"
                   >
                     <Icon name="unlock" size={16} />
@@ -2743,12 +2837,29 @@ TS Joinery Kanban System`
                 )}
 
                 {appMode === 'qr_scan_service' && (
-                  <QRScanService 
-                    kanbanCards={kanbanCards}
-                    currentUser={currentUser}
-                    announce={announce}
-                    onClose={() => setAppMode('employee')}
-                  />
+                  permissionService.canAccessMode(currentUser, 'qr_scan_service', layoutMode) ? (
+                    <QRScanService 
+                      kanbanCards={kanbanCards}
+                      currentUser={currentUser}
+                      layoutMode={layoutMode}
+                      announce={announce}
+                      onClose={() => setAppMode('employee')}
+                    />
+                  ) : (
+                    <div className="max-w-xl mx-auto py-12 text-center">
+                      <div className="bg-[#151515] border border-red-500/20 p-8 rounded-3xl">
+                        <Icon name="shield-alert" size={48} className="mx-auto text-red-400 mb-4" />
+                        <h3 className="text-xl font-black uppercase text-white mb-2 font-sans">Access Denied</h3>
+                        <p className="text-sm text-neutral-400 mb-6 font-sans">You do not have permission to access the QR Scan Service on this device.</p>
+                        <button
+                          onClick={() => setAppMode('employee')}
+                          className="px-6 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-colors font-sans"
+                        >
+                          Return to Terminal
+                        </button>
+                      </div>
+                    </div>
+                  )
                 )}
 
                 {appMode === 'home' && (
@@ -4299,6 +4410,7 @@ TS Joinery Kanban System`
           currentUser={currentUser}
           onClose={() => setShowUserProfileModal(false)}
           onLock={() => {
+            authManager.clearSession();
             setIsLocked(true);
             setAppMode('employee');
             setCurrentUser(null);

@@ -9,7 +9,8 @@ import {
   DeviceInterface,
   UserDeviceAccess,
   UserPermissionOverride,
-  EffectiveUserPermissions
+  EffectiveUserPermissions,
+  ModuleDefinition
 } from '../types';
 
 const STORAGE_ROLES_KEY = 'tsj_roles_v1';
@@ -27,6 +28,139 @@ export const ALL_PERMISSION_ACTIONS: PermissionAction[] = [
   'Process',
   'Print',
   'Export'
+];
+
+export const CENTRAL_MODULE_REGISTRY: ModuleDefinition[] = [
+  {
+    id: 'clocking',
+    name: 'Clocking Terminal / Employee',
+    category: 'Operations',
+    description: 'Artisan clock in/out, breaks, and personal profile verification.',
+    supportsDevices: { phone: true, tablet: true, desktop: true, terminal: true },
+    appMode: 'employee',
+    icon: 'clock',
+    permissionModules: ['Clocking', 'Dashboard']
+  },
+  {
+    id: 'qr_scan',
+    name: 'QR Scan Service',
+    category: 'Operations',
+    description: 'Scanning Kanban QR barcodes for stock transactions, orders, and lookups.',
+    supportsDevices: { phone: true, tablet: true, desktop: true, terminal: true },
+    appMode: 'qr_scan_service',
+    icon: 'scan',
+    permissionModules: ['QR Scan Service']
+  },
+  {
+    id: 'dispatch',
+    name: 'Dispatch & Receiving',
+    category: 'Logistics',
+    description: 'Outbound waybills, delivery notes, receiving inspections, and depot transfers.',
+    supportsDevices: { phone: true, tablet: true, desktop: true, terminal: false },
+    appMode: 'dispatch',
+    icon: 'truck',
+    permissionModules: ['Dispatch Creation', 'Receiving Inspection', 'Discrepancy Management', 'Waybills & Delivery Notes']
+  },
+  {
+    id: 'product_master',
+    name: 'Product Master',
+    category: 'Management',
+    description: 'Master catalog of joinery items, SKU numbers, specs, and default suppliers.',
+    supportsDevices: { phone: false, tablet: true, desktop: true, terminal: false },
+    appMode: 'product_master',
+    icon: 'box',
+    permissionModules: ['Product Master', 'QR Generation']
+  },
+  {
+    id: 'purchase_orders',
+    name: 'Purchase Orders',
+    category: 'Procurement',
+    description: 'Formal supplier purchase orders, PO tracking, approvals, and goods receiving.',
+    supportsDevices: { phone: false, tablet: true, desktop: true, terminal: false },
+    appMode: 'purchase_orders',
+    icon: 'file-text',
+    permissionModules: ['Purchase Orders', 'Goods Receiving', 'Stock Requests']
+  },
+  {
+    id: 'orders',
+    name: 'Procurement & Orders',
+    category: 'Procurement',
+    description: 'Direct procurement stock requests, replenishment, and reorder basket.',
+    supportsDevices: { phone: true, tablet: true, desktop: true, terminal: false },
+    appMode: 'orders',
+    icon: 'banknote',
+    permissionModules: ['Inventory', 'Basket', 'Stock Requests']
+  },
+  {
+    id: 'kanban',
+    name: 'Kanban Designer',
+    category: 'Management',
+    description: 'Custom visual card designer, template management, and PDF print exports.',
+    supportsDevices: { phone: true, tablet: true, desktop: true, terminal: false },
+    appMode: 'template_designer',
+    icon: 'layout-template',
+    permissionModules: ['Kanban Designer', 'Print Templates']
+  },
+  {
+    id: 'admin',
+    name: 'Employer Registration',
+    category: 'Management',
+    description: 'Artisan enrollment, personal details, tax/UIF, and profile archives.',
+    supportsDevices: { phone: true, tablet: true, desktop: true, terminal: false },
+    appMode: 'admin',
+    icon: 'users',
+    permissionModules: ['Employer Registration', 'Archive Profiles']
+  },
+  {
+    id: 'analytics',
+    name: 'Work Analytics',
+    category: 'Management',
+    description: 'Shift durations, overtime computations, attendance KPIs, and audit exports.',
+    supportsDevices: { phone: true, tablet: true, desktop: true, terminal: false },
+    appMode: 'analytics',
+    icon: 'bar-chart-3',
+    permissionModules: ['Work Analytics', 'Generate Reports', 'Historical Logs']
+  },
+  {
+    id: 'leave',
+    name: 'Leave Management',
+    category: 'Operations',
+    description: 'Staff leave applications, sick/annual balances, and supervisor approvals.',
+    supportsDevices: { phone: true, tablet: true, desktop: true, terminal: true },
+    appMode: 'leave',
+    icon: 'calendar',
+    permissionModules: ['Leave Management']
+  },
+  {
+    id: 'gemini_ai',
+    name: 'Gemini AI Hub',
+    category: 'Intelligence',
+    description: 'Intelligent AI assistant for workshop assistance, stock analytics, and summaries.',
+    supportsDevices: { phone: true, tablet: true, desktop: true, terminal: false },
+    appMode: 'gemini_chat',
+    icon: 'bot',
+    permissionModules: []
+  },
+  {
+    id: 'system_admin',
+    name: 'System Administration',
+    category: 'System',
+    description: 'User access controls, role definitions, security policies, and audit logs.',
+    supportsDevices: { phone: false, tablet: true, desktop: true, terminal: false },
+    appMode: 'system_admin',
+    icon: 'shield',
+    permissionModules: ['Roles & Permissions', 'System Audit Log', 'User Assignments']
+  },
+  {
+    id: 'company_settings',
+    name: 'Company Settings',
+    category: 'System',
+    description: 'Company information, branch/depot structure, and software version history.',
+    supportsDevices: { phone: false, tablet: true, desktop: true, terminal: false },
+    appMode: 'company_settings',
+    icon: 'building',
+    permissionModules: ['Company Information', 'Branch Management', 'Version Management']
+  }
 ];
 
 export interface ModuleCategoryGroup {
@@ -324,7 +458,41 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, RolePermissions> = {
 
 // DEFAULT USER OVERRIDES
 // Evaluated deterministically via Explicit User Overrides in the RBAC pipeline
-export const DEFAULT_USER_OVERRIDES: Record<string, UserPermissionOverride> = {};
+export const DEFAULT_USER_OVERRIDES: Record<string, UserPermissionOverride> = {
+  'juan@tsjoinery.co.za': {
+    userId: 'usr-depot-juan',
+    userEmail: 'juan@tsjoinery.co.za',
+    branchId: 'BFN-01',
+    branchName: 'Bloemfontein Central',
+    physicalLocation: 'Cape Town',
+    deviceAccess: {
+      desktop: true,
+      phone: true,
+      tablet: false,
+      terminal: false
+    },
+    deviceViewAccess: {
+      phone: {
+        dispatch: true,
+        clocking: false,
+        leave: false
+      },
+      tablet: {
+        dispatch: false,
+        clocking: false,
+        leave: false
+      },
+      desktop: {
+        dispatch: true,
+        clocking: true,
+        leave: true,
+        analytics: true
+      }
+    },
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    updatedBy: 'System'
+  }
+};
 
 export interface AuthorizedNavItem {
   id: string;
@@ -397,12 +565,29 @@ export const permissionService = {
       const data = localStorage.getItem(STORAGE_USER_OVERRIDES_KEY);
       if (data) {
         const parsed = JSON.parse(data);
-        return { ...DEFAULT_USER_OVERRIDES, ...parsed };
+        const merged: Record<string, UserPermissionOverride> = { ...DEFAULT_USER_OVERRIDES };
+        if (parsed && typeof parsed === 'object') {
+          for (const [k, v] of Object.entries(parsed)) {
+            const ov = v as UserPermissionOverride;
+            if (!ov) continue;
+            const email = ov.userEmail?.toLowerCase().trim();
+            const uid = ov.userId;
+            // Purge default placeholder key if a newer override exists for this user
+            if (email && merged[email] && (!merged[email].updatedAt || (ov.updatedAt && ov.updatedAt >= merged[email].updatedAt))) {
+              delete merged[email];
+            }
+            if (uid && merged[uid] && (!merged[uid].updatedAt || (ov.updatedAt && ov.updatedAt >= merged[uid].updatedAt))) {
+              delete merged[uid];
+            }
+            merged[k] = ov;
+          }
+        }
+        return merged;
       }
     } catch (e) {
       console.warn('Failed to parse local user overrides:', e);
     }
-    return DEFAULT_USER_OVERRIDES;
+    return { ...DEFAULT_USER_OVERRIDES };
   },
 
   saveLocalUserOverrides(overrides: Record<string, UserPermissionOverride>): void {
@@ -437,50 +622,98 @@ export const permissionService = {
     const cleanKey = userIdOrEmail.toLowerCase().trim();
     const overrides = this.getLocalUserOverrides();
 
-    // Match by exact ID or email
-    for (const [key, ov] of Object.entries(overrides)) {
+    // Priority 1: Direct key lookup
+    if (overrides[cleanKey]) return overrides[cleanKey];
+    if (overrides[userIdOrEmail]) return overrides[userIdOrEmail];
+
+    // Priority 2: Scan for matching entries, choosing the most recently updated
+    let bestMatch: UserPermissionOverride | null = null;
+    for (const ov of Object.values(overrides)) {
       const overrideObj = ov as UserPermissionOverride;
-      if (
-        key.toLowerCase() === cleanKey ||
-        overrideObj.userId?.toLowerCase() === cleanKey ||
-        overrideObj.userEmail?.toLowerCase() === cleanKey
-      ) {
-        return overrideObj;
+      if (!overrideObj) continue;
+      const matches =
+        overrideObj.userEmail?.toLowerCase().trim() === cleanKey ||
+        overrideObj.userId?.toLowerCase().trim() === cleanKey ||
+        overrideObj.userId === userIdOrEmail;
+
+      if (matches) {
+        if (!bestMatch) {
+          bestMatch = overrideObj;
+        } else {
+          const prevTime = bestMatch.updatedAt ? new Date(bestMatch.updatedAt).getTime() : 0;
+          const currTime = overrideObj.updatedAt ? new Date(overrideObj.updatedAt).getTime() : 0;
+          if (currTime >= prevTime) {
+            bestMatch = overrideObj;
+          }
+        }
       }
     }
-    return null;
+    return bestMatch;
+  },
+
+  // Central Module Registry helpers
+  getCentralModules(): ModuleDefinition[] {
+    return CENTRAL_MODULE_REGISTRY;
+  },
+
+  getModulesForDevice(deviceContext: DeviceInterface = 'desktop'): ModuleDefinition[] {
+    return CENTRAL_MODULE_REGISTRY.filter(m => m.supportsDevices[deviceContext]);
   },
 
   // Save or update an explicit user permission override
   async saveUserOverride(override: UserPermissionOverride, adminName: string = 'Administrator'): Promise<UserPermissionOverride> {
     const overrides = this.getLocalUserOverrides();
-    const key = override.userId || override.userEmail.toLowerCase().trim();
+    const emailKey = (override.userEmail || '').toLowerCase().trim();
+    const idKey = (override.userId || '').trim();
+    const primaryKey = emailKey || idKey;
+
     const updated: UserPermissionOverride = {
       ...override,
+      userEmail: emailKey,
+      userId: idKey || override.userId,
       updatedAt: new Date().toISOString(),
       updatedBy: adminName || 'System Admin'
     };
-    overrides[key] = updated;
+
+    // Remove any stale entries for this user
+    for (const k of Object.keys(overrides)) {
+      const ov = overrides[k];
+      if (
+        (emailKey && (k.toLowerCase() === emailKey || ov?.userEmail?.toLowerCase() === emailKey)) ||
+        (idKey && (k === idKey || ov?.userId === idKey))
+      ) {
+        delete overrides[k];
+      }
+    }
+
+    // Save under primary key and alias
+    if (primaryKey) overrides[primaryKey] = updated;
+    if (idKey && idKey !== primaryKey) overrides[idKey] = updated;
+
     this.saveLocalUserOverrides(overrides);
 
     await this.logAudit(
       adminName,
       `USER_PERMISSION_OVERRIDE_SAVED`,
       `User ${override.userEmail}`,
-      JSON.stringify({ deviceAccess: override.deviceAccess, permissionsCount: Object.keys(override.permissions || {}).length })
+      JSON.stringify({
+        deviceAccess: override.deviceAccess,
+        deviceViewAccess: override.deviceViewAccess,
+        permissionsCount: Object.keys(override.permissions || {}).length
+      })
     );
 
     if (db && APP_ID_PATH) {
       try {
-        await db.collection('artifacts')
-          .doc(APP_ID_PATH)
-          .collection('public')
-          .doc('userPermissionOverrides')
-          .collection('items')
-          .doc(key)
-          .set(updated);
-
-        await db.collection('userPermissionOverrides').doc(key).set(updated);
+        const batch = [
+          db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('userPermissionOverrides').collection('items').doc(primaryKey).set(updated),
+          db.collection('userPermissionOverrides').doc(primaryKey).set(updated)
+        ];
+        if (idKey && idKey !== primaryKey) {
+          batch.push(db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('userPermissionOverrides').collection('items').doc(idKey).set(updated));
+          batch.push(db.collection('userPermissionOverrides').doc(idKey).set(updated));
+        }
+        await Promise.allSettled(batch);
       } catch (e) {
         console.warn('Firebase userPermissionOverrides sync error:', e);
       }
@@ -522,6 +755,82 @@ export const permissionService = {
     // Standard defaults: Desktop & Phone enabled, Tablet/Terminal disabled unless assigned
     if (deviceContext === 'desktop' || deviceContext === 'phone') return true;
     return false;
+  },
+
+  // ================= DEVICE VIEW / MODULE ACCESS (LAYER 2 GATE) =================
+  canAccessDeviceView(
+    user: any,
+    moduleId: string,
+    deviceContext: DeviceInterface = 'desktop'
+  ): boolean {
+    if (!user || user.active === false) return false;
+    if (!this.canAccessDevice(user, deviceContext)) return false;
+
+    const moduleDef = CENTRAL_MODULE_REGISTRY.find(m => m.id === moduleId);
+    if (!moduleDef) return false;
+
+    // Check if module physically supports this device
+    if (moduleDef.supportsDevices && moduleDef.supportsDevices[deviceContext] === false) {
+      return false;
+    }
+
+    // 1. Check explicit user override for this device view
+    const override = this.getUserOverride(user.id || user.email);
+    if (override?.deviceViewAccess?.[deviceContext]?.[moduleId] !== undefined) {
+      return !!override.deviceViewAccess[deviceContext]![moduleId];
+    }
+
+    // 2. Check user object direct deviceViewAccess
+    if (user.deviceViewAccess?.[deviceContext]?.[moduleId] !== undefined) {
+      return !!user.deviceViewAccess[deviceContext][moduleId];
+    }
+
+    // 3. Check legacy deviceOverrides if present
+    if (override?.deviceOverrides?.[deviceContext]?.modules?.[moduleId] !== undefined) {
+      return !!override.deviceOverrides[deviceContext]!.modules![moduleId];
+    }
+
+    // 4. Role Baseline Evaluation
+    const role = (user.role || '').trim();
+    if (role === 'Administrator' || role === 'Admin') {
+      return true;
+    }
+
+    if (this.isClockingTerminalUser(user)) {
+      return ['clocking', 'qr_scan', 'leave'].includes(moduleId);
+    }
+
+    // Built-in modules open to authorized device users
+    if (moduleId === 'gemini_ai') {
+      return true;
+    }
+
+    if (moduleId === 'clocking') {
+      return this.hasPermission(user, 'Clocking', 'View', deviceContext) ||
+             this.hasPermission(user, 'Dashboard', 'View', deviceContext);
+    }
+
+    // Check mapped granular permission modules
+    if (moduleDef.permissionModules && moduleDef.permissionModules.length > 0) {
+      return moduleDef.permissionModules.some(pMod =>
+        this.hasPermission(user, pMod, 'View', deviceContext)
+      );
+    }
+
+    return true;
+  },
+
+  // Returns all authorized modules for user on the given device view
+  getAuthorizedModulesForUser(
+    user: any,
+    deviceContext: DeviceInterface = 'desktop'
+  ): ModuleDefinition[] {
+    if (!user || user.active === false) return [];
+    if (!this.canAccessDevice(user, deviceContext)) return [];
+
+    return CENTRAL_MODULE_REGISTRY.filter(m =>
+      this.canAccessDeviceView(user, m.id, deviceContext)
+    );
   },
 
   // ================= DETERMINISTIC PERMISSION CHECK ENGINE =================
@@ -634,84 +943,61 @@ export const permissionService = {
     if (!user) return false;
     if (user.active === false) return false;
 
-    // AI chat is accessible to all authenticated active users on authorized devices
-    if (mode === 'gemini_chat' || mode === 'ai_assistant') {
-      return this.canAccessDevice(user, deviceContext);
-    }
-
-    const role = (user.role || '').trim();
-    if (role === 'Administrator' || role === 'Admin') {
-      return this.canAccessDevice(user, deviceContext);
-    }
-
-    if (this.isClockingTerminalUser(user)) {
-      return ['clocking_terminal', 'employee', 'leave', 'qr_scan_service'].includes(mode);
-    }
+    const dev = deviceContext || 'desktop';
 
     // Device access gate
-    if (deviceContext && !this.canAccessDevice(user, deviceContext)) {
+    if (!this.canAccessDevice(user, dev)) {
       return false;
     }
 
     // Evaluate required module view permissions for each application mode
     switch (mode) {
       case 'clocking_terminal':
-        return this.hasPermission(user, 'Clocking', 'View', deviceContext);
-
       case 'employee':
-        return this.hasPermission(user, 'Clocking', 'View', deviceContext) ||
-               this.hasPermission(user, 'Dashboard', 'View', deviceContext);
+        return this.canAccessDeviceView(user, 'clocking', dev);
 
       case 'qr_scan_service':
-        return this.hasPermission(user, 'QR Scan Service', 'View', deviceContext);
+        return this.canAccessDeviceView(user, 'qr_scan', dev);
 
       case 'dispatch':
       case 'dispatches':
       case 'mobile_dispatches':
-        return this.hasPermission(user, 'Dispatch Creation', 'View', deviceContext) ||
-               this.hasPermission(user, 'Receiving Inspection', 'View', deviceContext) ||
-               this.hasPermission(user, 'Discrepancy Management', 'View', deviceContext) ||
-               this.hasPermission(user, 'Waybills & Delivery Notes', 'View', deviceContext);
+        return this.canAccessDeviceView(user, 'dispatch', dev);
 
       case 'purchase_orders':
-        return this.hasPermission(user, 'Purchase Orders', 'View', deviceContext) ||
-               this.hasPermission(user, 'Goods Receiving', 'View', deviceContext) ||
-               this.hasPermission(user, 'Stock Requests', 'View', deviceContext);
+        return this.canAccessDeviceView(user, 'purchase_orders', dev);
 
       case 'product_master':
-        return this.hasPermission(user, 'Product Master', 'View', deviceContext);
+        return this.canAccessDeviceView(user, 'product_master', dev);
 
       case 'orders':
-        return this.hasPermission(user, 'Inventory', 'View', deviceContext) ||
-               this.hasPermission(user, 'Basket', 'View', deviceContext);
+        return this.canAccessDeviceView(user, 'orders', dev);
 
       case 'kanban':
       case 'template_designer':
-        return this.hasPermission(user, 'Kanban Designer', 'View', deviceContext) ||
-               this.hasPermission(user, 'Print Templates', 'View', deviceContext);
+        return this.canAccessDeviceView(user, 'kanban', dev);
 
       case 'admin':
-        return this.hasPermission(user, 'Employer Registration', 'View', deviceContext) ||
-               this.hasPermission(user, 'Archive Profiles', 'View', deviceContext);
+        return this.canAccessDeviceView(user, 'admin', dev);
 
       case 'analytics':
-        return this.hasPermission(user, 'Work Analytics', 'View', deviceContext) ||
-               this.hasPermission(user, 'Generate Reports', 'View', deviceContext) ||
-               this.hasPermission(user, 'Historical Logs', 'View', deviceContext);
+        return this.canAccessDeviceView(user, 'analytics', dev);
 
       case 'leave':
-        return this.hasPermission(user, 'Leave Management', 'View', deviceContext);
+        return this.canAccessDeviceView(user, 'leave', dev);
+
+      case 'gemini_chat':
+      case 'ai_assistant':
+        return this.canAccessDeviceView(user, 'gemini_ai', dev);
 
       case 'system_admin':
-        return this.hasPermission(user, 'Roles & Permissions', 'View', deviceContext) ||
-               this.hasPermission(user, 'System Audit Log', 'View', deviceContext);
+        return this.canAccessDeviceView(user, 'system_admin', dev);
 
       case 'company_settings':
-        return this.hasPermission(user, 'Company Information', 'View', deviceContext) ||
-               this.hasPermission(user, 'Branch Management', 'View', deviceContext);
+        return this.canAccessDeviceView(user, 'company_settings', dev);
 
       case 'mobile':
-        return this.hasPermission(user, 'Dashboard', 'View', deviceContext);
+        return this.canAccessDevice(user, 'phone');
 
       default:
         return false;
@@ -860,7 +1146,7 @@ export const permissionService = {
     }> = [];
 
     // 1. Clocking (if authorized for Clocking module on phone)
-    if (this.hasPermission(user, 'Clocking', 'View', 'phone')) {
+    if (this.canAccessDeviceView(user, 'clocking', 'phone')) {
       items.push({
         id: 'clocking',
         label: 'Clocking',
@@ -870,7 +1156,7 @@ export const permissionService = {
     }
 
     // 2. QR Scan (if authorized on phone)
-    if (this.hasPermission(user, 'QR Scan Service', 'View', 'phone')) {
+    if (this.canAccessDeviceView(user, 'qr_scan', 'phone')) {
       items.push({
         id: 'qr_scan',
         label: 'QR Scan',
@@ -879,8 +1165,8 @@ export const permissionService = {
       });
     }
 
-    // 3. Dispatch & Receiving (if authorized for dispatch on phone)
-    if (this.canAccessMode(user, 'dispatch', 'phone')) {
+    // 3. Dispatch & Receiving (if authorized on phone)
+    if (this.canAccessDeviceView(user, 'dispatch', 'phone')) {
       items.push({
         id: 'dispatches',
         label: 'Dispatches',
@@ -889,8 +1175,8 @@ export const permissionService = {
       });
     }
 
-    // 4. Basket (if authorized for orders or QR scan and has basket items)
-    if (options.basketCount && options.basketCount > 0 && this.hasPermission(user, 'Procurement & Orders', 'View', 'phone')) {
+    // 4. Basket (if authorized for orders and has basket items)
+    if (options.basketCount && options.basketCount > 0 && this.canAccessDeviceView(user, 'orders', 'phone')) {
       items.push({
         id: 'basket',
         label: 'Basket',
@@ -901,7 +1187,7 @@ export const permissionService = {
     }
 
     // 5. Procurement / Orders (if authorized on phone)
-    if (this.canAccessMode(user, 'orders', 'phone') && !items.some(i => i.id === 'dispatches')) {
+    if (this.canAccessDeviceView(user, 'orders', 'phone') && !items.some(i => i.id === 'dispatches')) {
       items.push({
         id: 'orders',
         label: 'Orders',
@@ -910,18 +1196,18 @@ export const permissionService = {
       });
     }
 
-    // 6. Management / Hub (if admin or manager with template designer or admin access)
-    if ((this.canAccessMode(user, 'template_designer', 'phone') || this.canAccessMode(user, 'admin', 'phone')) && items.length < 3) {
+    // 6. Hub / Management (if authorized for kanban or admin on phone)
+    if ((this.canAccessDeviceView(user, 'kanban', 'phone') || this.canAccessDeviceView(user, 'admin', 'phone')) && items.length < 3) {
       items.push({
         id: 'management',
         label: 'Hub',
         icon: 'layout-template',
-        targetMode: this.canAccessMode(user, 'template_designer', 'phone') ? 'template_designer' : 'admin'
+        targetMode: this.canAccessDeviceView(user, 'kanban', 'phone') ? 'template_designer' : 'admin'
       });
     }
 
     // 7. Work Analytics (if authorized on phone)
-    if (this.canAccessMode(user, 'analytics', 'phone') && items.length < 3) {
+    if (this.canAccessDeviceView(user, 'analytics', 'phone') && items.length < 3) {
       items.push({
         id: 'analytics',
         label: 'Analytics',
@@ -930,7 +1216,7 @@ export const permissionService = {
       });
     }
 
-    // 8. Alerts / Notifications (if unread notifications exist or explicitly relevant)
+    // 8. Alerts / Notifications
     if (options.unreadNotifications && options.unreadNotifications > 0) {
       items.push({
         id: 'notifications',
@@ -942,7 +1228,7 @@ export const permissionService = {
       });
     }
 
-    // 9. Profile (Standard utility for all authenticated users)
+    // 9. Profile (Always accessible to authenticated user)
     items.push({
       id: 'profile',
       label: 'Profile',
@@ -1450,7 +1736,12 @@ export const permissionService = {
               const map: Record<string, UserPermissionOverride> = { ...DEFAULT_USER_OVERRIDES };
               snap.forEach(d => {
                 const data = d.data() as UserPermissionOverride;
-                map[data.userId || data.userEmail || d.id] = data;
+                if (!data) return;
+                const emailKey = data.userEmail?.toLowerCase().trim();
+                const idKey = data.userId?.trim();
+                if (emailKey) map[emailKey] = data;
+                if (idKey) map[idKey] = data;
+                map[d.id] = data;
               });
               this.saveLocalUserOverrides(map);
               callback(map);

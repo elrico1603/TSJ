@@ -1,6 +1,7 @@
 import React from 'react';
 import { Icon } from './Icon';
 import { AppUser } from '../auth';
+import { permissionService } from '../services/permissionService';
 
 interface UserProfileModalProps {
   currentUser: AppUser | null;
@@ -20,6 +21,8 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   const roleName = currentUser?.role || 'Stock Manager';
   const userName = currentUser?.name || 'Stock Manager User';
   const email = currentUser?.email || 'stock.manager@tsjoinery.co.za';
+
+  const authorizedModules = permissionService.getAuthorizedModulesForUser(currentUser, layoutMode);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
@@ -54,24 +57,27 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
           </div>
 
           <div className="pt-2 border-t border-white/5 space-y-2">
-            <span className="text-[10px] font-black uppercase text-gray-500 tracking-widest block font-sans">Assigned Access Modules</span>
-            <div className="grid grid-cols-2 gap-2 text-xs font-bold text-gray-300 font-sans">
-              <div className="flex items-center gap-1.5 bg-white/5 px-2.5 py-1.5 rounded-lg border border-white/5">
-                <Icon name="check-circle" size={12} className="text-emerald-400" />
-                <span>Dashboard</span>
-              </div>
-              <div className="flex items-center gap-1.5 bg-white/5 px-2.5 py-1.5 rounded-lg border border-white/5">
-                <Icon name="check-circle" size={12} className="text-emerald-400" />
-                <span>QR Scanner</span>
-              </div>
-              <div className="flex items-center gap-1.5 bg-white/5 px-2.5 py-1.5 rounded-lg border border-white/5">
-                <Icon name="check-circle" size={12} className="text-emerald-400" />
-                <span>Stock Basket</span>
-              </div>
-              <div className="flex items-center gap-1.5 bg-white/5 px-2.5 py-1.5 rounded-lg border border-white/5">
-                <Icon name="check-circle" size={12} className="text-emerald-400" />
-                <span>User Profile</span>
-              </div>
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-black uppercase text-gray-500 tracking-widest block font-sans">
+                Authorized Modules ({layoutMode} View)
+              </span>
+              <span className="text-[10px] font-mono text-purple-400 font-bold">
+                {authorizedModules.length} Active
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 text-xs font-bold text-gray-300 font-sans max-h-48 overflow-y-auto custom-scrollbar pr-1">
+              {authorizedModules.map(mod => (
+                <div key={mod.id} className="flex items-center gap-1.5 bg-white/5 px-2.5 py-1.5 rounded-lg border border-white/5 truncate">
+                  <Icon name="check-circle" size={12} className="text-emerald-400 shrink-0" />
+                  <span className="truncate">{mod.name}</span>
+                </div>
+              ))}
+              {authorizedModules.length === 0 && (
+                <div className="col-span-2 text-center text-xs text-gray-500 py-2">
+                  No modules authorized for this device view.
+                </div>
+              )}
             </div>
           </div>
         </div>

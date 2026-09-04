@@ -7,10 +7,12 @@ import { auditLogger } from '../audit';
 import { stockRequestService } from '../services/stockRequestService';
 import { productMasterService } from '../services/productMasterService';
 import { StockRequestItem } from '../types';
+import { permissionService } from '../services/permissionService';
 
 interface QRScanServiceProps {
   kanbanCards: any[]; // Existing card references for listing & simulation
   currentUser?: any;  // The currently logged in user/supervisor
+  layoutMode?: 'desktop' | 'tablet' | 'phone';
   onClose?: () => void;
   announce: (msg: string) => void;
 }
@@ -25,6 +27,7 @@ export interface BasketItem {
 export const QRScanService: React.FC<QRScanServiceProps> = ({
   kanbanCards = [],
   currentUser,
+  layoutMode = 'desktop',
   onClose,
   announce
 }) => {
@@ -123,11 +126,27 @@ export const QRScanService: React.FC<QRScanServiceProps> = ({
 
   const startCamera = async () => {
     setCameraError('');
+
+    // Security & RBAC verification: Only users authorized for QR Scan on this device may activate camera
+    const devContext = layoutMode || 'desktop';
+    const isAuthorized = currentUser && (
+      permissionService.canAccessMode(currentUser, 'qr_scan_service', devContext) ||
+      permissionService.canAccessDeviceView(currentUser, 'qr_scan', devContext)
+    );
+
+    if (!isAuthorized) {
+      setCameraError('Access denied: You do not have permission to access QR Scan on this device.');
+      setScanState('idle');
+      return;
+    }
+
     setScanState('scanning');
     try {
       if (qrCodeInstanceRef.current) {
         try {
-          await qrCodeInstanceRef.current.stop();
+          if (qrCodeInstanceRef.current.isScanning) {
+            await qrCodeInstanceRef.current.stop();
+          }
         } catch (e) {
           // ignore
         }
@@ -165,12 +184,32 @@ export const QRScanService: React.FC<QRScanServiceProps> = ({
   };
 
   const stopCamera = async () => {
-    if (qrCodeInstanceRef.current && qrCodeInstanceRef.current.isScanning) {
+    if (qrCodeInstanceRef.current) {
       try {
-        await qrCodeInstanceRef.current.stop();
+        if (qrCodeInstanceRef.current.isScanning) {
+          await qrCodeInstanceRef.current.stop();
+        }
       } catch (e) {
         console.error('Error stopping camera:', e);
       }
+    }
+    // Explicitly release all media streams and tracks on video elements in the container
+    try {
+      const container = document.getElementById(videoContainerId);
+      if (container) {
+        const videoElements = container.getElementsByTagName('video');
+        for (let i = 0; i < videoElements.length; i++) {
+          const stream = videoElements[i].srcObject as MediaStream | null;
+          if (stream && stream.getTracks) {
+            stream.getTracks().forEach((track) => {
+              try { track.stop(); } catch (_) {}
+            });
+          }
+          videoElements[i].srcObject = null;
+        }
+      }
+    } catch (e) {
+      console.warn('Error releasing video tracks:', e);
     }
     setIsCameraActive(false);
     if (scanState === 'scanning') {

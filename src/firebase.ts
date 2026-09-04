@@ -22,5 +22,19 @@ export const auth = firebase.auth();
 export const db = firebase.firestore();
 export const storage = firebase.storage();
 
+// Configure Firestore WebChannel transport to use long-polling in browser environments
+// This eliminates WebChannelConnection RPC 'Listen' transport errors behind buffering proxies
+if (typeof window !== 'undefined') {
+    try {
+        db.settings({
+            experimentalForceLongPolling: true,
+            experimentalAutoDetectLongPolling: false,
+            merge: true
+        });
+    } catch (e) {
+        console.warn('[FIRESTORE CONFIG] Settings initialization notice:', e);
+    }
+}
+
 export const APP_ID_PATH = 'timbersmith-terminal-v1';
 export const APP_MOBILE_LINK = 'https://elrico1603.github.io/TSJApp/';

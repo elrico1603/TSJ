@@ -40,6 +40,7 @@ export interface AppUser {
   branchName?: string;
   physicalLocation?: string;
   deviceAccess?: UserDeviceAccess;
+  deviceViewAccess?: Partial<Record<string, Record<string, boolean>>>;
   userPermissions?: Record<string, Partial<Record<PermissionAction, boolean>>>;
 }
 
@@ -52,9 +53,109 @@ export const DEFAULT_ACCOUNTS: AppUser[] = [
   { id: 'usr-clocking-kiosk', firstName: 'Clocking', lastName: 'Terminal', name: 'Clocking Terminal', email: 'clocking@tsjoinery.co.za', role: 'Clocking Terminal', department: 'Clocking', physicalLocation: 'Bloemfontein', branchName: 'Bloemfontein Central', branchId: 'BFN-01', active: true, pin: '0000', isApproved: true, status: 'active', createdAt: '2026-01-01T00:00:00.000Z' }
 ];
 
-let internalUsersPool: AppUser[] = [...DEFAULT_ACCOUNTS];
+const STORAGE_SESSION_KEY = 'ts_hub_active_session_v1';
+const STORAGE_CACHED_USERS_KEY = 'ts_hub_cached_users_v1';
+
+const getInitialUsersPool = (): AppUser[] => {
+  try {
+    const cached = localStorage.getItem(STORAGE_CACHED_USERS_KEY);
+    if (cached) {
+      const parsed = JSON.parse(cached) as AppUser[];
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        // Merge with defaults
+        const map = new Map<string, AppUser>();
+        DEFAULT_ACCOUNTS.forEach(def => map.set(def.email.toLowerCase().trim(), { ...def }));
+        parsed.forEach(u => {
+          if (u && u.email) {
+            const key = u.email.toLowerCase().trim();
+            map.set(key, { ...(map.get(key) || {}), ...u });
+          }
+        });
+        return Array.from(map.values());
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to load cached users pool:', e);
+  }
+  return [...DEFAULT_ACCOUNTS];
+};
+
+let internalUsersPool: AppUser[] = getInitialUsersPool();
 
 export const authManager = {
+  getStoredSession(): AppUser | null {
+    try {
+      const raw = localStorage.getItem(STORAGE_SESSION_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        const user = parsed?.user || parsed;
+        if (user && user.email) {
+          // Re-validate against current user pool
+          const users = this.getUsers();
+          const found = users.find(u => 
+            u.email?.toLowerCase().trim() === user.email.toLowerCase().trim() ||
+            u.id === user.id
+          );
+          if (found && found.active === false) {
+            this.clearSession();
+            return null;
+          }
+          const override = permissionService.getUserOverride(user.id || user.email);
+          return {
+            ...user,
+            ...(found || {}),
+            deviceAccess: override?.deviceAccess || found?.deviceAccess || user.deviceAccess,
+            deviceViewAccess: override?.deviceViewAccess || found?.deviceViewAccess || user.deviceViewAccess
+          };
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to retrieve stored session:', e);
+    }
+    return null;
+  },
+
+  saveSession(user: AppUser): void {
+    try {
+      if (!user || !user.email) return;
+      const override = permissionService.getUserOverride(user.id || user.email);
+      const sessionUser: AppUser = {
+        ...user,
+        deviceAccess: override?.deviceAccess || user.deviceAccess,
+        deviceViewAccess: override?.deviceViewAccess || user.deviceViewAccess
+      };
+      localStorage.setItem(STORAGE_SESSION_KEY, JSON.stringify(sessionUser));
+    } catch (e) {
+      console.warn('Failed to save session to localStorage:', e);
+    }
+  },
+
+  clearSession(): void {
+    try {
+      localStorage.removeItem(STORAGE_SESSION_KEY);
+    } catch (e) {
+      console.warn('Failed to clear session from localStorage:', e);
+    }
+  },
+
+  updateUser(userId: string, updates: Partial<AppUser>): void {
+    try {
+      let updated = false;
+      internalUsersPool = internalUsersPool.map(u => {
+        if (u.id === userId || (u.email && updates.email && u.email.toLowerCase().trim() === updates.email.toLowerCase().trim())) {
+          updated = true;
+          return { ...u, ...updates };
+        }
+        return u;
+      });
+      if (updated) {
+        localStorage.setItem(STORAGE_CACHED_USERS_KEY, JSON.stringify(internalUsersPool));
+      }
+    } catch (e) {
+      console.warn('Failed to update user in internal pool:', e);
+    }
+  },
+
   setUsers(users: AppUser[]): AppUser[] {
     const canonicalMap = new Map<string, AppUser>();
 
@@ -97,7 +198,9 @@ export const authManager = {
           active: u.active !== undefined ? u.active : true,
           pin: u.pin || existing.pin || '1234',
           branchName: u.branchName || existing.branchName,
-          branchId: u.branchId || existing.branchId
+          branchId: u.branchId || existing.branchId,
+          deviceAccess: u.deviceAccess || existing.deviceAccess,
+          deviceViewAccess: u.deviceViewAccess || existing.deviceViewAccess
         });
       } else {
         canonicalMap.set(email, {
@@ -113,6 +216,11 @@ export const authManager = {
 
     const mergedUsers = Array.from(canonicalMap.values());
     internalUsersPool = mergedUsers;
+    try {
+      localStorage.setItem(STORAGE_CACHED_USERS_KEY, JSON.stringify(mergedUsers));
+    } catch (e) {
+      console.warn('Failed to cache merged users pool:', e);
+    }
     return mergedUsers;
   },
 
@@ -251,7 +359,16 @@ export const authManager = {
       });
     }
 
-    return matchedUser;
+    if (matchedUser) {
+      const override = permissionService.getUserOverride(matchedUser.id || matchedUser.email);
+      return {
+        ...matchedUser,
+        deviceAccess: override?.deviceAccess || matchedUser.deviceAccess,
+        deviceViewAccess: override?.deviceViewAccess || matchedUser.deviceViewAccess
+      };
+    }
+
+    return null;
   },
 
   async registerUserRequest(request: Omit<AppUser, 'status' | 'isApproved' | 'createdAt'>): Promise<AppUser> {

@@ -645,6 +645,17 @@ export interface UserDeviceAccess {
   terminal: boolean;
 }
 
+export interface ModuleDefinition {
+  id: string;
+  name: string;
+  category: string;
+  description: string;
+  supportsDevices: Record<DeviceInterface, boolean>;
+  appMode: string;
+  icon: string;
+  permissionModules: string[];
+}
+
 export interface UserPermissionOverride {
   userId: string;
   userEmail: string;
@@ -652,6 +663,7 @@ export interface UserPermissionOverride {
   branchId?: string;
   branchName?: string;
   deviceAccess?: UserDeviceAccess;
+  deviceViewAccess?: Partial<Record<DeviceInterface, Record<string, boolean>>>;
   permissions?: Record<string, Partial<Record<PermissionAction, PermissionState | boolean>>>;
   deviceOverrides?: Partial<Record<DeviceInterface, {
     modules?: Record<string, boolean>;

@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useEffect } from 'react';
 import { Icon } from './Icon';
 
 interface EnrollmentModalProps {
@@ -31,6 +31,16 @@ export const EnrollmentModal: React.FC<EnrollmentModalProps> = ({
   setShowEnrollModal
 }) => {
   
+  useEffect(() => {
+    return () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(t => t.stop());
+        streamRef.current = null;
+      }
+      setIsCapturing(false);
+    };
+  }, []);
+
   const startCamera = async () => {
     try {
       setIsCapturing(true);
