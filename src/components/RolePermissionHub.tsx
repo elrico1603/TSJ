@@ -99,6 +99,11 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
   // User Management Modals State
   const [showCreateUserModal, setShowCreateUserModal] = useState(false);
   const [isCreatingUser, setIsCreatingUser] = useState(false);
+  const [createUserResult, setCreateUserResult] = useState<{
+    type: 'success' | 'error';
+    title: string;
+    message: string;
+  } | null>(null);
   const [showCreatePin, setShowCreatePin] = useState(false);
   const [createUserForm, setCreateUserForm] = useState({
     name: '',
@@ -426,8 +431,31 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
   const handleCreateUserSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isReadOnly) return;
-    if (!createUserForm.name.trim() || !createUserForm.email.trim() || !createUserForm.pin.trim()) {
-      announce?.('Please provide Name, Email, and PIN code.');
+    setCreateUserResult(null);
+
+    const name = createUserForm.name.trim();
+    const email = createUserForm.email.trim().toLowerCase();
+    const pin = createUserForm.pin.trim();
+
+    if (!name || !email || !pin) {
+      const err = 'Please provide Name, Email, and PIN code.';
+      setCreateUserResult({
+        type: 'error',
+        title: 'USER CREATION FAILED',
+        message: err
+      });
+      announce?.(err);
+      return;
+    }
+
+    if (pin.length < 6) {
+      const err = 'Password must be at least 6 characters.';
+      setCreateUserResult({
+        type: 'error',
+        title: 'USER CREATION FAILED',
+        message: err
+      });
+      announce?.(err);
       return;
     }
 
@@ -443,18 +471,18 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
       const branchName = selectedBranch ? selectedBranch.branchName : (createUserForm.branchName || (branches[0]?.branchName || 'Bloemfontein Central'));
       const branchId = selectedBranch ? selectedBranch.id : (createUserForm.branchId || (branches[0]?.id || 'BR-001'));
 
-      const nameParts = createUserForm.name.trim().split(' ');
+      const nameParts = name.split(' ');
       const firstName = nameParts[0] || 'User';
       const lastName = nameParts.slice(1).join(' ') || '';
 
       const newUserData: Omit<AppUser, 'id' | 'status' | 'isApproved' | 'createdAt'> = {
-        name: createUserForm.name.trim(),
+        name,
         firstName,
         lastName,
-        email: createUserForm.email.trim().toLowerCase(),
-        pin: createUserForm.pin.trim(),
+        email,
+        pin,
         role: roleName,
-        roleId: roleId,
+        roleId,
         branchId,
         branchName,
         department: createUserForm.department || 'Workshop',
@@ -465,17 +493,30 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
       const created = await authManager.createActiveUser(newUserData);
 
       if (created && roleId) {
-        await permissionService.assignUserRole(
-          created.id,
-          created.name,
-          created.email,
-          roleId,
-          currentUser?.name || 'Administrator'
-        );
+        try {
+          await permissionService.assignUserRole(
+            created.id,
+            created.name,
+            created.email,
+            roleId,
+            currentUser?.name || 'Administrator'
+          );
+        } catch (roleErr) {
+          console.warn('Role assignment notice:', roleErr);
+        }
       }
 
-      announce?.(`User account created for ${createUserForm.name} with role ${roleName}.`);
-      setShowCreateUserModal(false);
+      const successTitle = 'USER CREATED SUCCESSFULLY';
+      const successMsg = `${created.name || created.email} (${created.email}) has been added to TS Hub.`;
+      
+      setCreateUserResult({
+        type: 'success',
+        title: successTitle,
+        message: successMsg
+      });
+      announce?.(successMsg);
+
+      // Reset form
       setCreateUserForm({
         name: '',
         email: '',
@@ -486,9 +527,21 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
         roleName: roles[0]?.roleName || '',
         department: 'Workshop'
       });
+
+      // Auto-close modal after user sees the clear success confirmation
+      setTimeout(() => {
+        setShowCreateUserModal(false);
+        setCreateUserResult(null);
+      }, 2500);
     } catch (err: any) {
       console.error('Failed to create user:', err);
-      announce?.(err.message || 'Failed to create user.');
+      const errorMsg = err.message || 'An unexpected error occurred during user creation.';
+      setCreateUserResult({
+        type: 'error',
+        title: 'USER CREATION FAILED',
+        message: errorMsg
+      });
+      announce?.(`USER CREATION FAILED: ${errorMsg}`);
     } finally {
       setIsCreatingUser(false);
     }
@@ -1601,6 +1654,29 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
             </div>
 
             <form onSubmit={handleCreateUserSubmit} className="space-y-4 flex flex-col flex-1 overflow-hidden">
+              {/* Status Banner */}
+              {createUserResult && (
+                <div className={`p-4 rounded-2xl border flex items-start gap-3 shrink-0 ${
+                  createUserResult.type === 'success'
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                    : 'bg-red-500/10 border-red-500/30 text-red-300'
+                }`}>
+                  <span className={`p-1.5 rounded-xl shrink-0 ${
+                    createUserResult.type === 'success' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
+                  }`}>
+                    <Icon name={createUserResult.type === 'success' ? 'check-circle' : 'alert-triangle'} size={18} />
+                  </span>
+                  <div className="space-y-0.5 text-xs">
+                    <p className="font-black uppercase tracking-wider font-mono">
+                      {createUserResult.title}
+                    </p>
+                    <p className="leading-relaxed opacity-90">
+                      {createUserResult.message}
+                    </p>
+                  </div>
+                </div>
+              )}
+
               <div className="space-y-4 flex-1 overflow-y-auto custom-scrollbar pr-1">
                 {/* Full Name */}
                 <div className="space-y-1">
@@ -1681,12 +1757,16 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
 
                 {/* Password / PIN Credentials */}
                 <div className="space-y-1">
-                  <label className="text-xs font-bold text-gray-300 uppercase">PIN / Password Credentials *</label>
+                  <div className="flex justify-between items-center">
+                    <label className="text-xs font-bold text-gray-300 uppercase">PIN / Password Credentials *</label>
+                    <span className="text-[10px] text-amber-400 font-mono">Min 6 characters</span>
+                  </div>
                   <div className="relative">
                     <input
                       type={showCreatePin ? 'text' : 'password'}
                       required
-                      placeholder="e.g. 1234 or SecurePIN"
+                      minLength={6}
+                      placeholder="Minimum 6 characters (e.g. 123456)"
                       value={createUserForm.pin}
                       onChange={e => setCreateUserForm({ ...createUserForm, pin: e.target.value })}
                       className="w-full bg-black/60 border border-white/10 rounded-xl p-3 pr-10 text-xs text-white font-mono focus:outline-none focus:border-[#ff8c00]"

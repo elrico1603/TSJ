@@ -1,4 +1,6 @@
-import { db, APP_ID_PATH } from './firebase';
+import firebase from 'firebase/compat/app';
+import 'firebase/compat/auth';
+import { db, APP_ID_PATH, firebaseConfig } from './firebase';
 import { auditLogger } from './audit';
 import { permissionService } from './services/permissionService';
 import { UserDeviceAccess, PermissionAction } from './types';
@@ -138,6 +140,34 @@ export const authManager = {
     }
   },
 
+  _userListeners: [] as Array<(users: AppUser[]) => void>,
+
+  subscribeUsers(listener: (users: AppUser[]) => void): () => void {
+    this._userListeners.push(listener);
+    return () => {
+      this._userListeners = this._userListeners.filter(l => l !== listener);
+    };
+  },
+
+  notifyUsersChanged(): void {
+    const currentUsers = this.getUsers();
+    this._userListeners.forEach(fn => {
+      try { fn(currentUsers); } catch (e) { console.error('Error in user listener:', e); }
+    });
+  },
+
+  addUserToLocalPool(newUser: AppUser): void {
+    const normalizedEmail = (newUser.email || '').toLowerCase().trim();
+    const updated = internalUsersPool.filter(u => (u.email || '').toLowerCase().trim() !== normalizedEmail);
+    updated.push(newUser);
+    internalUsersPool = updated;
+    try {
+      localStorage.setItem(STORAGE_CACHED_USERS_KEY, JSON.stringify(internalUsersPool));
+    } catch (e) {
+      console.warn('Failed to cache user in local storage:', e);
+    }
+  },
+
   updateUser(userId: string, updates: Partial<AppUser>): void {
     try {
       let updated = false;
@@ -150,6 +180,7 @@ export const authManager = {
       });
       if (updated) {
         localStorage.setItem(STORAGE_CACHED_USERS_KEY, JSON.stringify(internalUsersPool));
+        this.notifyUsersChanged();
       }
     } catch (e) {
       console.warn('Failed to update user in internal pool:', e);
@@ -168,7 +199,9 @@ export const authManager = {
     const isPlaceholderTestUser = (u: AppUser): boolean => {
       const name = (u.name || '').trim().toLowerCase();
       const email = (u.email || '').trim().toLowerCase();
-      if (name === 'employee user' || name === 'purchasing user' || name === 'stock') return true;
+      // Never filter out real stock accounts or company emails
+      if (email === 'stock@tsjoinery.co.za') return false;
+      if (name === 'employee user' || name === 'purchasing user') return true;
       if (email === 'employee@tsjoinery.co.za' || email === 'purchasing@tsjoinery.co.za') return true;
       if (name === 'elrico user' || name === 'franz user' || name === 'frans user' || name === 'janah user' || name === 'marietjie user') return true;
       return false;
@@ -428,16 +461,127 @@ export const authManager = {
     return approvedUser;
   },
 
-  async createActiveUser(userData: Omit<AppUser, 'id' | 'status' | 'isApproved' | 'createdAt'>): Promise<AppUser | null> {
-    const newUser: AppUser = {
-      id: Date.now().toString(),
-      ...userData,
-      status: 'active',
-      isApproved: true,
-      createdAt: new Date().toISOString()
-    };
+  async createActiveUser(userData: Omit<AppUser, 'id' | 'status' | 'isApproved' | 'createdAt'>): Promise<AppUser> {
+    // 1. Form Validation
+    const name = (userData.name || '').trim();
+    const email = (userData.email || '').trim().toLowerCase();
+    const pin = (userData.pin || '').trim();
 
-    await auditLogger.log('USER_CREATED', newUser.email, `Created new active user ${newUser.name} with role ${newUser.role}`);
+    if (!name) {
+      throw new Error("Full Name is required.");
+    }
+    if (!email || !email.includes('@') || !email.includes('.')) {
+      throw new Error("A valid email address is required.");
+    }
+    if (!pin) {
+      throw new Error("A password or PIN code is required.");
+    }
+    if (pin.length < 6) {
+      throw new Error("Password must be at least 6 characters.");
+    }
+
+    const normalizedEmail = email;
+
+    // 2. Duplicate Check in Firestore & Local Pool
+    if (db && APP_ID_PATH) {
+      try {
+        const snap = await db.collection('artifacts')
+          .doc(APP_ID_PATH)
+          .collection('private')
+          .doc('users')
+          .collection('active')
+          .where('email', '==', normalizedEmail)
+          .get();
+
+        if (!snap.empty) {
+          throw new Error("User already exists.");
+        }
+      } catch (checkErr: any) {
+        if (checkErr.message === "User already exists.") {
+          throw checkErr;
+        }
+        console.warn("Firestore duplicate check notice:", checkErr);
+      }
+    }
+
+    // Check in local pool & default accounts
+    const existingInLocal = internalUsersPool.find(u => (u.email || '').toLowerCase().trim() === normalizedEmail && u.active !== false);
+    if (existingInLocal) {
+      throw new Error("User already exists.");
+    }
+
+    // 3. Firebase Authentication User Creation using a Secondary Firebase App
+    // Note: Creating via secondary Firebase app prevents the client browser from signing out
+    // or mutating the current administrator's active session.
+    let authUid = '';
+    const secondaryAppName = `user-creator-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+    let secondaryApp: any = null;
+
+    try {
+      secondaryApp = firebase.initializeApp(firebaseConfig, secondaryAppName);
+      const userCred = await secondaryApp.auth().createUserWithEmailAndPassword(normalizedEmail, pin);
+      authUid = userCred.user?.uid || '';
+    } catch (authErr: any) {
+      if (authErr.code === 'auth/email-already-in-use') {
+        // If Auth account exists but Firestore profile was missing, we allow profile repair
+        if (existingInLocal) {
+          throw new Error("User already exists.");
+        }
+        console.log("Firebase Auth account already exists. Proceeding with Firestore profile creation/repair...");
+      } else if (authErr.code === 'auth/weak-password') {
+        throw new Error("Password must be at least 6 characters.");
+      } else if (authErr.code === 'auth/invalid-email') {
+        throw new Error("Invalid email address format.");
+      } else {
+        throw new Error(`Authentication creation failed: ${authErr.message || 'Unknown error'}`);
+      }
+    } finally {
+      if (secondaryApp) {
+        try {
+          await secondaryApp.delete();
+        } catch (delErr) {
+          console.warn("Secondary app cleanup:", delErr);
+        }
+      }
+    }
+
+    // 4. Create Firestore User Profile
+    const userId = authUid || `usr-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const nameParts = name.split(' ');
+    const firstName = userData.firstName || nameParts[0] || 'User';
+    const lastName = userData.lastName || nameParts.slice(1).join(' ') || '';
+
+    const newUser: AppUser = {
+      id: userId,
+      name,
+      firstName,
+      lastName,
+      email: normalizedEmail,
+      pin,
+      role: userData.role || 'Employee',
+      roleId: userData.roleId || 'ROLE-EMPLOYEE',
+      department: userData.department || 'Workshop',
+      branchId: userData.branchId || 'BR-001',
+      branchName: userData.branchName || 'Bloemfontein Central',
+      physicalLocation: userData.physicalLocation || 'Bloemfontein',
+      active: true,
+      isApproved: true,
+      status: 'active',
+      createdAt: new Date().toISOString(),
+      permissions: userData.permissions || {},
+      deviceAccess: userData.deviceAccess || {
+        desktop: true,
+        phone: true,
+        tablet: false,
+        terminal: false
+      },
+      deviceViewAccess: userData.deviceViewAccess || {
+        desktop: {},
+        phone: {},
+        tablet: {},
+        terminal: {}
+      }
+    };
 
     if (db && APP_ID_PATH) {
       try {
@@ -448,11 +592,34 @@ export const authManager = {
           .collection('active')
           .doc(newUser.id)
           .set(newUser);
-      } catch (error) {
-        console.warn('Unable to create active user in Firestore:', error);
-        return null;
+      } catch (error: any) {
+        console.error('Unable to create active user in Firestore:', error);
+        throw new Error(`Firestore profile creation failed: ${error.message || 'Permission or network error'}`);
+      }
+
+      // 5. Verify User Profile Exists in Firestore
+      try {
+        const verifySnap = await db.collection('artifacts')
+          .doc(APP_ID_PATH)
+          .collection('private')
+          .doc('users')
+          .collection('active')
+          .doc(newUser.id)
+          .get();
+
+        if (!verifySnap.exists) {
+          throw new Error("Firestore profile creation failed: Profile verification check returned not found.");
+        }
+      } catch (verErr: any) {
+        throw new Error(verErr.message || "Firestore profile verification failed");
       }
     }
+
+    // 6. Refresh User List & Local Memory Pool
+    this.addUserToLocalPool(newUser);
+    this.notifyUsersChanged();
+
+    await auditLogger.log('USER_CREATED', newUser.email, `Created new active user ${newUser.name} with role ${newUser.role}`);
 
     return newUser;
   },

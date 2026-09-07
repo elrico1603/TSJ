@@ -132,6 +132,16 @@ export const CENTRAL_MODULE_REGISTRY: ModuleDefinition[] = [
     permissionModules: ['Leave Management']
   },
   {
+    id: 'mobile_deployment',
+    name: 'Mobile Deployment',
+    category: 'System',
+    description: 'PWA device installation, QR code pairing, and mobile workstation onboarding.',
+    supportsDevices: { phone: false, tablet: true, desktop: true, terminal: false },
+    appMode: 'mobile_deployment',
+    icon: 'smartphone',
+    permissionModules: ['System Configuration']
+  },
+  {
     id: 'gemini_ai',
     name: 'Gemini AI Hub',
     category: 'Intelligence',
@@ -996,6 +1006,15 @@ export const permissionService = {
       case 'company_settings':
         return this.canAccessDeviceView(user, 'company_settings', dev);
 
+      case 'mobile_deployment':
+        // Accessible to management, supervisors, HR, administrators on desktop/tablet, strictly excluded for clocking kiosk
+        if (this.isClockingTerminalUser(user)) return false;
+        return this.isAdmin(user) ||
+          this.canAccessDeviceView(user, 'system_admin', dev) ||
+          this.canAccessDeviceView(user, 'company_settings', dev) ||
+          this.canAccessDeviceView(user, 'mobile_deployment', dev) ||
+          ['administrator', 'admin', 'manager', 'hr', 'supervisor'].includes((user?.role || '').toLowerCase());
+
       case 'mobile':
         return this.canAccessDevice(user, 'phone');
 
@@ -1095,6 +1114,14 @@ export const permissionService = {
         icon: 'calendar',
         appMode: 'leave',
         view: 'dashboard',
+        category: 'Management Hub'
+      },
+      {
+        id: 'mobile_deployment',
+        label: 'Mobile Deployment',
+        icon: 'smartphone',
+        appMode: 'mobile_deployment',
+        view: 'mobile_deployment',
         category: 'Management Hub'
       },
       {
@@ -1337,6 +1364,12 @@ export const permissionService = {
       role === 'Clocking' ||
       email === 'clocking@tsjoinery.co.za'
     );
+  },
+
+  isAdmin(user: any): boolean {
+    if (!user) return false;
+    const role = (user.role || '').trim().toLowerCase();
+    return role === 'administrator' || role === 'admin';
   },
 
   getGreeting(firstName?: string, date: Date = new Date()): string {

@@ -57,6 +57,7 @@ import { MobileDashboardSummary } from './components/MobileDashboardSummary';
 import { permissionService } from './services/permissionService';
 import { DedicatedKioskClockingTerminal } from './components/DedicatedKioskClockingTerminal';
 import { GeminiChatHub } from './components/chat/GeminiChatHub';
+import { MobileDeploymentView } from './components/MobileDeploymentView';
 
 const { SUPER_USER_PIN } = SECURITY;
 
@@ -285,6 +286,8 @@ export default function App() {
   const [userPermissions, setUserPermissions] = useState<Record<string, Record<string, boolean>>>({});
   const [pendingUsers, setPendingUsers] = useState<AppUser[]>([]);
   const [showAddUserModal, setShowAddUserModal] = useState(false);
+  const [isAddingUser, setIsAddingUser] = useState(false);
+  const [addUserResult, setAddUserResult] = useState<{ type: 'success' | 'error'; title: string; message: string } | null>(null);
   const [newUserForm, setNewUserForm] = useState({ name: '', email: '', pin: '', role: 'Supervisor' });
 
   // Permissions & Roles
@@ -809,6 +812,14 @@ export default function App() {
           } catch (e) {
             console.warn('[FIRESTORE SYNC] Could not subscribe to active users:', e);
           }
+
+          // Local in-memory subscriber for instant UI updates on user creation
+          const unsubAuth = authManager.subscribeUsers((usersList) => {
+            if (isMounted) {
+              setActiveUsers(usersList);
+            }
+          });
+          unsubs.push(unsubAuth);
 
           // 5. Pending users listening
           try {
@@ -2582,6 +2593,22 @@ TS Joinery Kanban System`
                           </div>
                         </button>
                       )}
+
+                      {permissionService.canAccessMode(currentUser, 'mobile_deployment', layoutMode) && (
+                        <button 
+                          disabled={isLocked}
+                          onClick={() => { setAppMode('mobile_deployment'); setView('dashboard'); }} 
+                          className={`w-full flex items-center space-x-3.5 p-3 lg:p-4 rounded-2xl transition-all ${isLocked ? 'opacity-40 cursor-not-allowed' : ''} ${appMode === 'mobile_deployment' ? 'bg-cyan-600/10 border border-cyan-500/30 text-cyan-400' : 'hover:bg-white/5 text-gray-400 hover:text-white'}`}
+                        >
+                          <Icon name="smartphone" size={18} />
+                          <div className="flex items-center justify-between w-full">
+                            <span className="font-black uppercase text-xs tracking-wider">Mobile Deployment</span>
+                            <span className="px-2 py-0.5 bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 text-[9px] font-mono font-black rounded uppercase">
+                              PWA
+                            </span>
+                          </div>
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}
@@ -2820,20 +2847,12 @@ TS Joinery Kanban System`
                   />
                 )}
 
-                {appMode === 'mobile' && (
-                  <div className="animate-in fade-in duration-500 max-w-2xl mx-auto text-center py-12">
-                    <div className="bg-[#151515]/90 border border-white/5 p-10 rounded-[3rem] shadow-2xl backdrop-blur-3xl">
-                      <div className="w-20 h-20 bg-pink-500/10 text-pink-500 rounded-3xl flex items-center justify-center mx-auto mb-6">
-                        <Icon name="smartphone" size={40} />
-                      </div>
-                      <h2 className="text-3xl font-black uppercase tracking-tight text-white mb-2 font-sans-serif">Mobile companion</h2>
-                      <p className="text-xs text-gray-500 uppercase tracking-widest mb-10">Scan the QR code to use the mobile portal.</p>
-                      <div className="bg-white p-6 rounded-[2.5rem] inline-block mx-auto border-4 border-white/5 w-64 h-64 overflow-hidden flex items-center justify-center">
-                        <QRCodeRenderer text={APP_MOBILE_LINK} width={200} height={200} responsive={false} className="mx-auto flex items-center justify-center" />
-                      </div>
-                      <p className="text-xs text-gray-600 mt-6 font-mono break-all">{APP_MOBILE_LINK}</p>
-                    </div>
-                  </div>
+                {(appMode === 'mobile_deployment' || appMode === 'mobile') && (
+                  <MobileDeploymentView
+                    currentUser={currentUser}
+                    announce={announce}
+                    productionUrl={APP_MOBILE_LINK}
+                  />
                 )}
 
                 {appMode === 'qr_scan_service' && (
@@ -3469,43 +3488,123 @@ TS Joinery Kanban System`
       {/* POPUP: SECURE USER ADD TO DATABASE */}
       {showAddUserModal && (
         <div className="fixed inset-0 z-[1500] bg-black/95 backdrop-blur-3xl flex items-center justify-center p-6 animate-in fade-in font-sans">
-          <div className="bg-[#1a1a1a] rounded-[3rem] border border-white/10 w-full max-w-lg shadow-2xl p-8">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-2xl font-black uppercase text-white">Create New User</h2>
-              <button onClick={() => setShowAddUserModal(false)} className="p-2 text-gray-400 hover:text-white transition-all">
+          <div className="bg-[#1a1a1a] rounded-[3rem] border border-white/10 w-full max-w-lg shadow-2xl p-8 space-y-6">
+            <div className="flex justify-between items-center pb-2 border-b border-white/10">
+              <div>
+                <h2 className="text-2xl font-black uppercase text-white tracking-tight">Create New User</h2>
+                <p className="text-xs text-gray-400">Add active system credentials to TS Hub</p>
+              </div>
+              <button onClick={() => { setShowAddUserModal(false); setAddUserResult(null); }} className="p-2 text-gray-400 hover:text-white transition-all">
                 <Icon name="x" size={24} />
               </button>
             </div>
+
+            {addUserResult && (
+              <div className={`p-4 rounded-2xl border flex items-start gap-3 ${
+                addUserResult.type === 'success'
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                  : 'bg-red-500/10 border-red-500/30 text-red-300'
+              }`}>
+                <span className={`p-1.5 rounded-xl shrink-0 ${
+                  addUserResult.type === 'success' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
+                }`}>
+                  <Icon name={addUserResult.type === 'success' ? 'check-circle' : 'alert-triangle'} size={18} />
+                </span>
+                <div className="space-y-0.5 text-xs">
+                  <p className="font-black uppercase tracking-wider font-mono">
+                    {addUserResult.title}
+                  </p>
+                  <p className="leading-relaxed opacity-90">
+                    {addUserResult.message}
+                  </p>
+                </div>
+              </div>
+            )}
+
             <form onSubmit={async (e) => {
               e.preventDefault();
-              const createdUser = await authManager.createActiveUser(newUserForm);
-              if (createdUser) {
-                setShowAddUserModal(false);
-                announce('New user created successfully.');
-              } else {
-                announce('Failed to create user.');
+              setAddUserResult(null);
+
+              const name = newUserForm.name.trim();
+              const email = newUserForm.email.trim().toLowerCase();
+              const pin = newUserForm.pin.trim();
+
+              if (!name || !email || !pin) {
+                const msg = 'Please provide Full Name, Email, and Password.';
+                setAddUserResult({ type: 'error', title: 'USER CREATION FAILED', message: msg });
+                announce(msg);
+                return;
+              }
+
+              if (pin.length < 6) {
+                const msg = 'Password must be at least 6 characters.';
+                setAddUserResult({ type: 'error', title: 'USER CREATION FAILED', message: msg });
+                announce(msg);
+                return;
+              }
+
+              setIsAddingUser(true);
+              try {
+                const createdUser = await authManager.createActiveUser({
+                  name,
+                  email,
+                  pin,
+                  role: newUserForm.role || 'Supervisor',
+                  active: true
+                });
+
+                const successMsg = `${createdUser.name || createdUser.email} (${createdUser.email}) has been added to TS Hub.`;
+                setAddUserResult({
+                  type: 'success',
+                  title: 'USER CREATED SUCCESSFULLY',
+                  message: successMsg
+                });
+                announce(successMsg);
+                setNewUserForm({ name: '', email: '', pin: '', role: 'Supervisor' });
+
+                setTimeout(() => {
+                  setShowAddUserModal(false);
+                  setAddUserResult(null);
+                }, 2500);
+              } catch (err: any) {
+                console.error('Failed to create user:', err);
+                const errorMsg = err.message || 'Failed to create user in database.';
+                setAddUserResult({
+                  type: 'error',
+                  title: 'USER CREATION FAILED',
+                  message: errorMsg
+                });
+                announce(`USER CREATION FAILED: ${errorMsg}`);
+              } finally {
+                setIsAddingUser(false);
               }
             }} className="space-y-4 font-sans">
               <div>
-                <label className="text-[10px] font-bold uppercase text-gray-500 tracking-widest">Full Name</label>
-                <input required value={newUserForm.name} onChange={e => setNewUserForm({...newUserForm, name: e.target.value})} className="w-full bg-black/40 border border-white/10 rounded-xl p-3 mt-1 text-white" />
+                <label className="text-[10px] font-bold uppercase text-gray-400 tracking-widest">Full Name *</label>
+                <input required value={newUserForm.name} onChange={e => setNewUserForm({...newUserForm, name: e.target.value})} className="w-full bg-black/40 border border-white/10 rounded-xl p-3 mt-1 text-white text-sm" placeholder="e.g. Johannes Botha" />
               </div>
               <div>
-                <label className="text-[10px] font-bold uppercase text-gray-500 tracking-widest">Email</label>
-                <input required type="email" value={newUserForm.email} onChange={e => setNewUserForm({...newUserForm, email: e.target.value})} className="w-full bg-black/40 border border-white/10 rounded-xl p-3 mt-1 text-white" />
+                <label className="text-[10px] font-bold uppercase text-gray-400 tracking-widest">Email *</label>
+                <input required type="email" value={newUserForm.email} onChange={e => setNewUserForm({...newUserForm, email: e.target.value})} className="w-full bg-black/40 border border-white/10 rounded-xl p-3 mt-1 text-white text-sm" placeholder="e.g. j.botha@tsjoinery.co.za" />
               </div>
               <div>
-                <label className="text-[10px] font-bold uppercase text-gray-500 tracking-widest">PIN / Password</label>
-                <input required value={newUserForm.pin} onChange={e => setNewUserForm({...newUserForm, pin: e.target.value})} className="w-full bg-black/40 border border-white/10 rounded-xl p-3 mt-1 text-white text-center text-lg tracking-widest" />
+                <div className="flex justify-between items-center">
+                  <label className="text-[10px] font-bold uppercase text-gray-400 tracking-widest">PIN / Password *</label>
+                  <span className="text-[10px] text-amber-400 font-mono">Min 6 characters</span>
+                </div>
+                <input required minLength={6} type="password" value={newUserForm.pin} onChange={e => setNewUserForm({...newUserForm, pin: e.target.value})} className="w-full bg-black/40 border border-white/10 rounded-xl p-3 mt-1 text-white text-sm tracking-wider font-mono" placeholder="Minimum 6 characters" />
               </div>
               <div>
-                <label className="text-[10px] font-bold uppercase text-gray-500 tracking-widest font-sans">Access Role</label>
-                <select value={newUserForm.role} onChange={e => setNewUserForm({...newUserForm, role: e.target.value})} className="w-full bg-black/40 border border-white/10 rounded-xl p-3 mt-1 text-white cursor-pointer select-none">
+                <label className="text-[10px] font-bold uppercase text-gray-400 tracking-widest font-sans">Access Role *</label>
+                <select value={newUserForm.role} onChange={e => setNewUserForm({...newUserForm, role: e.target.value})} className="w-full bg-black/40 border border-white/10 rounded-xl p-3 mt-1 text-white cursor-pointer select-none text-sm">
                   {USER_ROLES.map(role => <option key={role} value={role}>{role}</option>)}
                 </select>
               </div>
-              <div className="pt-4">
-                <button type="submit" className="w-full py-4 bg-blue-600 hover:bg-blue-500 rounded-xl font-black uppercase text-sm tracking-widest text-white font-sans">Create User</button>
+              <div className="pt-4 flex gap-3">
+                <button type="button" onClick={() => { setShowAddUserModal(false); setAddUserResult(null); }} className="w-1/3 py-3.5 bg-white/10 hover:bg-white/15 rounded-xl font-bold uppercase text-xs tracking-wider text-gray-300 transition-colors">Cancel</button>
+                <button type="submit" disabled={isAddingUser} className="w-2/3 py-3.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-xl font-black uppercase text-xs tracking-widest text-white shadow-lg transition-colors flex items-center justify-center gap-2">
+                  {isAddingUser ? 'Creating User...' : 'Create User'}
+                </button>
               </div>
             </form>
           </div>

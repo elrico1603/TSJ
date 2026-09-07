@@ -37,4 +37,5 @@ if (typeof window !== 'undefined') {
 }
 
 export const APP_ID_PATH = 'timbersmith-terminal-v1';
-export const APP_MOBILE_LINK = 'https://elrico1603.github.io/TSJApp/';
+export const PRODUCTION_TS_HUB_URL = 'https://timbersmith-terminal.netlify.app/';
+export const APP_MOBILE_LINK = (env.VITE_PRODUCTION_APP_URL as string) || PRODUCTION_TS_HUB_URL;
