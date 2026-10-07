@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { PurchaseOrder, PurchaseOrderItem, Supplier, ProductMaster, StockRequest, StockRequestItem } from '../types';
+import { PurchaseOrder, PurchaseOrderItem, Supplier, ProductMaster, StockRequest, StockRequestItem, Branch } from '../types';
 import { productMasterService } from '../services/productMasterService';
 import { stockRequestService } from '../services/stockRequestService';
 import { purchaseOrderService } from '../services/purchaseOrderService';
+import { companyService } from '../services/companyService';
 import { Icon } from './Icon';
 
 interface CreatePOModalProps {
@@ -23,12 +24,14 @@ export const CreatePOModal: React.FC<CreatePOModalProps> = ({
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [products, setProducts] = useState<ProductMaster[]>([]);
   const [stockRequests, setStockRequests] = useState<StockRequest[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
 
   // Form Fields
   const [selectedSupplierId, setSelectedSupplierId] = useState('');
+  const [selectedBranchId, setSelectedBranchId] = useState('');
   const [linkedRequestId, setLinkedRequestId] = useState('');
-  const [deliveryAddress, setDeliveryAddress] = useState('TS Joinery Factory, 14 Factory Rd, Montague Gardens, Cape Town');
-  const [deliveryInstructions, setDeliveryInstructions] = useState('Deliver to Receiving Bay Gate B. Attn: Receiving Bay.');
+  const [deliveryAddress, setDeliveryAddress] = useState('');
+  const [deliveryInstructions, setDeliveryInstructions] = useState('');
   const [expectedDeliveryDate, setExpectedDeliveryDate] = useState(
     new Date(Date.now() + 3 * 24 * 3600 * 1000).toISOString().split('T')[0]
   );
@@ -51,18 +54,32 @@ export const CreatePOModal: React.FC<CreatePOModalProps> = ({
     setSuppliers(productMasterService.getSuppliers().filter(s => s.status === 'Active'));
     setProducts(productMasterService.getProducts().filter(p => p.status === 'Active'));
     setStockRequests(stockRequestService.getStockRequests());
-  }, []);
+
+    // Resolve branch master and initialize to user's assigned branch
+    const bList = companyService.getLocalBranches();
+    setBranches(bList);
+
+    const userBranchId = currentUser?.branchId;
+    const initialBranch = bList.find(b => b.id === userBranchId || b.branchCode === userBranchId) || bList[0];
+    if (initialBranch) {
+      setSelectedBranchId(initialBranch.id);
+      setDeliveryAddress(initialBranch.physicalAddress || '');
+    }
+  }, [currentUser]);
 
   // Handle preselected stock request populate
   useEffect(() => {
     if (preselectedStockRequest) {
-      setLinkedRequestId(preselectedStockRequest.id);
+      setLinkedRequestId(preselectedStockRequest.id || '');
       
       // Auto match supplier
       const sups = productMasterService.getSuppliers();
       const prods = productMasterService.getProducts();
 
-      let matchedSup = sups.find(s => s.supplierName.toLowerCase() === preselectedStockRequest.supplierName?.toLowerCase());
+      let matchedSup = sups.find(s => 
+        (preselectedStockRequest.supplierId && s.id === preselectedStockRequest.supplierId) ||
+        (preselectedStockRequest.supplierName && s.supplierName.toLowerCase() === preselectedStockRequest.supplierName.toLowerCase())
+      );
       let matchedProd = prods.find(p => p.id === preselectedStockRequest.productId || p.internalProductCode === preselectedStockRequest.productId);
 
       if (!matchedSup && matchedProd) {
@@ -73,11 +90,15 @@ export const CreatePOModal: React.FC<CreatePOModalProps> = ({
         setSelectedSupplierId(matchedSup.id);
       }
 
+      const prodDesc = preselectedStockRequest.productDescription || preselectedStockRequest.productName || 'Product';
       const newItem: PurchaseOrderItem = {
         id: `poi-${Date.now()}`,
         productId: matchedProd?.id || preselectedStockRequest.productId || `PRD-${preselectedStockRequest.kanbanId || '000'}`,
-        productName: preselectedStockRequest.productDescription || preselectedStockRequest.productName || 'Product',
+        productName: prodDesc,
+        productDescription: prodDesc,
         internalProductCode: matchedProd?.internalProductCode || preselectedStockRequest.kanbanId || 'PRD-000',
+        kanbanId: preselectedStockRequest.kanbanId,
+        supplierId: matchedSup?.id || matchedProd?.supplierId || preselectedStockRequest.supplierId || '',
         supplierPartNumber: matchedProd?.supplierPartNumber || preselectedStockRequest.supplierPartNumber || '',
         unit: matchedProd?.unit || 'ea',
         orderQuantity: Number(preselectedStockRequest.orderQuantity || preselectedStockRequest.quantity) || 1,
@@ -85,7 +106,8 @@ export const CreatePOModal: React.FC<CreatePOModalProps> = ({
         unitPrice: 0,
         totalPrice: 0,
         location: preselectedStockRequest.location || matchedProd?.location || 'A-01-A-01',
-        category: matchedProd?.category || 'General'
+        category: matchedProd?.category || 'General',
+        stockRequestItemId: preselectedStockRequest.id
       };
 
       setItems([newItem]);
@@ -123,8 +145,11 @@ export const CreatePOModal: React.FC<CreatePOModalProps> = ({
       id: `poi-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
       productId: matchedProd?.id || `PRD-${Date.now()}`,
       productName: customItemName.trim(),
+      productDescription: (matchedProd as any)?.description || matchedProd?.productName || customItemName.trim(),
       internalProductCode: matchedProd?.internalProductCode || 'PRD-CUSTOM',
       supplierPartNumber: supplierPartNumber || matchedProd?.supplierPartNumber || 'N/A',
+      kanbanId: undefined,
+      supplierId: selectedSupplierId || matchedProd?.supplierId || '',
       unit: unit || 'ea',
       orderQuantity: Math.max(1, orderQuantity),
       receivedQuantity: 0,
@@ -157,12 +182,17 @@ export const CreatePOModal: React.FC<CreatePOModalProps> = ({
 
     const selectedSup = suppliers.find(s => s.id === selectedSupplierId);
     const selectedReq = stockRequests.find(r => r.id === linkedRequestId);
+    const selectedBranch = branches.find(b => b.id === selectedBranchId);
 
     setIsSubmitting(true);
+    const companyInfo = companyService.getLocalCompanyInfo();
     try {
-      const username = currentUser?.name || currentUser?.email || 'Janah (Procurement Manager)';
-
       const newPO = await purchaseOrderService.createPurchaseOrder({
+        companyId: companyInfo.registrationNumber,
+        branchId: selectedBranch?.id || selectedBranchId || currentUser?.branchId || '',
+        branchName: selectedBranch?.branchName || '',
+        createdByUserId: currentUser?.id,
+        createdUser: currentUser?.name || currentUser?.email || 'Authorized User',
         supplierId: selectedSup?.id || '',
         supplierName: selectedSup?.supplierName || 'General Supplier',
         supplierCode: selectedSup?.supplierCode || '',
@@ -172,12 +202,12 @@ export const CreatePOModal: React.FC<CreatePOModalProps> = ({
         supplierAddress: selectedSup?.physicalAddress || '',
         linkedRequestId: selectedReq?.id || '',
         linkedRequestNumber: selectedReq?.requestNumber || selectedReq?.id || '',
-        deliveryAddress,
+        deliveryAddress: deliveryAddress || selectedBranch?.physicalAddress || companyInfo.physicalAddress || '',
         deliveryInstructions,
         expectedDeliveryDate,
         items,
         status: initialStatus
-      }, username);
+      }, currentUser);
 
       if (announce) announce(`Created Purchase Order ${newPO.poNumber}`);
       onCreated(newPO);
@@ -286,22 +316,47 @@ export const CreatePOModal: React.FC<CreatePOModalProps> = ({
                 onChange={e => setInitialStatus(e.target.value as any)}
                 className="w-full bg-[#111111] border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-[#ff8c00] font-bold"
               >
-                <option value="Pending Approval">Pending Approval (Janah Review)</option>
-                <option value="Approved">Approved Immediately</option>
+                <option value="Pending Approval">Pending Approval</option>
+                <option value="Approved">Approved</option>
                 <option value="Draft">Save as Draft</option>
               </select>
             </div>
           </div>
 
-          {/* Delivery Details */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-black/40 p-4 rounded-xl border border-white/5">
+          {/* Delivery Details & Destination Branch */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-black/40 p-4 rounded-xl border border-white/5">
             <div>
               <label className="block text-[10px] font-black uppercase text-gray-400 mb-1">
-                Delivery Address
+                Delivery Branch Destination
+              </label>
+              <select
+                value={selectedBranchId}
+                onChange={e => {
+                  const bId = e.target.value;
+                  setSelectedBranchId(bId);
+                  const matched = branches.find(b => b.id === bId || b.branchCode === bId);
+                  if (matched?.physicalAddress) {
+                    setDeliveryAddress(matched.physicalAddress);
+                  }
+                }}
+                className="w-full bg-[#111111] border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-[#ff8c00] font-bold"
+              >
+                {branches.map(b => (
+                  <option key={b.id} value={b.id}>
+                    {b.branchName} ({b.branchCode})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-black uppercase text-gray-400 mb-1">
+                Delivery Physical Address
               </label>
               <input
                 type="text"
                 value={deliveryAddress}
+                placeholder="Branch delivery address..."
                 onChange={e => setDeliveryAddress(e.target.value)}
                 className="w-full bg-[#111111] border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-[#ff8c00]"
               />
@@ -309,11 +364,12 @@ export const CreatePOModal: React.FC<CreatePOModalProps> = ({
 
             <div>
               <label className="block text-[10px] font-black uppercase text-gray-400 mb-1">
-                Delivery Instructions
+                Delivery Instructions (Optional)
               </label>
               <input
                 type="text"
                 value={deliveryInstructions}
+                placeholder="e.g. Deliver to Receiving Bay Gate B..."
                 onChange={e => setDeliveryInstructions(e.target.value)}
                 className="w-full bg-[#111111] border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-[#ff8c00]"
               />

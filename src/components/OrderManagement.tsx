@@ -5,6 +5,7 @@ import { Icon } from './Icon';
 import { notificationService } from '../services/notificationService';
 import { stockRequestService, isValidStatusTransition } from '../services/stockRequestService';
 import { purchaseOrderService } from '../services/purchaseOrderService';
+import { permissionService } from '../services/permissionService';
 import { ReceiveGoodsModal } from './ReceiveGoodsModal';
 import { InventoryManagement } from './InventoryManagement';
 
@@ -45,10 +46,18 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({
   const [showOrderModal, setShowOrderModal] = useState(false);
   const [orderForm, setOrderForm] = useState({ title: '', notes: '', photo: '' });
 
-  // Permissions & Roles
-  const userRole = currentUser?.role || '';
-  const isStockManager = userRole === 'Stock Manager';
-  const isPurchasingOrAdmin = !isStockManager && (canManageOrders || ['Admin', 'Purchasing', 'Janah', 'Supervisor', 'HR'].includes(userRole) || currentUser?.email?.includes('janah'));
+  // Permissions & Roles (Pure User-Centric: Role has ZERO authorization power)
+  const isPurchasingOrAdmin = currentUser ? (
+    canManageOrders ||
+    permissionService.hasPermission(currentUser, 'Purchase Orders', 'Edit') ||
+    permissionService.hasPermission(currentUser, 'Purchase Orders', 'Approve') ||
+    permissionService.hasPermission(currentUser, 'Stock Requests', 'Approve')
+  ) : false;
+
+  const isStockManager = currentUser ? (
+    permissionService.hasPermission(currentUser, 'Inventory', 'Edit') ||
+    permissionService.hasPermission(currentUser, 'Stock Requests', 'Create')
+  ) : false;
 
   // Real-time Subscription to Stock Requests
   useEffect(() => {
@@ -210,7 +219,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({
       const userContext = {
         userId: currentUser?.id || currentUser?.uid || 'p_user',
         userName: currentUser?.name || currentUser?.email || 'Janah (Purchasing)',
-        role: userRole || 'Purchasing'
+        role: currentUser?.role || 'Purchasing'
       };
 
       await stockRequestService.updateRequestStatus(req.id, nextStatus, userContext, notesText);
@@ -843,8 +852,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({
                           {(req.status === 'Pending' || req.status === 'Ordered') && (
                             <button
                               onClick={async () => {
-                                const username = currentUser?.name || currentUser?.email || 'Janah (Procurement Manager)';
-                                const createdPOs = await purchaseOrderService.createPOGroupFromStockRequest(req, username);
+                                const createdPOs = await purchaseOrderService.createPOGroupFromStockRequest(req, currentUser);
                                 if (req.status === 'Pending') {
                                   await handlePerformTransition(req, 'Ordered');
                                 }

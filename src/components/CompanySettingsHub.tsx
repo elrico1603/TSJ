@@ -4,6 +4,7 @@ import { AppUser } from '../auth';
 import { Icon } from './Icon';
 import { companyService } from '../services/companyService';
 import { googleDriveService, GoogleWorkspaceSettings } from '../services/googleDriveService';
+import { permissionService } from '../services/permissionService';
 
 interface CompanySettingsHubProps {
   currentUser?: any;
@@ -20,9 +21,14 @@ export const CompanySettingsHub: React.FC<CompanySettingsHubProps> = ({
   onVersionUpdated,
   initialTab = 'info'
 }) => {
-  const isAdmin = currentUser?.role === 'Admin' || currentUser?.role === 'Administrator';
-  const isManager = ['Supervisor', 'HR', 'Stock Manager'].includes(currentUser?.role || '');
-  const isReadOnly = !isAdmin;
+  const canEditCompanyInfo = permissionService.hasPermission(currentUser, 'Company Information', 'Edit');
+  const canEditSystemSettings = permissionService.hasPermission(currentUser, 'System Settings', 'Edit');
+  const canViewCompanySettings = permissionService.hasPermission(currentUser, 'Company Information', 'View') ||
+    permissionService.hasPermission(currentUser, 'System Settings', 'View') ||
+    permissionService.canAccessDeviceView(currentUser, 'company_settings') ||
+    permissionService.canAccessDeviceView(currentUser, 'system_admin');
+
+  const isReadOnly = !(canEditCompanyInfo || canEditSystemSettings);
 
   const [activeTab, setActiveTab] = useState<'info' | 'branches' | 'versions' | 'workspace'>(initialTab);
 

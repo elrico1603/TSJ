@@ -8,6 +8,7 @@ import {
   StockRequestItem
 } from '../types';
 import { productMasterService } from './productMasterService';
+import { companyService, DEFAULT_COMPANY_INFO } from './companyService';
 
 const STORAGE_PO_KEY = 'tsj_purchase_orders_v1';
 
@@ -16,8 +17,10 @@ const INITIAL_PURCHASE_ORDERS: PurchaseOrder[] = [
   {
     id: 'PO-2026-000001',
     poNumber: 'PO-2026-000001',
-    companyId: 'TS-JOINERY-CPT',
-    branchId: 'MAIN-BRANCH',
+    masterPoNumber: 'MPO-2026-000001',
+    companyId: DEFAULT_COMPANY_INFO.registrationNumber,
+    branchId: 'BR-001',
+    branchName: 'Bloemfontein Central',
     linkedRequestId: 'SR-001',
     linkedRequestNumber: 'SR-001',
     supplierId: 'SUP-001',
@@ -27,8 +30,8 @@ const INITIAL_PURCHASE_ORDERS: PurchaseOrder[] = [
     supplierTelephone: '+27 21 555 0192',
     supplierEmail: 'orders@sondorwood.co.za',
     supplierAddress: '12 Timber Way, Paarden Eiland, Cape Town',
-    deliveryAddress: 'TS Joinery Factory, 14 Factory Rd, Montague Gardens, Cape Town',
-    deliveryInstructions: 'Deliver to Warehouse Gate B. Attn: Receiving Bay.',
+    deliveryAddress: '14 Joiners Street, Industrial Area, Bloemfontein, 9301',
+    deliveryInstructions: 'Deliver to Receiving Bay Gate B. Attn: Workshop Receiving.',
     expectedDeliveryDate: new Date(Date.now() + 3 * 24 * 3600 * 1000).toISOString().split('T')[0],
     items: [
       {
@@ -64,24 +67,27 @@ const INITIAL_PURCHASE_ORDERS: PurchaseOrder[] = [
     totalQuantity: 35,
     estimatedTotalValue: 13200,
     status: 'Approved',
-    approvedBy: 'Janah (Procurement Manager)',
+    approvedBy: 'Elrico Greyvenstein',
+    approvedByUserId: 'usr-admin-elrico',
     approvedAt: new Date(Date.now() - 24 * 3600 * 1000).toISOString(),
-    createdUser: 'Janah',
+    createdUser: 'Janah Posthumus',
+    createdByUserId: 'usr-manager-janah',
+    userId: 'usr-manager-janah',
     createdAt: new Date(Date.now() - 48 * 3600 * 1000).toISOString(),
-    updatedUser: 'Janah',
+    updatedUser: 'Elrico Greyvenstein',
     updatedAt: new Date(Date.now() - 24 * 3600 * 1000).toISOString(),
     auditTrail: [
       {
         id: 'aud-1',
         action: 'Created',
-        user: 'Janah',
+        user: 'Janah Posthumus',
         timestamp: new Date(Date.now() - 48 * 3600 * 1000).toISOString(),
         notes: 'Generated from Stock Request SR-001'
       },
       {
         id: 'aud-2',
         action: 'Approved',
-        user: 'Janah (Procurement Manager)',
+        user: 'Elrico Greyvenstein',
         timestamp: new Date(Date.now() - 24 * 3600 * 1000).toISOString(),
         notes: 'PO Approved and issued to Sondor Wood & Boards'
       }
@@ -90,8 +96,10 @@ const INITIAL_PURCHASE_ORDERS: PurchaseOrder[] = [
   {
     id: 'PO-2026-000002',
     poNumber: 'PO-2026-000002',
-    companyId: 'TS-JOINERY-CPT',
-    branchId: 'MAIN-BRANCH',
+    masterPoNumber: 'MPO-2026-000002',
+    companyId: DEFAULT_COMPANY_INFO.registrationNumber,
+    branchId: 'BR-001',
+    branchName: 'Bloemfontein Central',
     linkedRequestId: 'SR-002',
     linkedRequestNumber: 'SR-002',
     supplierId: 'SUP-002',
@@ -101,7 +109,7 @@ const INITIAL_PURCHASE_ORDERS: PurchaseOrder[] = [
     supplierTelephone: '+27 21 555 8821',
     supplierEmail: 'sales@fastenerssa.co.za',
     supplierAddress: '45 Industrial Crescent, Epping, Cape Town',
-    deliveryAddress: 'TS Joinery Factory, 14 Factory Rd, Montague Gardens, Cape Town',
+    deliveryAddress: '14 Joiners Street, Industrial Area, Bloemfontein, 9301',
     deliveryInstructions: 'Small box delivery - leave at reception or bin A-01.',
     expectedDeliveryDate: new Date(Date.now() + 2 * 24 * 3600 * 1000).toISOString().split('T')[0],
     items: [
@@ -124,17 +132,84 @@ const INITIAL_PURCHASE_ORDERS: PurchaseOrder[] = [
     totalQuantity: 5,
     estimatedTotalValue: 1600,
     status: 'Pending Approval',
-    createdUser: 'Warehouse Operator',
+    createdUser: 'Juan de Lange',
+    createdByUserId: 'usr-depot-juan',
+    userId: 'usr-depot-juan',
     createdAt: new Date().toISOString(),
-    updatedUser: 'Warehouse Operator',
+    updatedUser: 'Juan de Lange',
     updatedAt: new Date().toISOString(),
     auditTrail: [
       {
         id: 'aud-3',
         action: 'Created',
-        user: 'Warehouse Operator',
+        user: 'Juan de Lange',
         timestamp: new Date().toISOString(),
-        notes: 'Submitted for Janah approval'
+        notes: 'Submitted for procurement approval'
+      }
+    ]
+  },
+  {
+    id: 'PO-2026-000005',
+    poNumber: 'PO-2026-000005',
+    masterPoNumber: 'MPO-2026-000005',
+    companyId: DEFAULT_COMPANY_INFO.registrationNumber,
+    branchId: 'BR-001',
+    branchName: 'Bloemfontein Central',
+    linkedRequestId: 'SR-005',
+    linkedRequestNumber: 'SR-005',
+    supplierId: 'SUP-001',
+    supplierName: 'Sondor Wood & Boards',
+    supplierCode: 'SONDOR',
+    supplierContactPerson: 'David Miller',
+    supplierTelephone: '+27 21 555 0192',
+    supplierEmail: 'orders@sondorwood.co.za',
+    supplierAddress: '12 Timber Way, Paarden Eiland, Cape Town',
+    deliveryAddress: '14 Joiners Street, Industrial Area, Bloemfontein, 9301',
+    deliveryInstructions: 'Deliver to Receiving Bay Gate B. Attn: Workshop Receiving.',
+    expectedDeliveryDate: '2026-02-18',
+    items: [
+      {
+        id: 'poi-5',
+        productId: 'PRD-0001',
+        productName: 'Oak Board 20mm (1220x2440)',
+        internalProductCode: 'PRD-0001',
+        supplierPartNumber: 'OAK-20-A',
+        unit: 'ea',
+        orderQuantity: 10,
+        receivedQuantity: 10,
+        unitPrice: 450,
+        totalPrice: 4500,
+        location: 'A-04-B-12',
+        category: 'Board'
+      }
+    ],
+    totalProducts: 1,
+    totalQuantity: 10,
+    estimatedTotalValue: 4500,
+    status: 'Approved',
+    approvedBy: 'Elrico Greyvenstein',
+    approvedByUserId: 'usr-admin-elrico',
+    approvedAt: '2026-02-15T10:00:00.000Z',
+    createdUser: 'Janah Posthumus',
+    createdByUserId: 'usr-manager-janah',
+    userId: 'usr-manager-janah',
+    createdAt: '2026-02-15T09:30:00.000Z',
+    updatedUser: 'Elrico Greyvenstein',
+    updatedAt: '2026-02-15T10:00:00.000Z',
+    auditTrail: [
+      {
+        id: 'aud-5a',
+        action: 'Created',
+        user: 'Janah Posthumus',
+        timestamp: '2026-02-15T09:30:00.000Z',
+        notes: 'Stock replenishment order for Oak Boards'
+      },
+      {
+        id: 'aud-5b',
+        action: 'Approved',
+        user: 'Elrico Greyvenstein',
+        timestamp: '2026-02-15T10:00:00.000Z',
+        notes: 'Approved for manufacturing job #4401'
       }
     ]
   }
@@ -156,7 +231,18 @@ class PurchaseOrderService {
     try {
       const stored = localStorage.getItem(STORAGE_PO_KEY);
       if (stored) {
-        this.localPOs = JSON.parse(stored);
+        const parsed: PurchaseOrder[] = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const existingIds = new Set(parsed.map(p => p.id));
+          const missing = INITIAL_PURCHASE_ORDERS.filter(p => !existingIds.has(p.id));
+          this.localPOs = [...parsed, ...missing];
+          if (missing.length > 0) {
+            this.saveLocal();
+          }
+        } else {
+          this.localPOs = INITIAL_PURCHASE_ORDERS;
+          this.saveLocal();
+        }
       } else {
         this.localPOs = INITIAL_PURCHASE_ORDERS;
         this.saveLocal();
@@ -238,7 +324,14 @@ class PurchaseOrderService {
   }
 
   public getPOById(id: string): PurchaseOrder | undefined {
-    return this.localPOs.find(p => p.id === id || p.poNumber === id);
+    const target = id.trim().toUpperCase();
+    const targetUnpadded = target.replace(/-0+/, '-');
+    return this.localPOs.find(p => {
+      if (p.id.toUpperCase() === target || p.poNumber.toUpperCase() === target) return true;
+      const pUnpadded = p.poNumber.toUpperCase().replace(/-0+/, '-');
+      const pIdUnpadded = p.id.toUpperCase().replace(/-0+/, '-');
+      return pUnpadded === targetUnpadded || pIdUnpadded === targetUnpadded;
+    });
   }
 
   // Auto-generate PO Number: e.g. PO-2026-000003
@@ -262,10 +355,38 @@ class PurchaseOrderService {
   // Create Purchase Order manually or from Stock Request
   public async createPurchaseOrder(
     poData: Partial<PurchaseOrder>,
-    currentUser: string = 'Admin User'
+    currentUser?: any
   ): Promise<PurchaseOrder> {
     const poNumber = poData.poNumber || this.generateNextPONumber();
     const now = new Date().toISOString();
+
+    // Resolve creator identity from currentUser or poData
+    const createdByUserId = (typeof currentUser === 'object' && currentUser?.id)
+      ? currentUser.id
+      : (poData.createdByUserId || (typeof currentUser === 'string' && currentUser ? currentUser : 'system'));
+    const createdUserName = (typeof currentUser === 'object' && (currentUser?.name || currentUser?.email))
+      ? (currentUser.name || currentUser.email)
+      : (typeof currentUser === 'string' && currentUser ? currentUser : (poData.createdUser || 'System User'));
+
+    // Resolve branch and delivery address dynamically from Branch Master
+    const companyInfo = companyService.getLocalCompanyInfo();
+    const branches = companyService.getLocalBranches();
+
+    let resolvedBranchId = poData.branchId;
+    if (!resolvedBranchId && typeof currentUser === 'object' && currentUser?.branchId) {
+      resolvedBranchId = currentUser.branchId;
+    }
+    const matchedBranch = branches.find(b => b.id === resolvedBranchId || b.branchCode === resolvedBranchId);
+    const branchId = matchedBranch?.id || resolvedBranchId || (branches[0]?.id || 'BR-001');
+    const branchName = matchedBranch?.branchName || poData.branchName || (branches[0]?.branchName || 'Bloemfontein Central');
+
+    // Authoritative delivery address resolution:
+    // If explicitly provided (and not the legacy hardcoded Cape Town default), preserve it;
+    // Otherwise resolve directly from the branch record's physical address, falling back to company address
+    let deliveryAddress = poData.deliveryAddress;
+    if (!deliveryAddress || deliveryAddress.includes('14 Factory Rd, Montague Gardens, Cape Town')) {
+      deliveryAddress = matchedBranch?.physicalAddress || companyInfo.physicalAddress || DEFAULT_COMPANY_INFO.physicalAddress || '';
+    }
 
     const items = poData.items || [];
     const totalProducts = items.length;
@@ -275,8 +396,10 @@ class PurchaseOrderService {
     const newPO: PurchaseOrder = {
       id: poNumber,
       poNumber: poNumber,
-      companyId: poData.companyId || 'TS-JOINERY-CPT',
-      branchId: poData.branchId || 'MAIN-BRANCH',
+      masterPoNumber: poData.masterPoNumber || poNumber,
+      companyId: poData.companyId || companyInfo.registrationNumber || DEFAULT_COMPANY_INFO.registrationNumber,
+      branchId: branchId,
+      branchName: branchName,
       linkedRequestId: poData.linkedRequestId || '',
       linkedRequestNumber: poData.linkedRequestNumber || '',
       supplierId: poData.supplierId || '',
@@ -286,23 +409,25 @@ class PurchaseOrderService {
       supplierTelephone: poData.supplierTelephone || '',
       supplierEmail: poData.supplierEmail || '',
       supplierAddress: poData.supplierAddress || '',
-      deliveryAddress: poData.deliveryAddress || 'TS Joinery Factory, 14 Factory Rd, Montague Gardens, Cape Town',
-      deliveryInstructions: poData.deliveryInstructions || 'Deliver to Receiving Bay Gate B.',
+      deliveryAddress: deliveryAddress,
+      deliveryInstructions: poData.deliveryInstructions || '',
       expectedDeliveryDate: poData.expectedDeliveryDate || new Date(Date.now() + 3 * 24 * 3600 * 1000).toISOString().split('T')[0],
       items: items,
       totalProducts,
       totalQuantity,
       estimatedTotalValue,
       status: poData.status || 'Pending Approval',
-      createdUser: currentUser,
+      createdUser: createdUserName,
+      createdByUserId: createdByUserId,
+      userId: createdByUserId,
       createdAt: now,
-      updatedUser: currentUser,
+      updatedUser: createdUserName,
       updatedAt: now,
       auditTrail: [
         {
           id: `aud-${Date.now()}`,
           action: 'Created',
-          user: currentUser,
+          user: createdUserName,
           timestamp: now,
           notes: poData.linkedRequestNumber ? `Created from Stock Request ${poData.linkedRequestNumber}` : 'Manual Purchase Order creation'
         }
@@ -329,7 +454,7 @@ class PurchaseOrderService {
   // Convenience helper: Convert a Stock Request directly to Purchase Orders grouped automatically by Supplier
   public async createPOGroupFromStockRequest(
     stockRequest: StockRequest,
-    currentUser: string = 'Janah (Procurement Manager)'
+    currentUser?: any
   ): Promise<PurchaseOrder[]> {
     const suppliers = productMasterService.getSuppliers();
     const products = productMasterService.getProducts();
@@ -340,14 +465,18 @@ class PurchaseOrderService {
       return [defaultPO];
     }
 
-    // Group items by supplier key
+    // Group items by supplier key (preferring canonical supplierId)
     const groupedMap = new Map<string, { supplier: typeof suppliers[0] | null; supplierName: string; items: StockRequestItem[] }>();
 
     requestItems.forEach((item) => {
       const matchedProduct = products.find(p => p.id === item.productId || p.internalProductCode === item.productId || p.productName.toLowerCase() === item.productName.toLowerCase());
-      let matchedSupplier = suppliers.find(s => (item.supplier && s.supplierName.toLowerCase() === item.supplier.toLowerCase()) || (matchedProduct && (s.id === matchedProduct.supplierId || s.supplierName.toLowerCase() === matchedProduct.supplier.toLowerCase())));
+      let matchedSupplier = suppliers.find(s => 
+        (item.supplierId && s.id === item.supplierId) ||
+        (item.supplier && s.supplierName.toLowerCase() === item.supplier.toLowerCase()) || 
+        (matchedProduct && (s.id === matchedProduct.supplierId || s.supplierName.toLowerCase() === matchedProduct.supplier.toLowerCase()))
+      );
 
-      const suppKey = matchedSupplier ? matchedSupplier.id : (item.supplier || matchedProduct?.supplier || 'Unassigned Supplier');
+      const suppKey = matchedSupplier ? matchedSupplier.id : (item.supplierId || item.supplier || matchedProduct?.supplierId || matchedProduct?.supplier || 'Unassigned Supplier');
       const suppName = matchedSupplier ? matchedSupplier.supplierName : (item.supplier || matchedProduct?.supplier || 'Unassigned Supplier');
 
       if (!groupedMap.has(suppKey)) {
@@ -357,16 +486,23 @@ class PurchaseOrderService {
     });
 
     const createdPOs: PurchaseOrder[] = [];
+    const masterPoNumber = stockRequest.requestNumber 
+      ? `MPO-${stockRequest.requestNumber}` 
+      : `MPO-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
 
     for (const [_, group] of groupedMap.entries()) {
       const matchedSupplier = group.supplier;
       const poItems: PurchaseOrderItem[] = group.items.map((item, idx) => {
         const matchedProduct = products.find(p => p.id === item.productId || p.internalProductCode === item.productId || p.productName.toLowerCase() === item.productName.toLowerCase());
+        const prodDesc = item.productDescription || item.productName || (matchedProduct as any)?.description || matchedProduct?.productName || 'Product';
         return {
           id: `poi-${Date.now()}-${idx}-${Math.floor(Math.random() * 1000)}`,
           productId: matchedProduct?.id || item.productId || `PRD-${idx}`,
-          productName: item.productName,
-          internalProductCode: matchedProduct?.internalProductCode || item.productId || 'PRD-000',
+          productName: prodDesc,
+          productDescription: prodDesc,
+          internalProductCode: matchedProduct?.internalProductCode || (item.productId && !item.productId.startsWith('KAN-') ? item.productId : (matchedProduct?.id || 'PRD-000')),
+          kanbanId: item.kanbanId || (item.productId && item.productId.startsWith('KAN-') ? item.productId : undefined),
+          supplierId: matchedSupplier?.id || matchedProduct?.supplierId || item.supplierId || '',
           supplierPartNumber: matchedProduct?.supplierPartNumber || item.supplierPartNumber || 'N/A',
           unit: matchedProduct?.unit || 'ea',
           orderQuantity: Number(item.quantity) || 1,
@@ -374,11 +510,16 @@ class PurchaseOrderService {
           unitPrice: 0,
           totalPrice: 0,
           location: item.location || matchedProduct?.location || 'A-01-A-01',
-          category: matchedProduct?.category || 'General'
+          category: matchedProduct?.category || 'General',
+          stockRequestItemId: item.id
         };
       });
 
       const po = await this.createPurchaseOrder({
+        masterPoNumber: masterPoNumber,
+        branchId: stockRequest.branchId,
+        branchName: stockRequest.branchName,
+        deliveryInstructions: stockRequest.notes ? `Requisition Notes: ${stockRequest.notes}` : undefined,
         linkedRequestId: stockRequest.id,
         linkedRequestNumber: stockRequest.requestNumber || stockRequest.id,
         supplierId: matchedSupplier?.id || '',
@@ -403,7 +544,7 @@ class PurchaseOrderService {
   public async createPOFromStockRequest(
     stockRequest: StockRequest,
     supplierId?: string,
-    currentUser: string = 'Janah (Procurement Manager)'
+    currentUser?: any
   ): Promise<PurchaseOrder> {
     const createdPOs = await this.createPOGroupFromStockRequest(stockRequest, currentUser);
     return createdPOs[0];
@@ -431,23 +572,31 @@ class PurchaseOrderService {
   }
 
   // Approve Purchase Order
-  public async approvePO(poId: string, currentUser: string = 'Janah (Procurement Manager)', notes?: string): Promise<boolean> {
+  public async approvePO(poId: string, currentUser?: any, notes?: string): Promise<boolean> {
     const poIndex = this.localPOs.findIndex(p => p.id === poId || p.poNumber === poId);
     if (poIndex === -1) return false;
+
+    const approverUserId = (typeof currentUser === 'object' && currentUser?.id)
+      ? currentUser.id
+      : (typeof currentUser === 'string' && currentUser ? currentUser : 'system');
+    const approverName = (typeof currentUser === 'object' && (currentUser?.name || currentUser?.email))
+      ? (currentUser.name || currentUser.email)
+      : (typeof currentUser === 'string' && currentUser ? currentUser : 'Authorized Approver');
 
     const now = new Date().toISOString();
     const target = { ...this.localPOs[poIndex] };
 
     target.status = 'Approved';
-    target.approvedBy = currentUser;
+    target.approvedBy = approverName;
+    target.approvedByUserId = approverUserId;
     target.approvedAt = now;
-    target.updatedUser = currentUser;
+    target.updatedUser = approverName;
     target.updatedAt = now;
 
     target.auditTrail.unshift({
       id: `aud-${Date.now()}`,
       action: 'Approved',
-      user: currentUser,
+      user: approverName,
       timestamp: now,
       notes: notes || 'Purchase Order approved and issued to supplier.'
     });
@@ -460,9 +609,10 @@ class PurchaseOrderService {
       if (this.isFirebaseConfigured) {
         await db.collection(APP_ID_PATH).doc('purchase_orders_data').collection('purchaseOrders').doc(target.id).update({
           status: 'Approved',
-          approvedBy: currentUser,
+          approvedBy: approverName,
+          approvedByUserId: approverUserId,
           approvedAt: now,
-          updatedUser: currentUser,
+          updatedUser: approverName,
           updatedAt: now,
           auditTrail: target.auditTrail
         });
@@ -478,23 +628,27 @@ class PurchaseOrderService {
   public async updatePOStatus(
     poId: string,
     newStatus: PurchaseOrderStatus,
-    currentUser: string = 'Admin User',
+    currentUser?: any,
     notes?: string
   ): Promise<boolean> {
     const poIndex = this.localPOs.findIndex(p => p.id === poId || p.poNumber === poId);
     if (poIndex === -1) return false;
 
+    const userName = (typeof currentUser === 'object' && (currentUser?.name || currentUser?.email))
+      ? (currentUser.name || currentUser.email)
+      : (typeof currentUser === 'string' && currentUser ? currentUser : 'User');
+
     const now = new Date().toISOString();
     const target = { ...this.localPOs[poIndex] };
 
     target.status = newStatus;
-    target.updatedUser = currentUser;
+    target.updatedUser = userName;
     target.updatedAt = now;
 
     target.auditTrail.unshift({
       id: `aud-${Date.now()}`,
       action: `Status changed to ${newStatus}`,
-      user: currentUser,
+      user: userName,
       timestamp: now,
       notes: notes || `Status updated to ${newStatus}`
     });
@@ -507,7 +661,7 @@ class PurchaseOrderService {
       if (this.isFirebaseConfigured) {
         await db.collection(APP_ID_PATH).doc('purchase_orders_data').collection('purchaseOrders').doc(target.id).update({
           status: newStatus,
-          updatedUser: currentUser,
+          updatedUser: userName,
           updatedAt: now,
           auditTrail: target.auditTrail
         });

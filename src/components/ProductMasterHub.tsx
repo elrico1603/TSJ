@@ -39,6 +39,7 @@ export const ProductMasterHub: React.FC<ProductMasterHubProps> = ({
 
   // Global Search & Filter State
   const [searchQuery, setSearchQuery] = useState('');
+  const [supplierSearchQuery, setSupplierSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [selectedSupplier, setSelectedSupplier] = useState<string>('All');
   const [statusFilter, setStatusFilter] = useState<'Active' | 'Archived' | 'All'>('Active');
@@ -598,96 +599,194 @@ export const ProductMasterHub: React.FC<ProductMasterHubProps> = ({
       )}
 
       {/* TAB 3: SUPPLIERS */}
-      {activeTab === 'suppliers' && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between bg-[#151515] border border-white/10 rounded-2xl p-4">
-            <div>
-              <h2 className="text-sm font-black text-white uppercase tracking-wider">Supplier Management</h2>
-              <p className="text-xs text-gray-400">Manage vendor contact info, lead times, and preferred status.</p>
-            </div>
-            <button
-              onClick={() => setSupplierModal({ open: true, supplier: null })}
-              className="px-4 py-2 bg-[#ff8c00] hover:bg-[#e07b00] text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-2"
-            >
-              <Icon name="plus" size={16} />
-              <span>Add Supplier</span>
-            </button>
-          </div>
+      {activeTab === 'suppliers' && (() => {
+        const filteredSuppliers = suppliers.filter(s => {
+          if (!supplierSearchQuery.trim()) return true;
+          const q = supplierSearchQuery.toLowerCase();
+          return (
+            (s.supplierName && s.supplierName.toLowerCase().includes(q)) ||
+            (s.supplierCode && s.supplierCode.toLowerCase().includes(q)) ||
+            (s.contactPerson && s.contactPerson.toLowerCase().includes(q)) ||
+            (s.email && s.email.toLowerCase().includes(q)) ||
+            (s.poEmail && s.poEmail.toLowerCase().includes(q)) ||
+            (s.telephone && s.telephone.toLowerCase().includes(q)) ||
+            (s.vatNumber && s.vatNumber.toLowerCase().includes(q)) ||
+            (s.id && s.id.toLowerCase().includes(q))
+          );
+        });
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {suppliers.map(s => {
-              const suppliedProducts = products.filter(p => p.supplierId === s.id || p.supplier === s.supplierName).length;
-              return (
-                <div key={s.id} className="bg-[#151515] border border-white/10 rounded-2xl p-5 space-y-4 flex flex-col justify-between">
-                  <div>
-                    <div className="flex items-center justify-between gap-2 mb-2">
-                      <span className="text-xs font-mono font-bold text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded border border-purple-500/30">
-                        {s.supplierCode}
-                      </span>
-                      {s.preferredSupplier && (
-                        <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/30">
-                          Preferred
-                        </span>
-                      )}
-                    </div>
+        return (
+          <div className="space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-[#151515] border border-white/10 rounded-2xl p-4">
+              <div>
+                <h2 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
+                  <Icon name="truck" size={16} className="text-[#ff8c00]" />
+                  <span>Supplier Management</span>
+                </h2>
+                <p className="text-xs text-gray-400">Authoritative vendor contact information, PO routing, and lead times.</p>
+              </div>
 
-                    <h3 className="text-base font-extrabold text-white uppercase">{s.supplierName}</h3>
-                    <p className="text-xs text-gray-400 font-medium">Contact: {s.contactPerson || 'N/A'}</p>
-
-                    <div className="mt-3 bg-[#111111] p-3 rounded-xl border border-white/5 space-y-1.5 text-xs">
-                      <div className="flex items-center justify-between text-gray-300">
-                        <span className="text-gray-500 font-bold uppercase text-[10px]">Phone:</span>
-                        <span>{s.telephone || 'N/A'}</span>
-                      </div>
-                      <div className="flex items-center justify-between text-gray-300">
-                        <span className="text-gray-500 font-bold uppercase text-[10px]">Email:</span>
-                        <span className="truncate max-w-[180px]">{s.email || 'N/A'}</span>
-                      </div>
-                      <div className="flex items-center justify-between text-gray-300">
-                        <span className="text-gray-500 font-bold uppercase text-[10px]">Lead Time:</span>
-                        <span className="text-emerald-400 font-bold">{s.leadTimeDays} Days</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="pt-3 border-t border-white/5 flex items-center justify-between text-xs">
-                    <span className="text-gray-400 font-bold">{suppliedProducts} Linked Items</span>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => setSupplierModal({ open: true, supplier: s })}
-                        className="px-3 py-1.5 bg-white/5 hover:bg-white/10 text-gray-300 rounded-lg text-xs font-bold uppercase flex items-center gap-1"
-                      >
-                        <Icon name="edit-3" size={14} />
-                        <span>Edit</span>
-                      </button>
-                      <button
-                        onClick={() => setArchiveConfirm({ type: 'supplier', id: s.id, name: s.supplierName })}
-                        className="p-1.5 text-gray-500 hover:text-amber-400 hover:bg-amber-500/10 rounded-lg transition-all"
-                        title="Archive Supplier"
-                      >
-                        <Icon name="archive" size={16} />
-                      </button>
-                      <button
-                        onClick={async () => {
-                          if (confirm(`PERMANENT DELETE: Delete supplier "${s.supplierName}" permanently?`)) {
-                            const username = currentUser?.name || currentUser?.email || 'Admin User';
-                            await productMasterService.deleteSupplier(s.id, username);
-                            if (announce) announce(`Deleted supplier ${s.supplierName}`);
-                          }
-                        }}
-                        className="p-1.5 text-gray-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
-                        title="Permanently Delete Supplier"
-                      >
-                        <Icon name="trash-2" size={16} />
-                      </button>
-                    </div>
-                  </div>
+              <div className="flex items-center gap-3">
+                {/* Search bar for suppliers */}
+                <div className="relative">
+                  <Icon name="search" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <input
+                    type="text"
+                    value={supplierSearchQuery}
+                    onChange={e => setSupplierSearchQuery(e.target.value)}
+                    placeholder="Search name, code, PO email, VAT..."
+                    className="bg-[#111111] border border-white/10 rounded-xl pl-8 pr-7 py-2 text-xs text-white focus:outline-none focus:border-[#ff8c00] w-48 sm:w-64"
+                  />
+                  {supplierSearchQuery && (
+                    <button
+                      onClick={() => setSupplierSearchQuery('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white text-xs font-bold"
+                    >
+                      ×
+                    </button>
+                  )}
                 </div>
-              );
-            })}
+
+                <button
+                  onClick={() => setSupplierModal({ open: true, supplier: null })}
+                  className="px-4 py-2 bg-[#ff8c00] hover:bg-[#e07b00] text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-2 shrink-0 transition-all shadow-md"
+                >
+                  <Icon name="plus" size={16} />
+                  <span>Add Supplier</span>
+                </button>
+              </div>
+            </div>
+
+            {filteredSuppliers.length === 0 ? (
+              <div className="bg-[#151515] border border-white/10 rounded-2xl p-12 text-center space-y-3">
+                <Icon name="truck" size={32} className="mx-auto text-gray-600" />
+                <h3 className="text-sm font-bold text-gray-300 uppercase">No Suppliers Found</h3>
+                <p className="text-xs text-gray-500 max-w-sm mx-auto">
+                  {supplierSearchQuery ? `No suppliers match "${supplierSearchQuery}". Try clearing search.` : 'No suppliers currently registered in the system.'}
+                </p>
+                {supplierSearchQuery && (
+                  <button
+                    onClick={() => setSupplierSearchQuery('')}
+                    className="text-xs text-[#ff8c00] hover:underline font-bold"
+                  >
+                    Clear Search Filter
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredSuppliers.map(s => {
+                  const suppliedProducts = products.filter(p => p.supplierId === s.id || p.supplier === s.supplierName).length;
+                  return (
+                    <div key={s.id} className="bg-[#151515] border border-white/10 rounded-2xl p-5 space-y-4 flex flex-col justify-between hover:border-white/20 transition-all">
+                      <div>
+                        <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs font-mono font-bold text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded border border-purple-500/30">
+                              {s.supplierCode || 'NO-CODE'}
+                            </span>
+                            <span className="text-[10px] font-mono text-gray-500">
+                              {s.id}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-1.5">
+                            <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded border ${
+                              s.status === 'Active'
+                                ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30'
+                                : s.status === 'Archived'
+                                ? 'text-amber-400 bg-amber-500/10 border-amber-500/30'
+                                : 'text-gray-400 bg-white/5 border-white/10'
+                            }`}>
+                              {s.status || 'Active'}
+                            </span>
+                            {s.preferredSupplier && (
+                              <span className="text-[10px] font-black uppercase tracking-wider text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/30">
+                                Preferred
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <h3 className="text-base font-extrabold text-white uppercase">{s.supplierName}</h3>
+                        <p className="text-xs text-gray-400 font-medium">Contact: {s.contactPerson || 'N/A'}</p>
+
+                        <div className="mt-3 bg-[#111111] p-3 rounded-xl border border-white/5 space-y-1.5 text-xs">
+                          <div className="flex items-center justify-between text-gray-300">
+                            <span className="text-gray-500 font-bold uppercase text-[10px]">Phone:</span>
+                            <span>{s.telephone || 'N/A'}</span>
+                          </div>
+                          <div className="flex items-center justify-between text-gray-300">
+                            <span className="text-gray-500 font-bold uppercase text-[10px]">General Email:</span>
+                            <span className="truncate max-w-[170px]">{s.email || 'N/A'}</span>
+                          </div>
+                          <div className="flex items-center justify-between text-gray-300">
+                            <span className="text-gray-500 font-bold uppercase text-[10px]">PO Email:</span>
+                            <span className="truncate max-w-[170px] text-purple-300 font-medium">
+                              {s.poEmail || <span className="text-gray-600 italic">None assigned</span>}
+                            </span>
+                          </div>
+                          {Array.isArray(s.poCcEmails) && s.poCcEmails.length > 0 && (
+                            <div className="flex items-center justify-between text-gray-300">
+                              <span className="text-gray-500 font-bold uppercase text-[10px]">CC Recipients:</span>
+                              <span className="text-purple-400 font-bold text-[10px] bg-purple-500/10 px-1.5 py-0.5 rounded border border-purple-500/20">
+                                {s.poCcEmails.length} configured
+                              </span>
+                            </div>
+                          )}
+                          {s.vatNumber && (
+                            <div className="flex items-center justify-between text-gray-300">
+                              <span className="text-gray-500 font-bold uppercase text-[10px]">VAT No:</span>
+                              <span className="font-mono text-gray-400">{s.vatNumber}</span>
+                            </div>
+                          )}
+                          <div className="flex items-center justify-between text-gray-300">
+                            <span className="text-gray-500 font-bold uppercase text-[10px]">Lead Time:</span>
+                            <span className="text-emerald-400 font-bold">{s.leadTimeDays || 3} Days</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="pt-3 border-t border-white/5 flex items-center justify-between text-xs">
+                        <span className="text-gray-400 font-bold">{suppliedProducts} Linked Items</span>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => setSupplierModal({ open: true, supplier: s })}
+                            className="px-3 py-1.5 bg-white/5 hover:bg-white/10 text-gray-300 rounded-lg text-xs font-bold uppercase flex items-center gap-1 transition-all"
+                          >
+                            <Icon name="edit-3" size={14} />
+                            <span>Edit</span>
+                          </button>
+                          <button
+                            onClick={() => setArchiveConfirm({ type: 'supplier', id: s.id, name: s.supplierName })}
+                            className="p-1.5 text-gray-500 hover:text-amber-400 hover:bg-amber-500/10 rounded-lg transition-all"
+                            title="Archive Supplier"
+                          >
+                            <Icon name="archive" size={16} />
+                          </button>
+                          <button
+                            onClick={async () => {
+                              if (confirm(`PERMANENT DELETE: Delete supplier "${s.supplierName}" permanently?`)) {
+                                const username = currentUser?.name || currentUser?.email || 'Admin User';
+                                await productMasterService.deleteSupplier(s.id, username);
+                                if (announce) announce(`Deleted supplier ${s.supplierName}`);
+                              }
+                            }}
+                            className="p-1.5 text-gray-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
+                            title="Permanently Delete Supplier"
+                          >
+                            <Icon name="trash-2" size={16} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* TAB 4: WAREHOUSE LOCATIONS */}
       {activeTab === 'locations' && (

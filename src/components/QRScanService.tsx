@@ -528,20 +528,30 @@ export const QRScanService: React.FC<QRScanServiceProps> = ({
     const requestedBy = currentUser?.name || currentUser?.email || 'Stock Manager';
     const requestedByUid = currentUser?.id || currentUser?.uid || 'sm_001';
     const requestedByRole = currentUser?.role || 'Stock Manager';
-    const branchId = currentUser?.branchId || 'BR-01';
-    const branchName = currentUser?.branch || 'TS Joinery Main Workshop';
+    const branchId = currentUser?.branchId || 'BR-001';
+    const branchName = currentUser?.branchName || currentUser?.branch || 'TS Joinery Workshop';
 
     try {
       // 1. Build StockRequestItems
-      const requestItems: StockRequestItem[] = basket.map(item => ({
-        productId: item.id,
-        productName: item.card.productName || item.card.productDescription || 'No description',
-        quantity: item.basketQty,
-        supplier: item.card.supplierName || 'N/A',
-        supplierPartNumber: item.card.supplierPartNumber || 'N/A',
-        location: `${item.card.location?.letter || ''}${item.card.location?.number || ''}${item.card.location?.colour ? ` (${item.card.location.colour})` : ''}`,
-        imageUrl: item.card.imageUrl || ''
-      }));
+      const requestItems: StockRequestItem[] = basket.map(item => {
+        const prodDesc = item.card.productDescription || item.card.productName || 'No description';
+        return {
+          id: `sri-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+          productId: (item.card as any).productId || item.card.kanbanId || item.id,
+          productName: prodDesc,
+          productDescription: prodDesc,
+          quantity: item.basketQty,
+          orderQuantity: item.basketQty,
+          supplier: item.card.supplierName || 'N/A',
+          supplierName: item.card.supplierName || 'N/A',
+          supplierId: (item.card as any).supplierId || '',
+          supplierPartNumber: item.card.supplierPartNumber || 'N/A',
+          kanbanId: item.card.kanbanId || item.id,
+          location: `${item.card.location?.letter || ''}${item.card.location?.number || ''}${item.card.location?.colour ? ` (${item.card.location.colour})` : ''}`,
+          imageUrl: item.card.imageUrl || '',
+          branchName: branchName
+        };
+      });
 
       // 2. Create Stock Request in Firebase and trigger 1 notification
       const stockReq = await stockRequestService.createStockRequest({

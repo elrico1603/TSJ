@@ -1,11 +1,16 @@
 import React, { useState } from 'react';
-import { GlobalNotification, NotificationCategory } from '../types';
+import {
+  UserNotification,
+  NotificationGroup,
+  NotificationPolicyPriority,
+  NOTIFICATION_GROUP_LABELS
+} from '../types/notification';
 import { Icon } from './Icon';
 
 interface NotificationCentreProps {
   isOpen: boolean;
   onClose: () => void;
-  notifications: GlobalNotification[];
+  notifications: UserNotification[];
   onMarkAsRead: (id: string) => void;
   onMarkAllAsRead: () => void;
   onDeleteNotification: (id: string) => void;
@@ -14,14 +19,32 @@ interface NotificationCentreProps {
   userEmail?: string;
 }
 
-const CATEGORY_MAP: { id: NotificationCategory | 'all'; label: string; icon: string }[] = [
+const CANONICAL_GROUPS: { id: NotificationGroup | 'all'; label: string; icon: string }[] = [
   { id: 'all', label: 'All', icon: 'bell' },
-  { id: 'leave_request', label: 'Leave Requests', icon: 'calendar' },
-  { id: 'stock_order', label: 'Stock Orders', icon: 'kanban' },
-  { id: 'clocking_exception', label: 'Clocking Exceptions', icon: 'clock' },
-  { id: 'employee_request', label: 'Employee Requests', icon: 'users' },
-  { id: 'system_alert', label: 'System Alerts', icon: 'shield-alert' }
+  { id: 'attention', label: NOTIFICATION_GROUP_LABELS.attention, icon: 'alert-triangle' },
+  { id: 'clocking', label: NOTIFICATION_GROUP_LABELS.clocking, icon: 'clock' },
+  { id: 'leave', label: NOTIFICATION_GROUP_LABELS.leave, icon: 'calendar' },
+  { id: 'money_borrowing', label: NOTIFICATION_GROUP_LABELS.money_borrowing, icon: 'banknote' },
+  { id: 'stock_procurement', label: NOTIFICATION_GROUP_LABELS.stock_procurement, icon: 'shopping-cart' },
+  { id: 'dispatch_receiving', label: NOTIFICATION_GROUP_LABELS.dispatch_receiving, icon: 'truck' },
+  { id: 'users_security', label: NOTIFICATION_GROUP_LABELS.users_security, icon: 'shield' },
+  { id: 'kanban', label: NOTIFICATION_GROUP_LABELS.kanban, icon: 'kanban' },
+  { id: 'system_deployment', label: NOTIFICATION_GROUP_LABELS.system_deployment, icon: 'activity' },
+  { id: 'other', label: NOTIFICATION_GROUP_LABELS.other, icon: 'bell' }
 ];
+
+const GROUP_ICON_MAP: Record<NotificationGroup, string> = {
+  attention: 'alert-triangle',
+  clocking: 'clock',
+  leave: 'calendar',
+  money_borrowing: 'banknote',
+  stock_procurement: 'shopping-cart',
+  dispatch_receiving: 'truck',
+  users_security: 'shield',
+  kanban: 'kanban',
+  system_deployment: 'activity',
+  other: 'bell'
+};
 
 export const NotificationCentre: React.FC<NotificationCentreProps> = ({
   isOpen,
@@ -34,19 +57,22 @@ export const NotificationCentre: React.FC<NotificationCentreProps> = ({
   userRole,
   userEmail
 }) => {
-  const [selectedCategory, setSelectedCategory] = useState<NotificationCategory | 'all'>('all');
+  const [selectedGroup, setSelectedGroup] = useState<NotificationGroup | 'all'>('all');
   const [unreadOnly, setUnreadOnly] = useState<boolean>(false);
   const [pushPermission, setPushPermission] = useState<string>('default');
 
   if (!isOpen) return null;
 
-  const filtered = notifications.filter(n => {
-    if (selectedCategory !== 'all' && n.category !== selectedCategory) return false;
+  // STEP 9: Silent notifications MUST NOT render in NotificationCentre
+  const visibleNotifications = (notifications || []).filter(n => n.priority !== 'silent');
+
+  const filtered = visibleNotifications.filter(n => {
+    if (selectedGroup !== 'all' && n.groupId !== selectedGroup) return false;
     if (unreadOnly && n.isRead) return false;
     return true;
   });
 
-  const unreadCount = notifications.filter(n => !n.isRead).length;
+  const unreadCount = visibleNotifications.filter(n => !n.isRead).length;
 
   const handleRequestPushPermission = async () => {
     if (!('Notification' in window)) {
@@ -64,33 +90,33 @@ export const NotificationCentre: React.FC<NotificationCentreProps> = ({
     }
   };
 
-  const getPriorityStyle = (priority: string) => {
+  const getPriorityStyle = (priority: NotificationPolicyPriority) => {
     switch (priority) {
       case 'critical':
         return 'bg-red-500/20 text-red-400 border-red-500/40 animate-pulse';
       case 'high':
         return 'bg-amber-500/20 text-amber-400 border-amber-500/40';
-      case 'medium':
+      case 'normal':
         return 'bg-blue-500/20 text-blue-400 border-blue-500/40';
+      case 'info':
+        return 'bg-sky-500/20 text-sky-400 border-sky-500/40';
+      case 'silent':
       default:
         return 'bg-gray-500/20 text-gray-300 border-gray-500/40';
     }
   };
 
-  const getCategoryIcon = (category: string) => {
-    switch (category) {
-      case 'leave_request':
-        return 'calendar';
-      case 'stock_order':
-        return 'kanban';
-      case 'clocking_exception':
-        return 'clock';
-      case 'employee_request':
-        return 'users';
-      case 'system_alert':
-        return 'shield-alert';
-      default:
-        return 'bell';
+  const formatTimestamp = (isoString?: string) => {
+    if (!isoString) return { date: '', time: '' };
+    try {
+      const d = new Date(isoString);
+      if (isNaN(d.getTime())) return { date: isoString, time: '' };
+      return {
+        date: d.toISOString().split('T')[0],
+        time: d.toTimeString().slice(0, 5)
+      };
+    } catch {
+      return { date: isoString, time: '' };
     }
   };
 
@@ -128,11 +154,11 @@ export const NotificationCentre: React.FC<NotificationCentreProps> = ({
           </button>
         </div>
 
-        {/* Manager permission info badge */}
+        {/* User profile info badge */}
         <div className="px-6 py-2.5 bg-[#151515] border-b border-white/5 flex items-center justify-between text-[11px] font-sans">
           <div className="flex items-center gap-2 text-gray-400">
             <Icon name="shield" size={14} className="text-[#ff8c00]" />
-            <span>Active Profile: <strong className="text-white uppercase">{userEmail || userRole || 'Management'}</strong></span>
+            <span>Active Profile: <strong className="text-white uppercase">{userEmail || userRole || 'Active User'}</strong></span>
           </div>
           {unreadCount > 0 && (
             <button
@@ -144,10 +170,10 @@ export const NotificationCentre: React.FC<NotificationCentreProps> = ({
           )}
         </div>
 
-        {/* Category Filters */}
+        {/* Canonical Group Filters */}
         <div className="p-4 border-b border-white/10 bg-black/20 space-y-3">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-black uppercase text-gray-400 tracking-wider">Filter Category</span>
+            <span className="text-[10px] font-black uppercase text-gray-400 tracking-wider">Filter Group</span>
             <label className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer select-none">
               <input 
                 type="checkbox" 
@@ -160,18 +186,18 @@ export const NotificationCentre: React.FC<NotificationCentreProps> = ({
           </div>
 
           <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
-            {CATEGORY_MAP.map(cat => (
+            {CANONICAL_GROUPS.map(grp => (
               <button
-                key={cat.id}
-                onClick={() => setSelectedCategory(cat.id)}
+                key={grp.id}
+                onClick={() => setSelectedGroup(grp.id)}
                 className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider whitespace-nowrap transition-all flex items-center gap-1.5 shrink-0 ${
-                  selectedCategory === cat.id
+                  selectedGroup === grp.id
                     ? 'bg-[#ff8c00] text-black shadow-lg shadow-[#ff8c00]/20'
                     : 'bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white border border-white/5'
                 }`}
               >
-                <Icon name={cat.icon} size={13} />
-                <span>{cat.label}</span>
+                <Icon name={grp.icon} size={13} />
+                <span>{grp.label}</span>
               </button>
             ))}
           </div>
@@ -184,74 +210,88 @@ export const NotificationCentre: React.FC<NotificationCentreProps> = ({
               <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center mx-auto mb-4 text-gray-500">
                 <Icon name="bell" size={32} />
               </div>
-              <p className="text-gray-400 font-black uppercase text-sm">No notifications found</p>
-              <p className="text-xs text-gray-600 mt-1">You are all caught up for {selectedCategory !== 'all' ? selectedCategory.replace('_', ' ') : 'all categories'}.</p>
+              <p className="text-gray-400 font-black uppercase text-sm">No notifications</p>
+              <p className="text-xs text-gray-600 mt-1">You’re all caught up.</p>
             </div>
           ) : (
-            filtered.map(notif => (
-              <div
-                key={notif.id}
-                onClick={() => {
-                  if (!notif.isRead) {
-                    onMarkAsRead(notif.id);
-                  }
-                  if (notif.relatedPage) {
-                    onNavigateToPage(notif.relatedPage);
-                    onClose();
-                  }
-                }}
-                className={`group relative p-4 rounded-2xl border transition-all cursor-pointer ${
-                  notif.isRead
-                    ? 'bg-black/30 border-white/5 opacity-70 hover:opacity-100 hover:bg-white/5'
-                    : 'bg-[#181818] border-[#ff8c00]/30 shadow-lg shadow-black/50 hover:border-[#ff8c00]'
-                }`}
-              >
-                {!notif.isRead && (
-                  <span className="absolute top-4 right-4 w-2.5 h-2.5 bg-[#ff8c00] rounded-full ring-4 ring-[#181818]" />
-                )}
+            filtered.map(notif => {
+              const { date, time } = formatTimestamp(notif.createdAt);
+              const groupIcon = GROUP_ICON_MAP[notif.groupId] || 'bell';
+              const groupLabel = NOTIFICATION_GROUP_LABELS[notif.groupId] || notif.groupId;
 
-                <div className="flex items-start gap-3">
-                  <div className={`p-2.5 rounded-xl border ${getPriorityStyle(notif.priority)} shrink-0 mt-0.5`}>
-                    <Icon name={getCategoryIcon(notif.category)} size={18} />
-                  </div>
+              return (
+                <div
+                  key={notif.notificationId}
+                  onClick={() => {
+                    if (!notif.isRead) {
+                      onMarkAsRead(notif.notificationId);
+                    }
+                    if (notif.relatedPage) {
+                      onNavigateToPage(notif.relatedPage);
+                      onClose();
+                    }
+                  }}
+                  className={`group relative p-4 rounded-2xl border transition-all cursor-pointer ${
+                    notif.isRead
+                      ? 'bg-black/30 border-white/5 opacity-70 hover:opacity-100 hover:bg-white/5'
+                      : 'bg-[#181818] border-[#ff8c00]/30 shadow-lg shadow-black/50 hover:border-[#ff8c00]'
+                  }`}
+                >
+                  {!notif.isRead && (
+                    <span className="absolute top-4 right-4 w-2.5 h-2.5 bg-[#ff8c00] rounded-full ring-4 ring-[#181818]" />
+                  )}
 
-                  <div className="flex-1 min-w-0 pr-4">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-white/5 text-gray-400 border border-white/10">
-                        {notif.categoryLabel}
-                      </span>
-                      <span className="text-[10px] text-gray-500 font-mono">
-                        {notif.date} • {notif.time}
-                      </span>
+                  <div className="flex items-start gap-3">
+                    <div className={`p-2.5 rounded-xl border ${getPriorityStyle(notif.priority)} shrink-0 mt-0.5`}>
+                      <Icon name={groupIcon} size={18} />
                     </div>
 
-                    <h4 className="font-black text-sm text-white group-hover:text-[#ff8c00] transition-colors leading-snug">
-                      {notif.title}
-                    </h4>
+                    <div className="flex-1 min-w-0 pr-4">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                        <span className="text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-white/5 text-gray-400 border border-white/10">
+                          {groupLabel}
+                        </span>
+                        {/* STEP 14 TEST G — Coalescing Indicator */}
+                        {notif.coalescing && notif.coalescing.coalesceCount > 1 && (
+                          <span className="px-1.5 py-0.2 rounded-md bg-[#ff8c00]/20 text-[#ff8c00] font-mono font-black text-[10px] border border-[#ff8c00]/40">
+                            ×{notif.coalescing.coalesceCount}
+                          </span>
+                        )}
+                        {(date || time) && (
+                          <span className="text-[10px] text-gray-500 font-mono">
+                            {date} {time ? `• ${time}` : ''}
+                          </span>
+                        )}
+                      </div>
 
-                    <p className="text-xs text-gray-300 mt-1.5 leading-relaxed font-sans line-clamp-3">
-                      {notif.description}
-                    </p>
+                      <h4 className="font-black text-sm text-white group-hover:text-[#ff8c00] transition-colors leading-snug">
+                        {notif.title}
+                      </h4>
 
-                    <div className="mt-3 flex items-center justify-between text-[10px] font-black uppercase tracking-wider text-[#ff8c00]">
-                      <span className="flex items-center gap-1 hover:underline">
-                        View details <Icon name="arrow-right" size={12} />
-                      </span>
-                      <button
-                        onClick={e => {
-                          e.stopPropagation();
-                          onDeleteNotification(notif.id);
-                        }}
-                        className="text-gray-500 hover:text-red-400 p-1"
-                        title="Remove notification"
-                      >
-                        <Icon name="trash-2" size={13} />
-                      </button>
+                      <p className="text-xs text-gray-300 mt-1.5 leading-relaxed font-sans line-clamp-3">
+                        {notif.description}
+                      </p>
+
+                      <div className="mt-3 flex items-center justify-between text-[10px] font-black uppercase tracking-wider text-[#ff8c00]">
+                        <span className="flex items-center gap-1 hover:underline">
+                          View details <Icon name="arrow-right" size={12} />
+                        </span>
+                        <button
+                          onClick={e => {
+                            e.stopPropagation();
+                            onDeleteNotification(notif.notificationId);
+                          }}
+                          className="text-gray-500 hover:text-red-400 p-1"
+                          title="Remove notification"
+                        >
+                          <Icon name="trash-2" size={13} />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
 

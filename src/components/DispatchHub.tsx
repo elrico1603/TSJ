@@ -7,6 +7,7 @@ import { ReceivingWizard } from './ReceivingWizard';
 import { DispatchArchive } from './DispatchArchive';
 import { Icon } from './Icon';
 import { normalizeDispatchRecord, sanitizeForFirestore } from '../services/dispatchAdapter';
+import { permissionService } from '../services/permissionService';
 
 const LOCAL_DISPATCHES_KEY = 'tsj_dispatches_v1';
 
@@ -103,13 +104,10 @@ export const DispatchHub: React.FC<DispatchHubProps> = ({ currentUser, announce 
   const [activeView, setActiveView] = useState<'list' | 'wizard' | 'details' | 'receiving' | 'archive'>('list');
   const [selectedDispatch, setSelectedDispatch] = useState<DispatchRecord | null>(null);
 
-  // User permissions
-  const role = currentUser?.role || '';
-  const isAdmin = role === 'Admin' || role === 'Administrator';
-  const isManager = ['Supervisor', 'HR', 'Stock Manager'].includes(role);
-  const isDispatchOrFactorySupervisor = role.toLowerCase().includes('dispatch') || role.toLowerCase().includes('factory');
-  
-  const canCreateOrEdit = isAdmin || isManager || isDispatchOrFactorySupervisor;
+  // User permissions - Pure user-centric model
+  const canCreateOrEdit = permissionService.hasPermission(currentUser, 'Dispatch Creation', 'Create') ||
+    permissionService.hasPermission(currentUser, 'Dispatch Creation', 'Edit') ||
+    permissionService.hasPermission(currentUser, 'Waybill Management', 'Edit');
 
   // Load dispatches from Firestore / localStorage fallback
   useEffect(() => {

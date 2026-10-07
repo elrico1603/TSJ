@@ -13,7 +13,7 @@ import { ChatGenerateRequest } from './src/types/chat';
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   // JSON and URL-encoded body parser with 30MB limit for evidence handling
   app.use(express.json({ limit: '30mb' }));

@@ -37,4 +37,6 @@ export const auditLogger = {
   }
 };
 
-(window as any).auditLogger = auditLogger;
+if (typeof window !== 'undefined') {
+  (window as any).auditLogger = auditLogger;
+}

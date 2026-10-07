@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { PurchaseOrder, PurchaseOrderStatus } from '../types';
 import { purchaseOrderService } from '../services/purchaseOrderService';
+import { companyService } from '../services/companyService';
+import { permissionService } from '../services/permissionService';
 import { PurchaseOrderDocumentModal } from './PurchaseOrderDocumentModal';
 import { CreatePOModal } from './CreatePOModal';
 import { Icon } from './Icon';
@@ -20,6 +22,14 @@ export const PurchaseOrderHub: React.FC<PurchaseOrderHubProps> = ({
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
 
+  // Authoritative company info
+  const companyInfo = companyService.getLocalCompanyInfo();
+
+  // Authoritative permissions
+  const canCreatePO = permissionService.hasPermission(currentUser, 'Purchase Orders', 'Create') || permissionService.hasPermission(currentUser, 'Purchase Orders', 'Edit');
+  const canApprovePO = permissionService.hasPermission(currentUser, 'Purchase Orders', 'Approve');
+  const canDeletePO = permissionService.hasPermission(currentUser, 'Purchase Orders', 'Delete');
+
   // Modals state
   const [selectedPO, setSelectedPO] = useState<PurchaseOrder | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -33,8 +43,7 @@ export const PurchaseOrderHub: React.FC<PurchaseOrderHubProps> = ({
 
   const handleApprovePO = async (e: React.MouseEvent, poId: string) => {
     e.stopPropagation();
-    const username = currentUser?.name || currentUser?.email || 'Janah (Procurement Manager)';
-    const success = await purchaseOrderService.approvePO(poId, username, 'Approved from Purchase Order Hub');
+    const success = await purchaseOrderService.approvePO(poId, currentUser, 'Approved from Purchase Order Hub');
     if (success && announce) {
       announce(`Purchase Order ${poId} approved.`);
     }
@@ -43,8 +52,7 @@ export const PurchaseOrderHub: React.FC<PurchaseOrderHubProps> = ({
   const handleArchivePO = async (e: React.MouseEvent, poId: string) => {
     e.stopPropagation();
     if (window.confirm(`Are you sure you want to archive Purchase Order ${poId}?`)) {
-      const username = currentUser?.name || currentUser?.email || 'Admin';
-      await purchaseOrderService.updatePOStatus(poId, 'Archived', username, 'Archived by user');
+      await purchaseOrderService.updatePOStatus(poId, 'Archived', currentUser, 'Archived by user');
       if (announce) announce(`Purchase Order ${poId} archived.`);
     }
   };
@@ -137,13 +145,15 @@ export const PurchaseOrderHub: React.FC<PurchaseOrderHubProps> = ({
           </div>
 
           <div className="flex items-center gap-3">
-            <button
-              onClick={() => setShowCreateModal(true)}
-              className="px-5 py-3 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-lg shadow-cyan-600/20 flex items-center gap-2"
-            >
-              <Icon name="plus" size={16} />
-              <span>Create Purchase Order</span>
-            </button>
+            {canCreatePO && (
+              <button
+                onClick={() => setShowCreateModal(true)}
+                className="px-5 py-3 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-lg shadow-cyan-600/20 flex items-center gap-2"
+              >
+                <Icon name="plus" size={16} />
+                <span>Create Purchase Order</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -163,7 +173,9 @@ export const PurchaseOrderHub: React.FC<PurchaseOrderHubProps> = ({
           </div>
           <div className="bg-black/30 border border-white/5 p-3 rounded-xl">
             <span className="text-[10px] font-black text-gray-500 uppercase block">Company Scope</span>
-            <span className="text-xs font-black text-gray-300 font-mono">TS-JOINERY-CPT</span>
+            <span className="text-xs font-black text-gray-300 font-mono truncate" title={companyInfo.companyName}>
+              {companyInfo.tradingName || companyInfo.companyName}
+            </span>
           </div>
         </div>
       </div>
@@ -272,6 +284,11 @@ export const PurchaseOrderHub: React.FC<PurchaseOrderHubProps> = ({
                         {po.poNumber}
                       </span>
                       {getStatusBadge(po.status)}
+                      {po.masterPoNumber && po.masterPoNumber !== po.poNumber && (
+                        <span className="text-xs text-purple-400 font-mono bg-purple-500/10 border border-purple-500/20 px-2.5 py-0.5 rounded-lg" title="Master Requisition Group">
+                          Group: <span className="font-bold">{po.masterPoNumber}</span>
+                        </span>
+                      )}
                       {po.linkedRequestNumber && (
                         <span className="text-xs text-gray-400 font-mono bg-white/5 px-2.5 py-0.5 rounded-lg border border-white/5">
                           Req: <span className="text-[#ff8c00] font-bold">{po.linkedRequestNumber}</span>
@@ -326,7 +343,7 @@ export const PurchaseOrderHub: React.FC<PurchaseOrderHubProps> = ({
                         <span>View Document</span>
                       </button>
 
-                      {po.status === 'Pending Approval' && (
+                      {po.status === 'Pending Approval' && canApprovePO && (
                         <button
                           onClick={e => handleApprovePO(e, po.id)}
                           className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black uppercase transition-all shadow-lg flex items-center gap-1.5"
@@ -360,19 +377,21 @@ export const PurchaseOrderHub: React.FC<PurchaseOrderHubProps> = ({
                         </button>
                       )}
 
-                      <button
-                        onClick={async e => {
-                          e.stopPropagation();
-                          if (window.confirm(`PERMANENT DELETE: Delete Purchase Order ${po.poNumber} permanently?`)) {
-                            await purchaseOrderService.deletePurchaseOrder(po.id);
-                            if (announce) announce(`Purchase Order ${po.poNumber} deleted permanently.`);
-                          }
-                        }}
-                        className="p-2 text-gray-500 hover:text-red-500 rounded-xl hover:bg-red-500/10 transition-all"
-                        title="Permanently Delete PO"
-                      >
-                        <Icon name="trash-2" size={16} />
-                      </button>
+                      {canDeletePO && (
+                        <button
+                          onClick={async e => {
+                            e.stopPropagation();
+                            if (window.confirm(`PERMANENT DELETE: Delete Purchase Order ${po.poNumber} permanently?`)) {
+                              await purchaseOrderService.deletePurchaseOrder(po.id);
+                              if (announce) announce(`Purchase Order ${po.poNumber} deleted permanently.`);
+                            }
+                          }}
+                          className="p-2 text-gray-500 hover:text-red-500 rounded-xl hover:bg-red-500/10 transition-all"
+                          title="Permanently Delete PO"
+                        >
+                          <Icon name="trash-2" size={16} />
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>

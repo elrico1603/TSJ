@@ -1,4 +1,5 @@
 import { db, APP_ID_PATH } from '../firebase';
+import { canMutateAuthOrRBAC } from './previewSafety';
 import {
   PermissionAction,
   PermissionCategory,
@@ -467,42 +468,49 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, RolePermissions> = {
 };
 
 // DEFAULT USER OVERRIDES
-// Evaluated deterministically via Explicit User Overrides in the RBAC pipeline
-export const DEFAULT_USER_OVERRIDES: Record<string, UserPermissionOverride> = {
-  'juan@tsjoinery.co.za': {
-    userId: 'usr-depot-juan',
-    userEmail: 'juan@tsjoinery.co.za',
-    branchId: 'BFN-01',
-    branchName: 'Bloemfontein Central',
-    physicalLocation: 'Cape Town',
-    deviceAccess: {
-      desktop: true,
-      phone: true,
-      tablet: false,
-      terminal: false
-    },
-    deviceViewAccess: {
-      phone: {
-        dispatch: true,
-        clocking: false,
-        leave: false
-      },
-      tablet: {
-        dispatch: false,
-        clocking: false,
-        leave: false
-      },
-      desktop: {
-        dispatch: true,
-        clocking: true,
-        leave: true,
-        analytics: true
-      }
-    },
-    updatedAt: '2026-01-01T00:00:00.000Z',
-    updatedBy: 'System'
+// In the pure user-centric model, permissions are stored per user in Firestore / local overrides cache.
+export const DEFAULT_USER_OVERRIDES: Record<string, UserPermissionOverride> = {};
+
+export const CANONICAL_PERMISSIONS_COLLECTION = 'userPermissionOverrides';
+
+// Universal In-Memory Permission Store
+let activeUserOverrides: Record<string, UserPermissionOverride> | null = null;
+const overridesByUserId = new Map<string, UserPermissionOverride>();
+const overridesByEmail = new Map<string, UserPermissionOverride>();
+const overridesByDocId = new Map<string, UserPermissionOverride>();
+const overrideListeners: Set<(overrides: Record<string, UserPermissionOverride>) => void> = new Set();
+
+function indexUserOverrideRecord(docId: string, record: UserPermissionOverride) {
+  if (!record) return;
+  const userId = record.userId?.trim();
+  const userEmail = record.userEmail?.toLowerCase().trim();
+
+  overridesByDocId.set(docId, record);
+  if (userId) {
+    overridesByUserId.set(userId, record);
   }
-};
+  if (userEmail) {
+    overridesByEmail.set(userEmail, record);
+  }
+}
+
+function rebuildPermissionMaps(records: Array<{ id: string; data: UserPermissionOverride }>) {
+  overridesByDocId.clear();
+  overridesByUserId.clear();
+  overridesByEmail.clear();
+  const newMap: Record<string, UserPermissionOverride> = {};
+
+  records.forEach(({ id, data }) => {
+    if (!data) return;
+    indexUserOverrideRecord(id, data);
+    newMap[id] = data;
+    if (data.userId?.trim()) newMap[data.userId.trim()] = data;
+    if (data.userEmail?.toLowerCase().trim()) newMap[data.userEmail.toLowerCase().trim()] = data;
+  });
+
+  activeUserOverrides = newMap;
+  return newMap;
+}
 
 export interface AuthorizedNavItem {
   id: string;
@@ -571,33 +579,28 @@ export const permissionService = {
   },
 
   getLocalUserOverrides(): Record<string, UserPermissionOverride> {
+    if (activeUserOverrides && Object.keys(activeUserOverrides).length > 0) {
+      return activeUserOverrides;
+    }
     try {
       const data = localStorage.getItem(STORAGE_USER_OVERRIDES_KEY);
       if (data) {
         const parsed = JSON.parse(data);
-        const merged: Record<string, UserPermissionOverride> = { ...DEFAULT_USER_OVERRIDES };
         if (parsed && typeof parsed === 'object') {
+          const items: Array<{ id: string; data: UserPermissionOverride }> = [];
           for (const [k, v] of Object.entries(parsed)) {
             const ov = v as UserPermissionOverride;
-            if (!ov) continue;
-            const email = ov.userEmail?.toLowerCase().trim();
-            const uid = ov.userId;
-            // Purge default placeholder key if a newer override exists for this user
-            if (email && merged[email] && (!merged[email].updatedAt || (ov.updatedAt && ov.updatedAt >= merged[email].updatedAt))) {
-              delete merged[email];
+            if (ov) {
+              items.push({ id: k, data: ov });
             }
-            if (uid && merged[uid] && (!merged[uid].updatedAt || (ov.updatedAt && ov.updatedAt >= merged[uid].updatedAt))) {
-              delete merged[uid];
-            }
-            merged[k] = ov;
           }
+          return rebuildPermissionMaps(items);
         }
-        return merged;
       }
     } catch (e) {
       console.warn('Failed to parse local user overrides:', e);
     }
-    return { ...DEFAULT_USER_OVERRIDES };
+    return activeUserOverrides || {};
   },
 
   saveLocalUserOverrides(overrides: Record<string, UserPermissionOverride>): void {
@@ -626,39 +629,125 @@ export const permissionService = {
     }
   },
 
-  // Retrieve user override record by userId or email
-  getUserOverride(userIdOrEmail: string): UserPermissionOverride | null {
-    if (!userIdOrEmail) return null;
-    const cleanKey = userIdOrEmail.toLowerCase().trim();
-    const overrides = this.getLocalUserOverrides();
+  // Universal User Override Resolver
+  // Resolves against live userId, normalized email, document ID, or user object
+  getUserOverride(userOrIdOrEmail: any): UserPermissionOverride | null {
+    if (!userOrIdOrEmail) return null;
 
-    // Priority 1: Direct key lookup
-    if (overrides[cleanKey]) return overrides[cleanKey];
-    if (overrides[userIdOrEmail]) return overrides[userIdOrEmail];
+    // Ensure cache / store is initialized
+    if (!activeUserOverrides || (overridesByUserId.size === 0 && overridesByEmail.size === 0)) {
+      this.getLocalUserOverrides();
+    }
 
-    // Priority 2: Scan for matching entries, choosing the most recently updated
-    let bestMatch: UserPermissionOverride | null = null;
-    for (const ov of Object.values(overrides)) {
-      const overrideObj = ov as UserPermissionOverride;
-      if (!overrideObj) continue;
-      const matches =
-        overrideObj.userEmail?.toLowerCase().trim() === cleanKey ||
-        overrideObj.userId?.toLowerCase().trim() === cleanKey ||
-        overrideObj.userId === userIdOrEmail;
+    let targetUserId = '';
+    let targetEmail = '';
+    let rawStr = '';
 
-      if (matches) {
-        if (!bestMatch) {
-          bestMatch = overrideObj;
-        } else {
-          const prevTime = bestMatch.updatedAt ? new Date(bestMatch.updatedAt).getTime() : 0;
-          const currTime = overrideObj.updatedAt ? new Date(overrideObj.updatedAt).getTime() : 0;
-          if (currTime >= prevTime) {
-            bestMatch = overrideObj;
+    if (typeof userOrIdOrEmail === 'object' && userOrIdOrEmail !== null) {
+      targetUserId = (userOrIdOrEmail.id || userOrIdOrEmail.userId || '').trim();
+      targetEmail = (userOrIdOrEmail.email || userOrIdOrEmail.userEmail || '').toLowerCase().trim();
+    } else if (typeof userOrIdOrEmail === 'string') {
+      rawStr = userOrIdOrEmail.trim();
+      if (rawStr.includes('@')) {
+        targetEmail = rawStr.toLowerCase();
+      } else {
+        targetUserId = rawStr;
+      }
+    }
+
+    // 1. Live User ID match
+    if (targetUserId) {
+      const match = overridesByUserId.get(targetUserId) || overridesByDocId.get(targetUserId) || activeUserOverrides?.[targetUserId];
+      if (match) return match;
+    }
+
+    // 2. Normalized Email match
+    if (targetEmail) {
+      let match = overridesByEmail.get(targetEmail) || overridesByDocId.get(targetEmail) || activeUserOverrides?.[targetEmail];
+      if (!match) {
+        if (targetEmail === 'frans@tsjoinery.co.za') {
+          match = overridesByEmail.get('franz@tsjoinery.co.za') || activeUserOverrides?.['franz@tsjoinery.co.za'];
+        } else if (targetEmail === 'franz@tsjoinery.co.za') {
+          match = overridesByEmail.get('frans@tsjoinery.co.za') || activeUserOverrides?.['frans@tsjoinery.co.za'];
+        }
+      }
+      if (match) return match;
+    }
+
+    // 3. Raw String match (if docId was queried)
+    if (rawStr) {
+      const rawLower = rawStr.toLowerCase();
+      const match = overridesByDocId.get(rawStr) || overridesByDocId.get(rawLower) || activeUserOverrides?.[rawStr] || activeUserOverrides?.[rawLower];
+      if (match) return match;
+    }
+
+    // 4. Cross-reference with global user pool if targetUserId didn't have email or vice versa
+    if (targetUserId && !targetEmail) {
+      try {
+        const pool = typeof window !== 'undefined' ? ((window as any).__ts_user_pool || []) : [];
+        const found = pool.find((u: any) => u && (u.id === targetUserId || u.userId === targetUserId));
+        if (found && found.email) {
+          const poolEmail = found.email.toLowerCase().trim();
+          const match = overridesByEmail.get(poolEmail) || overridesByDocId.get(poolEmail) || activeUserOverrides?.[poolEmail];
+          if (match) return match;
+        }
+      } catch (e) {
+        // ignore
+      }
+    } else if (targetEmail && !targetUserId) {
+      try {
+        const pool = typeof window !== 'undefined' ? ((window as any).__ts_user_pool || []) : [];
+        const found = pool.find((u: any) => u && u.email && u.email.toLowerCase().trim() === targetEmail);
+        if (found && found.id) {
+          const poolId = found.id.trim();
+          const match = overridesByUserId.get(poolId) || overridesByDocId.get(poolId) || activeUserOverrides?.[poolId];
+          if (match) return match;
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    // 5. Full scan fallback across all cached overrides
+    if (activeUserOverrides) {
+      let bestMatch: UserPermissionOverride | null = null;
+      for (const ov of Object.values(activeUserOverrides)) {
+        if (!ov) continue;
+        const ovEmail = ov.userEmail?.toLowerCase().trim();
+        const ovId = ov.userId?.trim();
+
+        const isMatch =
+          (targetUserId && ovId === targetUserId) ||
+          (targetEmail && ovEmail === targetEmail) ||
+          (rawStr && (ovId === rawStr || ovEmail === rawStr.toLowerCase()));
+
+        if (isMatch) {
+          if (!bestMatch) {
+            bestMatch = ov;
+          } else {
+            const prevTime = bestMatch.updatedAt ? new Date(bestMatch.updatedAt).getTime() : 0;
+            const currTime = ov.updatedAt ? new Date(ov.updatedAt).getTime() : 0;
+            if (currTime >= prevTime) {
+              bestMatch = ov;
+            }
           }
         }
       }
+      if (bestMatch) return bestMatch;
     }
-    return bestMatch;
+
+    // 6. Direct fallback on user object itself if it already carries valid deviceViewAccess
+    if (userOrIdOrEmail && typeof userOrIdOrEmail === 'object' && userOrIdOrEmail.deviceViewAccess) {
+      return {
+        userId: targetUserId || userOrIdOrEmail.id || '',
+        userEmail: targetEmail || userOrIdOrEmail.email || '',
+        deviceAccess: userOrIdOrEmail.deviceAccess,
+        deviceViewAccess: userOrIdOrEmail.deviceViewAccess,
+        permissions: userOrIdOrEmail.permissions || {}
+      } as UserPermissionOverride;
+    }
+
+    return null;
   },
 
   // Central Module Registry helpers
@@ -671,61 +760,66 @@ export const permissionService = {
   },
 
   // Save or update an explicit user permission override
+  // Uses ONLY the canonical userPermissionOverrides Firestore collection
   async saveUserOverride(override: UserPermissionOverride, adminName: string = 'Administrator'): Promise<UserPermissionOverride> {
-    const overrides = this.getLocalUserOverrides();
     const emailKey = (override.userEmail || '').toLowerCase().trim();
     const idKey = (override.userId || '').trim();
-    const primaryKey = emailKey || idKey;
+
+    // Determine canonical document ID: reuse existing document ID if one exists for this user
+    const existing = this.getUserOverride(override);
+    let targetDocId = idKey || emailKey;
+    if (existing) {
+      for (const [dId, ov] of overridesByDocId.entries()) {
+        if (ov === existing || (idKey && ov.userId === idKey) || (emailKey && ov.userEmail?.toLowerCase().trim() === emailKey)) {
+          targetDocId = dId;
+          break;
+        }
+      }
+    }
 
     const updated: UserPermissionOverride = {
       ...override,
-      userEmail: emailKey,
-      userId: idKey || override.userId,
+      userEmail: emailKey || existing?.userEmail,
+      userId: idKey || existing?.userId || targetDocId,
       updatedAt: new Date().toISOString(),
       updatedBy: adminName || 'System Admin'
     };
 
-    // Remove any stale entries for this user
-    for (const k of Object.keys(overrides)) {
-      const ov = overrides[k];
-      if (
-        (emailKey && (k.toLowerCase() === emailKey || ov?.userEmail?.toLowerCase() === emailKey)) ||
-        (idKey && (k === idKey || ov?.userId === idKey))
-      ) {
-        delete overrides[k];
+    // Index into in-memory store immediately
+    indexUserOverrideRecord(targetDocId, updated);
+    if (!activeUserOverrides) activeUserOverrides = {};
+    activeUserOverrides[targetDocId] = updated;
+    if (updated.userId) activeUserOverrides[updated.userId] = updated;
+    if (updated.userEmail) activeUserOverrides[updated.userEmail] = updated;
+
+    this.saveLocalUserOverrides(activeUserOverrides);
+
+    // Notify all subscribers immediately for instantaneous UI update
+    overrideListeners.forEach(listener => {
+      try {
+        listener(activeUserOverrides!);
+      } catch (e) {
+        console.warn('Listener error on saveUserOverride:', e);
       }
-    }
-
-    // Save under primary key and alias
-    if (primaryKey) overrides[primaryKey] = updated;
-    if (idKey && idKey !== primaryKey) overrides[idKey] = updated;
-
-    this.saveLocalUserOverrides(overrides);
+    });
 
     await this.logAudit(
       adminName,
       `USER_PERMISSION_OVERRIDE_SAVED`,
-      `User ${override.userEmail}`,
+      `User ${updated.userEmail || updated.userId}`,
       JSON.stringify({
-        deviceAccess: override.deviceAccess,
-        deviceViewAccess: override.deviceViewAccess,
-        permissionsCount: Object.keys(override.permissions || {}).length
+        deviceAccess: updated.deviceAccess,
+        deviceViewAccess: updated.deviceViewAccess,
+        permissionsCount: Object.keys(updated.permissions || {}).length
       })
     );
 
-    if (db && APP_ID_PATH) {
+    // Persist to ONLY canonical Firestore collection (guarded against live mutation in Preview)
+    if (db && canMutateAuthOrRBAC('saveUserOverride', `${CANONICAL_PERMISSIONS_COLLECTION}/${targetDocId}`)) {
       try {
-        const batch = [
-          db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('userPermissionOverrides').collection('items').doc(primaryKey).set(updated),
-          db.collection('userPermissionOverrides').doc(primaryKey).set(updated)
-        ];
-        if (idKey && idKey !== primaryKey) {
-          batch.push(db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('userPermissionOverrides').collection('items').doc(idKey).set(updated));
-          batch.push(db.collection('userPermissionOverrides').doc(idKey).set(updated));
-        }
-        await Promise.allSettled(batch);
+        await db.collection(CANONICAL_PERMISSIONS_COLLECTION).doc(targetDocId).set(updated);
       } catch (e) {
-        console.warn('Firebase userPermissionOverrides sync error:', e);
+        console.warn('Firestore userPermissionOverrides save error:', e);
       }
     }
 
@@ -742,17 +836,8 @@ export const permissionService = {
     if (user.active === false) return false;
     if (!deviceContext) return true;
 
-    // Administrators always have full device access
-    const role = (user.role || '').trim();
-    if (role === 'Administrator' || role === 'Admin') return true;
-
-    // Clocking Terminal account is restricted to terminal interface
-    if (this.isClockingTerminalUser(user)) {
-      return deviceContext === 'terminal';
-    }
-
-    // Check user explicit override
-    const override = this.getUserOverride(user.id || user.email);
+    // Check user explicit override first
+    const override = this.getUserOverride(user);
     if (override?.deviceAccess && override.deviceAccess[deviceContext] !== undefined) {
       return !!override.deviceAccess[deviceContext];
     }
@@ -762,7 +847,12 @@ export const permissionService = {
       return !!user.deviceAccess[deviceContext];
     }
 
-    // Standard defaults: Desktop & Phone enabled, Tablet/Terminal disabled unless assigned
+    // Clocking Terminal account is restricted to terminal interface if not explicitly given desktop
+    if (this.isClockingTerminalUser(user)) {
+      return deviceContext === 'terminal';
+    }
+
+    // Standard defaults: Desktop & Phone enabled, Tablet/Terminal disabled unless explicitly assigned
     if (deviceContext === 'desktop' || deviceContext === 'phone') return true;
     return false;
   },
@@ -785,7 +875,7 @@ export const permissionService = {
     }
 
     // 1. Check explicit user override for this device view
-    const override = this.getUserOverride(user.id || user.email);
+    const override = this.getUserOverride(user);
     if (override?.deviceViewAccess?.[deviceContext]?.[moduleId] !== undefined) {
       return !!override.deviceViewAccess[deviceContext]![moduleId];
     }
@@ -800,24 +890,10 @@ export const permissionService = {
       return !!override.deviceOverrides[deviceContext]!.modules![moduleId];
     }
 
-    // 4. Role Baseline Evaluation
-    const role = (user.role || '').trim();
-    if (role === 'Administrator' || role === 'Admin') {
-      return true;
-    }
-
-    if (this.isClockingTerminalUser(user)) {
-      return ['clocking', 'qr_scan', 'leave'].includes(moduleId);
-    }
-
-    // Built-in modules open to authorized device users
+    // Pure user-centric model: Role baseline removed. Role has ZERO authorization power.
+    // Built-in basic module
     if (moduleId === 'gemini_ai') {
       return true;
-    }
-
-    if (moduleId === 'clocking') {
-      return this.hasPermission(user, 'Clocking', 'View', deviceContext) ||
-             this.hasPermission(user, 'Dashboard', 'View', deviceContext);
     }
 
     // Check mapped granular permission modules
@@ -827,7 +903,8 @@ export const permissionService = {
       );
     }
 
-    return true;
+    // Default: If no explicit override or mapped permissions allow it, default DENY
+    return false;
   },
 
   // Returns all authorized modules for user on the given device view
@@ -866,7 +943,7 @@ export const permissionService = {
       return false;
     }
 
-    const override = this.getUserOverride(user.id || user.email);
+    const override = this.getUserOverride(user);
 
     // 1. Device-specific action override
     if (deviceContext && override?.deviceOverrides?.[deviceContext]?.actions?.[moduleName]?.[action] !== undefined) {
@@ -885,7 +962,8 @@ export const permissionService = {
     if (userVal !== undefined) {
       if (userVal === 'deny' || userVal === false) return false;
       if (userVal === 'allow' || userVal === true) return true;
-      // If userVal === 'inherit', continue to role permission check
+      // Inherit without role baseline strictly defaults to DENY
+      if (userVal === 'inherit') return false;
     }
 
     // 4. User direct permissions field fallback
@@ -901,41 +979,10 @@ export const permissionService = {
       }
     }
 
-    // 5. Role Permission Baseline
-    const role = (user.role || '').trim();
-    if (role === 'Administrator' || role === 'Admin') {
-      return true;
-    }
-
-    const userRoles = this.getLocalUserRoles();
-    const assigned = userRoles[user.id || user.email];
-    let roleId = assigned?.roleId || user.roleId;
-
-    if (!roleId) {
-      const roles = this.getLocalRoles();
-      const matched = roles.find(r => r.roleName.toLowerCase() === role.toLowerCase());
-      if (matched) roleId = matched.id;
-    }
-
-    if (!roleId) {
-      if (role === 'Manager') roleId = 'ROLE-MANAGER';
-      else if (role === 'Purchasing') roleId = 'ROLE-PURCHASING';
-      else if (role === 'Stock Manager') roleId = 'ROLE-STOCK-MGR';
-      else if (role === 'Supervisor') roleId = 'ROLE-SUPERVISOR';
-      else if (role === 'Clocking Terminal' || role === 'Clocking Kiosk') roleId = 'ROLE-CLOCKING-TERMINAL';
-      else if (role === 'Employee' || role === 'Artisan') roleId = 'ROLE-EMPLOYEE';
-      else if (role === 'Viewer') roleId = 'ROLE-VIEWER';
-      else return false;
-    }
-
-    const allRolePerms = this.getLocalRolePermissions();
-    const rolePerms = allRolePerms[roleId];
-
-    if (!rolePerms || !rolePerms.permissions[moduleName]) {
-      return false;
-    }
-
-    return !!rolePerms.permissions[moduleName][action];
+    // 5. Pure User-Centric Authorization:
+    // Role has ZERO authorization power. Role names must NEVER grant, deny, bypass, or infer permissions.
+    // If a user has no configured functional permission: DEFAULT = DENY.
+    return false;
   },
 
   // Alias for granular action checks
@@ -1007,13 +1054,13 @@ export const permissionService = {
         return this.canAccessDeviceView(user, 'company_settings', dev);
 
       case 'mobile_deployment':
-        // Accessible to management, supervisors, HR, administrators on desktop/tablet, strictly excluded for clocking kiosk
+        // Accessible strictly if user has view access to mobile_deployment, system_admin, or company_settings
         if (this.isClockingTerminalUser(user)) return false;
-        return this.isAdmin(user) ||
+        return (
           this.canAccessDeviceView(user, 'system_admin', dev) ||
           this.canAccessDeviceView(user, 'company_settings', dev) ||
-          this.canAccessDeviceView(user, 'mobile_deployment', dev) ||
-          ['administrator', 'admin', 'manager', 'hr', 'supervisor'].includes((user?.role || '').toLowerCase());
+          this.canAccessDeviceView(user, 'mobile_deployment', dev)
+        );
 
       case 'mobile':
         return this.canAccessDevice(user, 'phone');
@@ -1314,7 +1361,7 @@ export const permissionService = {
     const email = (user?.email || '').toLowerCase().trim();
     const userId = user?.id || '';
     const role = (user?.role || 'Employee').trim();
-    const override = this.getUserOverride(userId || email);
+    const override = this.getUserOverride(user);
 
     const deviceAccess: UserDeviceAccess = override?.deviceAccess || user?.deviceAccess || {
       desktop: true,
@@ -1356,20 +1403,26 @@ export const permissionService = {
   // ================= HELPERS & AUDIT =================
   isClockingTerminalUser(user: any): boolean {
     if (!user) return false;
+    // Check user device access configuration
+    const override = this.getUserOverride(user);
+    const terminalAccess = override?.deviceAccess?.terminal ?? user.deviceAccess?.terminal;
+    if (terminalAccess === true && !override?.deviceAccess?.desktop && !override?.deviceAccess?.phone) {
+      return true;
+    }
     const role = (user.role || '').trim();
-    const email = (user.email || '').trim().toLowerCase();
     return (
       role === 'Clocking Kiosk' ||
       role === 'Clocking Terminal' ||
-      role === 'Clocking' ||
-      email === 'clocking@tsjoinery.co.za'
+      role === 'Clocking'
     );
   },
 
   isAdmin(user: any): boolean {
     if (!user) return false;
-    const role = (user.role || '').trim().toLowerCase();
-    return role === 'administrator' || role === 'admin';
+    // User-centric: Evaluates whether user has system administration permission rather than trusting role string
+    return this.hasPermission(user, 'User Assignments', 'Edit') ||
+      this.hasPermission(user, 'Roles & Permissions', 'Edit') ||
+      this.canAccessDeviceView(user, 'system_admin');
   },
 
   getGreeting(firstName?: string, date: Date = new Date()): string {
@@ -1443,7 +1496,7 @@ export const permissionService = {
 
     await this.logAudit(adminName, 'ROLE_CREATED', 'None', `Created role ${newRole.roleName} (${newRole.id})`);
 
-    if (db && APP_ID_PATH) {
+    if (db && APP_ID_PATH && canMutateAuthOrRBAC('createRole', newRole.id)) {
       try {
         await db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('roles').collection('items').doc(newRole.id).set(newRole);
         await db.collection('roles').doc(newRole.id).set(newRole);
@@ -1483,7 +1536,7 @@ export const permissionService = {
 
     await this.logAudit(adminName, 'ROLE_UPDATED', JSON.stringify(oldRole), JSON.stringify(updatedRole));
 
-    if (db && APP_ID_PATH) {
+    if (db && APP_ID_PATH && canMutateAuthOrRBAC('updateRole', roleId)) {
       try {
         await db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('roles').collection('items').doc(roleId).update(updatedRole);
         await db.collection('roles').doc(roleId).update(updatedRole);
@@ -1526,7 +1579,7 @@ export const permissionService = {
 
     await this.logAudit(adminName, 'ROLE_DUPLICATED', sourceRole.roleName, duplicatedRole.roleName);
 
-    if (db && APP_ID_PATH) {
+    if (db && APP_ID_PATH && canMutateAuthOrRBAC('duplicateRole', duplicatedRole.id)) {
       try {
         await db.collection('roles').doc(duplicatedRole.id).set(duplicatedRole);
         await db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('roles').collection('items').doc(duplicatedRole.id).set(duplicatedRole);
@@ -1564,7 +1617,7 @@ export const permissionService = {
 
     await this.logAudit(adminName, 'ROLE_DELETED', target.roleName, 'Deleted permanently');
 
-    if (db && APP_ID_PATH) {
+    if (db && APP_ID_PATH && canMutateAuthOrRBAC('deleteRole', roleId)) {
       try {
         await db.collection('roles').doc(roleId).delete();
         await db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('roles').collection('items').doc(roleId).delete();
@@ -1608,7 +1661,7 @@ export const permissionService = {
       `Saved ${Object.keys(newPermissions).length} module permissions`
     );
 
-    if (db && APP_ID_PATH) {
+    if (db && APP_ID_PATH && canMutateAuthOrRBAC('savePermissionsForRole', roleId)) {
       try {
         await db.collection('rolePermissions').doc(roleId).set(updatedRolePerms);
         await db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('rolePermissions').collection('items').doc(roleId).set(updatedRolePerms);
@@ -1659,7 +1712,7 @@ export const permissionService = {
 
     await this.logAudit(resolvedAdminName, 'USER_ROLE_ASSIGNED', `${userName}: ${oldRole}`, `${userName}: ${resolvedRoleName}`);
 
-    if (db && APP_ID_PATH) {
+    if (db && APP_ID_PATH && canMutateAuthOrRBAC('assignUserRole', userId)) {
       try {
         await db.collection('userRoles').doc(userId).set(assignment);
         await db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('userRoles').collection('items').doc(userId).set(assignment);
@@ -1759,36 +1812,48 @@ export const permissionService = {
   },
 
   subscribeUserOverrides(callback: (overrides: Record<string, UserPermissionOverride>) => void) {
+    // Immediately emit current in-memory / local state
     callback(this.getLocalUserOverrides());
 
-    if (db && APP_ID_PATH) {
+    overrideListeners.add(callback);
+
+    let unsubFirestore = () => {};
+
+    if (db) {
       try {
-        const unsub = db.collection('userPermissionOverrides').onSnapshot(
+        const unsub = db.collection(CANONICAL_PERMISSIONS_COLLECTION).onSnapshot(
           snap => {
-            if (snap && !snap.empty) {
-              const map: Record<string, UserPermissionOverride> = { ...DEFAULT_USER_OVERRIDES };
+            if (snap) {
+              const items: Array<{ id: string; data: UserPermissionOverride }> = [];
               snap.forEach(d => {
                 const data = d.data() as UserPermissionOverride;
-                if (!data) return;
-                const emailKey = data.userEmail?.toLowerCase().trim();
-                const idKey = data.userId?.trim();
-                if (emailKey) map[emailKey] = data;
-                if (idKey) map[idKey] = data;
-                map[d.id] = data;
+                if (data) {
+                  items.push({ id: d.id, data });
+                }
               });
-              this.saveLocalUserOverrides(map);
-              callback(map);
+              const freshMap = rebuildPermissionMaps(items);
+              this.saveLocalUserOverrides(freshMap);
+              overrideListeners.forEach(listener => {
+                try {
+                  listener(freshMap);
+                } catch (e) {
+                  console.warn('Listener notification error:', e);
+                }
+              });
             }
           },
-          err => console.warn('UserOverrides subscription error:', err)
+          err => console.warn('userPermissionOverrides subscription error:', err)
         );
-        return unsub;
+        unsubFirestore = unsub;
       } catch (e) {
         console.warn('Unable to subscribe to userPermissionOverrides collection:', e);
       }
     }
 
-    return () => {};
+    return () => {
+      overrideListeners.delete(callback);
+      unsubFirestore();
+    };
   },
 
   subscribeAuditLogs(callback: (logs: RoleAuditLogEntry[]) => void) {

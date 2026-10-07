@@ -1,6 +1,7 @@
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/auth';
 import { db, APP_ID_PATH, firebaseConfig } from './firebase';
+import { canMutateAuthOrRBAC } from './services/previewSafety';
 import { auditLogger } from './audit';
 import { permissionService } from './services/permissionService';
 import { UserDeviceAccess, PermissionAction } from './types';
@@ -12,15 +13,16 @@ export const SECURITY = {
   SUPER_USER_PIN: 'Elrico1603!!'
 };
 
-// Unified proxy: All role/permission evaluation routes through permissionService
+// Legacy helper - In pure user-centric model, Role has ZERO authorization power.
+// These methods default to false unless evaluated against an authenticated AppUser object with user permissions.
 export const rolePermissions = {
-  canManageUsers: (role: string) => permissionService.hasPermission({ role }, 'User Assignments', 'Edit'),
-  canApproveUsers: (role: string) => permissionService.hasPermission({ role }, 'User Assignments', 'Approve'),
-  canManageOrders: (role: string) => permissionService.hasPermission({ role }, 'Purchase Orders', 'Edit') || permissionService.hasPermission({ role }, 'Stock Requests', 'Edit'),
-  canViewAnalytics: (role: string) => permissionService.hasPermission({ role }, 'Work Analytics', 'View'),
-  canAccessMobile: (role: string) => permissionService.canAccessDevice({ role }, 'phone'),
-  canClock: (role: string) => permissionService.hasPermission({ role }, 'Clocking', 'Create'),
-  isStockManager: (role: string) => role === 'Purchasing' || role === 'Stock Manager'
+  canManageUsers: (userOrRole: any) => typeof userOrRole === 'object' && userOrRole ? permissionService.hasPermission(userOrRole, 'User Assignments', 'Edit') : false,
+  canApproveUsers: (userOrRole: any) => typeof userOrRole === 'object' && userOrRole ? permissionService.hasPermission(userOrRole, 'User Assignments', 'Approve') : false,
+  canManageOrders: (userOrRole: any) => typeof userOrRole === 'object' && userOrRole ? (permissionService.hasPermission(userOrRole, 'Purchase Orders', 'Edit') || permissionService.hasPermission(userOrRole, 'Stock Requests', 'Edit')) : false,
+  canViewAnalytics: (userOrRole: any) => typeof userOrRole === 'object' && userOrRole ? permissionService.hasPermission(userOrRole, 'Work Analytics', 'View') : false,
+  canAccessMobile: (userOrRole: any) => typeof userOrRole === 'object' && userOrRole ? permissionService.canAccessDevice(userOrRole, 'phone') : false,
+  canClock: (userOrRole: any) => typeof userOrRole === 'object' && userOrRole ? permissionService.hasPermission(userOrRole, 'Clocking', 'Create') : false,
+  isStockManager: (userOrRole: any) => typeof userOrRole === 'object' && userOrRole ? permissionService.hasPermission(userOrRole, 'Inventory', 'Edit') : false
 };
 
 export interface AppUser {
@@ -60,20 +62,22 @@ const STORAGE_CACHED_USERS_KEY = 'ts_hub_cached_users_v1';
 
 const getInitialUsersPool = (): AppUser[] => {
   try {
-    const cached = localStorage.getItem(STORAGE_CACHED_USERS_KEY);
-    if (cached) {
-      const parsed = JSON.parse(cached) as AppUser[];
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        // Merge with defaults
-        const map = new Map<string, AppUser>();
-        DEFAULT_ACCOUNTS.forEach(def => map.set(def.email.toLowerCase().trim(), { ...def }));
-        parsed.forEach(u => {
-          if (u && u.email) {
-            const key = u.email.toLowerCase().trim();
-            map.set(key, { ...(map.get(key) || {}), ...u });
-          }
-        });
-        return Array.from(map.values());
+    if (typeof localStorage !== 'undefined') {
+      const cached = localStorage.getItem(STORAGE_CACHED_USERS_KEY);
+      if (cached) {
+        const parsed = JSON.parse(cached) as AppUser[];
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          // Merge with defaults
+          const map = new Map<string, AppUser>();
+          DEFAULT_ACCOUNTS.forEach(def => map.set(def.email.toLowerCase().trim(), { ...def }));
+          parsed.forEach(u => {
+            if (u && u.email) {
+              const key = u.email.toLowerCase().trim();
+              map.set(key, { ...(map.get(key) || {}), ...u });
+            }
+          });
+          return Array.from(map.values());
+        }
       }
     }
   } catch (e) {
@@ -102,7 +106,7 @@ export const authManager = {
             this.clearSession();
             return null;
           }
-          const override = permissionService.getUserOverride(user.id || user.email);
+          const override = permissionService.getUserOverride(found || user);
           return {
             ...user,
             ...(found || {}),
@@ -120,7 +124,7 @@ export const authManager = {
   saveSession(user: AppUser): void {
     try {
       if (!user || !user.email) return;
-      const override = permissionService.getUserOverride(user.id || user.email);
+      const override = permissionService.getUserOverride(user);
       const sessionUser: AppUser = {
         ...user,
         deviceAccess: override?.deviceAccess || user.deviceAccess,
@@ -218,22 +222,24 @@ export const authManager = {
 
       const existing = canonicalMap.get(email);
       if (existing) {
-        // Merge attributes, keeping proper names and active flags
+        // Live user u from Firestore is authoritative and always wins over default account
         canonicalMap.set(email, {
           ...existing,
           ...u,
-          id: existing.id || u.id,
-          name: existing.name || u.name,
-          firstName: existing.firstName || u.firstName || (existing.name || u.name).split(' ')[0],
-          lastName: existing.lastName || u.lastName || (existing.name || u.name).split(' ').slice(1).join(' '),
+          id: u.id || existing.id,
+          name: u.name || existing.name,
+          firstName: u.firstName || (u.name ? u.name.split(' ')[0] : existing.firstName),
+          lastName: u.lastName || (u.name ? u.name.split(' ').slice(1).join(' ') : existing.lastName),
           email,
           role: u.role || existing.role,
+          department: u.department || existing.department,
           active: u.active !== undefined ? u.active : true,
-          pin: u.pin || existing.pin || '1234',
+          pin: u.pin !== undefined ? u.pin : (existing.pin || ''),
           branchName: u.branchName || existing.branchName,
           branchId: u.branchId || existing.branchId,
           deviceAccess: u.deviceAccess || existing.deviceAccess,
-          deviceViewAccess: u.deviceViewAccess || existing.deviceViewAccess
+          deviceViewAccess: u.deviceViewAccess || existing.deviceViewAccess,
+          permissions: (u as any).permissions || (existing as any).permissions || {}
         });
       } else {
         canonicalMap.set(email, {
@@ -242,12 +248,19 @@ export const authManager = {
           firstName: u.firstName || u.name?.split(' ')[0] || 'User',
           lastName: u.lastName || u.name?.split(' ').slice(1).join(' ') || '',
           active: u.active !== undefined ? u.active : true,
-          pin: u.pin || '1234'
+          pin: u.pin || ''
         });
       }
     });
 
-    const mergedUsers = Array.from(canonicalMap.values());
+    const mergedUsers = Array.from(canonicalMap.values()).map(user => {
+      const override = permissionService.getUserOverride(user);
+      return {
+        ...user,
+        deviceAccess: override?.deviceAccess || user.deviceAccess,
+        deviceViewAccess: override?.deviceViewAccess || user.deviceViewAccess
+      };
+    });
     internalUsersPool = mergedUsers;
     try {
       localStorage.setItem(STORAGE_CACHED_USERS_KEY, JSON.stringify(mergedUsers));
@@ -291,15 +304,7 @@ export const authManager = {
     const emailFormat = normalizedInput.includes('@') ? normalizedInput : `${normalizedInput}@tsjoinery.co.za`;
 
     const sourceList = (activeUsers && activeUsers.length > 0) ? activeUsers : internalUsersPool;
-    const remoteMap = new Map(
-      sourceList
-        .filter(u => u && u.email)
-        .map(u => [String(u.email).toLowerCase().trim(), u])
-    );
-    const candidateList = [
-      ...sourceList,
-      ...DEFAULT_ACCOUNTS.filter(def => !remoteMap.has(String(def.email).toLowerCase().trim()))
-    ];
+    const hasLiveUsers = Boolean(sourceList && sourceList.length > 0);
 
     const checkCandidate = (user: AppUser, source: string) => {
       if (!user) return { isMatch: false, reason: 'Null user object' };
@@ -353,28 +358,38 @@ export const authManager = {
       return { isMatch: true, user, candidateTrace };
     };
 
-    // 1. Try candidate list first
     let matchedUser: AppUser | null = null;
-    let identifierFound = false;
+    let liveUserIdentified = false;
 
-    for (const user of candidateList) {
-      const result = checkCandidate(user, 'candidateList');
-      if (result.reason !== 'Identifier mismatch') {
-        identifierFound = true;
-      }
-      if (result.isMatch && result.user) {
-        matchedUser = result.user;
-        break;
-      }
-    }
-
-    // 2. Fallback to DEFAULT_ACCOUNTS directly if no match found yet
-    if (!matchedUser) {
-      for (const defUser of DEFAULT_ACCOUNTS) {
-        const result = checkCandidate(defUser, 'DEFAULT_ACCOUNTS');
+    // 1. If live users exist in the active user pool, evaluate ONLY against live users.
+    if (hasLiveUsers) {
+      for (const user of sourceList) {
+        const result = checkCandidate(user, 'liveUsers');
         if (result.reason !== 'Identifier mismatch') {
-          identifierFound = true;
+          liveUserIdentified = true;
         }
+        if (result.isMatch && result.user) {
+          matchedUser = result.user;
+          break;
+        }
+      }
+
+      // If an existing live user was identified, decision is FINAL based on live user credential.
+      // NEVER fall back to DEFAULT_ACCOUNTS for existing live users or missing live users when live pool is active.
+      if (liveUserIdentified && !matchedUser) {
+        console.log('[AUTH TRACE] Live user identified but credential rejected. DEFAULT_ACCOUNTS fallback blocked.');
+        return null;
+      }
+
+      // If no live user was found and live pool is active, reject immediately (no silent DEFAULT_ACCOUNTS fallback).
+      if (!matchedUser) {
+        console.log('[AUTH TRACE] Rejection: No active live user matching identifier found.');
+        return null;
+      }
+    } else {
+      // 2. Offline / isolated in-memory development fallback: ONLY used when live user pool is completely empty (0 users loaded).
+      for (const defUser of DEFAULT_ACCOUNTS) {
+        const result = checkCandidate(defUser, 'DEFAULT_ACCOUNTS_OFFLINE_DEV');
         if (result.isMatch && result.user) {
           matchedUser = result.user;
           break;
@@ -382,18 +397,8 @@ export const authManager = {
       }
     }
 
-    if (!matchedUser && !identifierFound) {
-      console.log('[AUTH TRACE] Rejection:', {
-        candidateFound: false,
-        rejectionReason: `No candidate matching identifier '${normalizedInput}' found in pool of ${candidateList.length} users`,
-        candidateCount: candidateList.length,
-        hasElricoInPool: candidateList.some(u => String(u.email).toLowerCase().includes('elrico')),
-        hasJanahInPool: candidateList.some(u => String(u.email).toLowerCase().includes('janah'))
-      });
-    }
-
     if (matchedUser) {
-      const override = permissionService.getUserOverride(matchedUser.id || matchedUser.email);
+      const override = permissionService.getUserOverride(matchedUser);
       return {
         ...matchedUser,
         deviceAccess: override?.deviceAccess || matchedUser.deviceAccess,
@@ -436,7 +441,7 @@ export const authManager = {
 
     const approvedUser: AppUser = { ...user, status: 'active', isApproved: true };
 
-    if (db && APP_ID_PATH) {
+    if (db && APP_ID_PATH && canMutateAuthOrRBAC('approvePendingUser', user.id)) {
       try {
         await db.collection('artifacts')
           .doc(APP_ID_PATH)
@@ -514,35 +519,40 @@ export const authManager = {
     // Note: Creating via secondary Firebase app prevents the client browser from signing out
     // or mutating the current administrator's active session.
     let authUid = '';
-    const secondaryAppName = `user-creator-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
-    let secondaryApp: any = null;
+    if (canMutateAuthOrRBAC('createAuthUser', normalizedEmail)) {
+      const secondaryAppName = `user-creator-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+      let secondaryApp: any = null;
 
-    try {
-      secondaryApp = firebase.initializeApp(firebaseConfig, secondaryAppName);
-      const userCred = await secondaryApp.auth().createUserWithEmailAndPassword(normalizedEmail, pin);
-      authUid = userCred.user?.uid || '';
-    } catch (authErr: any) {
-      if (authErr.code === 'auth/email-already-in-use') {
-        // If Auth account exists but Firestore profile was missing, we allow profile repair
-        if (existingInLocal) {
-          throw new Error("User already exists.");
+      try {
+        secondaryApp = firebase.initializeApp(firebaseConfig, secondaryAppName);
+        const userCred = await secondaryApp.auth().createUserWithEmailAndPassword(normalizedEmail, pin);
+        authUid = userCred.user?.uid || '';
+      } catch (authErr: any) {
+        if (authErr.code === 'auth/email-already-in-use') {
+          // If Auth account exists but Firestore profile was missing, we allow profile repair
+          if (existingInLocal) {
+            throw new Error("User already exists.");
+          }
+          console.log("Firebase Auth account already exists. Proceeding with Firestore profile creation/repair...");
+        } else if (authErr.code === 'auth/weak-password') {
+          throw new Error("Password must be at least 6 characters.");
+        } else if (authErr.code === 'auth/invalid-email') {
+          throw new Error("Invalid email address format.");
+        } else {
+          throw new Error(`Authentication creation failed: ${authErr.message || 'Unknown error'}`);
         }
-        console.log("Firebase Auth account already exists. Proceeding with Firestore profile creation/repair...");
-      } else if (authErr.code === 'auth/weak-password') {
-        throw new Error("Password must be at least 6 characters.");
-      } else if (authErr.code === 'auth/invalid-email') {
-        throw new Error("Invalid email address format.");
-      } else {
-        throw new Error(`Authentication creation failed: ${authErr.message || 'Unknown error'}`);
-      }
-    } finally {
-      if (secondaryApp) {
-        try {
-          await secondaryApp.delete();
-        } catch (delErr) {
-          console.warn("Secondary app cleanup:", delErr);
+      } finally {
+        if (secondaryApp) {
+          try {
+            await secondaryApp.delete();
+          } catch (delErr) {
+            console.warn("Secondary app cleanup:", delErr);
+          }
         }
       }
+    } else {
+      authUid = `usr-preview-${Date.now()}`;
+      console.log(`[PREVIEW SAFETY] Simulating user creation in Preview mode for ${normalizedEmail} (authUid: ${authUid})`);
     }
 
     // 4. Create Firestore User Profile
@@ -583,7 +593,7 @@ export const authManager = {
       }
     };
 
-    if (db && APP_ID_PATH) {
+    if (db && APP_ID_PATH && canMutateAuthOrRBAC('createFirestoreUser', newUser.id)) {
       try {
         await db.collection('artifacts')
           .doc(APP_ID_PATH)
@@ -629,7 +639,7 @@ export const authManager = {
 
     await auditLogger.log('USER_DELETED', user.email || 'N/A', `Deleted active user ${user.name}`);
 
-    if (db && APP_ID_PATH) {
+    if (db && APP_ID_PATH && canMutateAuthOrRBAC('deleteActiveUser', user.id)) {
       try {
         await db.collection('artifacts')
           .doc(APP_ID_PATH)
@@ -647,7 +657,7 @@ export const authManager = {
   async rejectPendingUser(user: AppUser): Promise<null> {
     await auditLogger.log('USER_REJECTED', user.email, `Rejected role ${user.role}`);
 
-    if (db && APP_ID_PATH) {
+    if (db && APP_ID_PATH && canMutateAuthOrRBAC('rejectPendingUser', user.id)) {
       try {
         await db.collection('artifacts')
           .doc(APP_ID_PATH)
@@ -665,8 +675,10 @@ export const authManager = {
   }
 };
 
-const globalWindow = window as any;
-globalWindow.USER_ROLES = USER_ROLES;
-globalWindow.SECURITY = SECURITY;
-globalWindow.rolePermissions = rolePermissions;
-globalWindow.authManager = authManager;
+if (typeof window !== 'undefined') {
+  const globalWindow = window as any;
+  globalWindow.USER_ROLES = USER_ROLES;
+  globalWindow.SECURITY = SECURITY;
+  globalWindow.rolePermissions = rolePermissions;
+  globalWindow.authManager = authManager;
+}

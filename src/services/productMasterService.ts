@@ -8,6 +8,15 @@ import {
   MasterAuditLog
 } from '../types';
 import { inventoryService } from './inventoryService';
+import { canMutateSupplier } from './previewSafety';
+import {
+  supplierService,
+  INITIAL_SUPPLIERS,
+  DEFAULT_PO_MESSAGE,
+  SupplierListener
+} from './supplierService';
+
+export { DEFAULT_PO_MESSAGE };
 
 const STORAGE_PRODUCTS_KEY = 'tsj_products_master_v1';
 const STORAGE_CATEGORIES_KEY = 'tsj_categories_master_v1';
@@ -23,52 +32,6 @@ const INITIAL_CATEGORIES: ProductCategory[] = [
   { id: 'CAT-104', name: 'Consumables', code: 'CONSUMABLE', description: 'Adhesives, sandpaper, drill bits', status: 'Active', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
   { id: 'CAT-105', name: 'Machinery Parts', code: 'MACHINERY', description: 'CNC tooling, saw blades, belts', status: 'Active', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
   { id: 'CAT-106', name: 'Packaging', code: 'PACKAGING', description: 'Bubble wrap, strapping, boxes', status: 'Active', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
-];
-
-// Initial Sample Suppliers
-const INITIAL_SUPPLIERS: Supplier[] = [
-  {
-    id: 'SUP-001',
-    supplierName: 'Sondor Wood & Boards',
-    supplierCode: 'SONDOR',
-    contactPerson: 'David Miller',
-    telephone: '+27 21 555 0192',
-    email: 'orders@sondorwood.co.za',
-    physicalAddress: '12 Timber Way, Paarden Eiland, Cape Town',
-    leadTimeDays: 3,
-    preferredSupplier: true,
-    status: 'Active',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  },
-  {
-    id: 'SUP-002',
-    supplierName: 'Fasteners SA',
-    supplierCode: 'FASTENERS',
-    contactPerson: 'Sarah Jenkins',
-    telephone: '+27 21 555 8821',
-    email: 'sales@fastenerssa.co.za',
-    physicalAddress: '45 Industrial Crescent, Epping, Cape Town',
-    leadTimeDays: 2,
-    preferredSupplier: true,
-    status: 'Active',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  },
-  {
-    id: 'SUP-003',
-    supplierName: 'Blum Hardware',
-    supplierCode: 'BLUM',
-    contactPerson: 'Johan van der Merwe',
-    telephone: '+27 11 444 3300',
-    email: 'support@blumhardware.co.za',
-    physicalAddress: '88 Joinery Park, Midrand, Johannesburg',
-    leadTimeDays: 5,
-    preferredSupplier: true,
-    status: 'Active',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  }
 ];
 
 // Initial Sample Warehouse Locations
@@ -175,13 +138,11 @@ function getMasterDocRef() {
 
 type ProductListener = (products: ProductMaster[]) => void;
 type CategoryListener = (categories: ProductCategory[]) => void;
-type SupplierListener = (suppliers: Supplier[]) => void;
 type LocationListener = (locations: WarehouseLocation[]) => void;
 type AuditListener = (audits: MasterAuditLog[]) => void;
 
 const productListeners = new Set<ProductListener>();
 const categoryListeners = new Set<CategoryListener>();
-const supplierListeners = new Set<SupplierListener>();
 const locationListeners = new Set<LocationListener>();
 const auditListeners = new Set<AuditListener>();
 
@@ -234,26 +195,11 @@ export const productMasterService = {
   },
 
   getLocalSuppliers(): Supplier[] {
-    try {
-      const stored = localStorage.getItem(STORAGE_SUPPLIERS_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch (e) {
-      console.error('Failed to parse local suppliers:', e);
-    }
-    this.saveLocalSuppliers(INITIAL_SUPPLIERS);
-    return INITIAL_SUPPLIERS;
+    return supplierService.getLocalSuppliers();
   },
 
   saveLocalSuppliers(items: Supplier[]): void {
-    try {
-      localStorage.setItem(STORAGE_SUPPLIERS_KEY, JSON.stringify(items));
-      supplierListeners.forEach(cb => cb(items));
-    } catch (e) {
-      console.error('Failed to save local suppliers:', e);
-    }
+    supplierService.saveLocalSuppliers(items);
   },
 
   getLocalLocations(): WarehouseLocation[] {
@@ -467,28 +413,7 @@ export const productMasterService = {
   },
 
   async deleteSupplier(id: string, user: string): Promise<boolean> {
-    const current = this.getLocalSuppliers();
-    const supp = current.find(s => s.id === id);
-    const filtered = current.filter(s => s.id !== id);
-    this.saveLocalSuppliers(filtered);
-
-    if (supp) {
-      await this.logMasterAction({
-        entityType: 'Supplier',
-        entityId: id,
-        entityName: supp.supplierName,
-        action: 'Deleted',
-        user,
-        reason: 'Permanently deleted supplier'
-      });
-    }
-
-    try {
-      await getMasterDocRef().collection('suppliers').doc(id).delete();
-    } catch (e) {
-      console.warn('Firestore supplier delete failed:', e);
-    }
-    return true;
+    return supplierService.deleteSupplier(id, user);
   },
 
   async deleteCategory(id: string, user: string): Promise<boolean> {
@@ -690,94 +615,17 @@ export const productMasterService = {
     return updated;
   },
 
-  // Supplier CRUD
+  // Supplier CRUD - Delegated to authoritative supplierService
   subscribeSuppliers(callback: SupplierListener): () => void {
-    supplierListeners.add(callback);
-    callback(this.getLocalSuppliers());
-
-    try {
-      const unsub = getMasterDocRef()
-        .collection('suppliers')
-        .onSnapshot(
-          snapshot => {
-            if (!snapshot.empty) {
-              const items: Supplier[] = snapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data()
-              } as Supplier));
-              this.saveLocalSuppliers(items);
-            }
-          },
-          err => console.warn('Suppliers subscription offline:', err)
-        );
-      return () => {
-        supplierListeners.delete(callback);
-        unsub();
-      };
-    } catch (e) {
-      return () => supplierListeners.delete(callback);
-    }
+    return supplierService.subscribeSuppliers(callback);
   },
 
   async createSupplier(data: Omit<Supplier, 'id' | 'createdAt' | 'updatedAt'>, user: string): Promise<Supplier> {
-    const newSupp: Supplier = {
-      ...data,
-      id: `SUP-${Date.now()}`,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-
-    const current = this.getLocalSuppliers();
-    this.saveLocalSuppliers([newSupp, ...current]);
-
-    await this.logMasterAction({
-      entityType: 'Supplier',
-      entityId: newSupp.id,
-      entityName: newSupp.supplierName,
-      action: 'Created',
-      user,
-      reason: 'Created new supplier'
-    });
-
-    try {
-      await getMasterDocRef().collection('suppliers').doc(newSupp.id).set(newSupp);
-    } catch (e) {
-      console.warn('Firestore supplier create failed:', e);
-    }
-
-    return newSupp;
+    return supplierService.createSupplier(data, user);
   },
 
   async updateSupplier(id: string, updates: Partial<Supplier>, user: string): Promise<Supplier> {
-    const current = this.getLocalSuppliers();
-    const idx = current.findIndex(s => s.id === id);
-    if (idx === -1) throw new Error('Supplier not found');
-
-    const updated = {
-      ...current[idx],
-      ...updates,
-      updatedAt: new Date().toISOString()
-    };
-
-    current[idx] = updated;
-    this.saveLocalSuppliers([...current]);
-
-    await this.logMasterAction({
-      entityType: 'Supplier',
-      entityId: updated.id,
-      entityName: updated.supplierName,
-      action: updates.status === 'Archived' ? 'Archived' : 'Updated',
-      user,
-      reason: updates.status === 'Archived' ? 'Supplier archived' : 'Supplier updated'
-    });
-
-    try {
-      await getMasterDocRef().collection('suppliers').doc(id).update(updated);
-    } catch (e) {
-      console.warn('Firestore supplier update failed:', e);
-    }
-
-    return updated;
+    return supplierService.updateSupplier(id, updates, user);
   },
 
   // Location CRUD

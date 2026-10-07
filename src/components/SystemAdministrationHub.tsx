@@ -52,9 +52,11 @@ export const SystemAdministrationHub: React.FC<SystemAdministrationHubProps> = (
   setVoiceEnabled,
   initialTab = 'company_settings'
 }) => {
-  const isAdmin = currentUser?.role === 'Admin' || currentUser?.role === 'Administrator';
-  const isManager = ['Supervisor', 'HR', 'Stock Manager'].includes(currentUser?.role || '');
-  const hasAccess = isAdmin || isManager;
+  const hasAccess = permissionService.canAccessDeviceView(currentUser, 'system_admin') ||
+    permissionService.canAccessDeviceView(currentUser, 'company_settings') ||
+    permissionService.hasPermission(currentUser, 'System Settings', 'View') ||
+    permissionService.hasPermission(currentUser, 'Company Information', 'View') ||
+    permissionService.hasPermission(currentUser, 'User Assignments', 'View');
 
   const [activeTab, setActiveTab] = useState<SystemAdminTab>(initialTab);
 

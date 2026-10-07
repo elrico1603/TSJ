@@ -2,6 +2,9 @@ import React, { useState } from 'react';
 import { PurchaseOrder } from '../types';
 import { Icon } from './Icon';
 import { purchaseOrderService } from '../services/purchaseOrderService';
+import { companyService } from '../services/companyService';
+import { permissionService } from '../services/permissionService';
+import { downloadPurchaseOrderPdf } from '../services/purchaseOrderPdfService';
 
 interface PurchaseOrderDocumentModalProps {
   po: PurchaseOrder;
@@ -19,16 +22,24 @@ export const PurchaseOrderDocumentModal: React.FC<PurchaseOrderDocumentModalProp
   announce
 }) => {
   const [isApproving, setIsApproving] = useState(false);
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [approvalNotes, setApprovalNotes] = useState('');
   const [showApprovalPrompt, setShowApprovalPrompt] = useState(false);
+  const [showInternalAudit, setShowInternalAudit] = useState(false);
 
-  const canApprove = po.status === 'Draft' || po.status === 'Pending Approval';
+  // Authoritative company and branch information
+  const companyInfo = companyService.getLocalCompanyInfo();
+  const branches = companyService.getLocalBranches();
+  const branch = branches.find(b => b.id === po.branchId || b.branchCode === po.branchId);
+
+  const canApprove = (po.status === 'Draft' || po.status === 'Pending Approval') &&
+    permissionService.hasPermission(currentUser, 'Purchase Orders', 'Approve');
 
   const handleApproveSubmit = async () => {
     setIsApproving(true);
-    const username = currentUser?.name || currentUser?.email || 'Janah (Procurement Manager)';
+    const approverName = currentUser?.name || currentUser?.email || 'Authorized Approver';
     try {
-      await purchaseOrderService.approvePO(po.id, username, approvalNotes || 'Approved by Janah');
+      await purchaseOrderService.approvePO(po.id, currentUser, approvalNotes || `Approved by ${approverName}`);
       if (announce) announce(`Purchase Order ${po.poNumber} has been approved.`);
       setShowApprovalPrompt(false);
       onStatusChanged();
@@ -40,13 +51,50 @@ export const PurchaseOrderDocumentModal: React.FC<PurchaseOrderDocumentModalProp
   };
 
   const handlePrint = () => {
+    const prevTitle = document.title;
+    document.title = `Purchase_Order_${po.poNumber}`;
     window.print();
+    setTimeout(() => {
+      document.title = prevTitle;
+    }, 1000);
   };
 
-  const handleExportPDF = () => {
-    // Generate simple print-to-pdf instruction or trigger print dialog
-    window.print();
+  const handleExportPDF = async () => {
+    const prevTitle = document.title;
+    document.title = `Purchase_Order_${po.poNumber}`;
+    setIsExportingPdf(true);
+    if (announce) {
+      announce(`Generating programmatic PDF for Purchase Order ${po.poNumber}...`);
+    }
+
+    try {
+      await downloadPurchaseOrderPdf(po);
+      if (announce) {
+        announce(`Purchase Order ${po.poNumber} PDF generated and downloaded successfully.`);
+      }
+    } catch (err: any) {
+      console.warn('[PDF Export] Programmatic generation notice, falling back to print dialog:', err);
+      window.print();
+    } finally {
+      setIsExportingPdf(false);
+      setTimeout(() => {
+        document.title = prevTitle;
+      }, 1000);
+    }
   };
+
+  // Document presentation filter: remove conversational greetings (e.g. "Hi Rowan...")
+  const sanitizeDeliveryInstructions = (instructions?: string): string => {
+    if (!instructions) return '';
+    return instructions
+      .replace(/hi\s+[a-z]+/gi, '')
+      .replace(/here\s+is\s+our\s+order,?\s*thank\s+you\.?/gi, '')
+      .replace(/here\s+is\s+our\s+order/gi, '')
+      .replace(/thank\s+you\.?/gi, '')
+      .trim();
+  };
+
+  const cleanedInstructions = sanitizeDeliveryInstructions(po.deliveryInstructions);
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -68,11 +116,11 @@ export const PurchaseOrderDocumentModal: React.FC<PurchaseOrderDocumentModalProp
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/85 backdrop-blur-md overflow-y-auto animate-fadeIn">
-      <div className="bg-[#151515] border border-white/10 rounded-2xl w-full max-w-4xl overflow-hidden shadow-2xl my-6 flex flex-col max-h-[92vh]">
+    <div className="print-wrapper fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/85 backdrop-blur-md overflow-y-auto animate-fadeIn print:p-0 print:m-0 print:bg-white print:static print:min-h-0 print:h-auto print:overflow-visible">
+      <div className="bg-[#151515] border border-white/10 rounded-2xl w-full max-w-4xl overflow-hidden shadow-2xl my-6 flex flex-col max-h-[92vh] print:border-none print:shadow-none print:p-0 print:m-0 print:w-full print:max-w-none print:static print:bg-white print:overflow-visible print:max-h-none">
         
-        {/* Top Header Bar (Action Controls) */}
-        <div className="p-4 bg-[#1f1f1f] border-b border-white/10 flex flex-wrap items-center justify-between gap-3 print:hidden">
+        {/* Top Header Bar (Action Controls - Hidden during print) */}
+        <div className="p-4 bg-[#1f1f1f] border-b border-white/10 flex flex-wrap items-center justify-between gap-3 no-print print:hidden">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-[#ff8c00]/10 border border-[#ff8c00]/30 flex items-center justify-center text-[#ff8c00]">
               <Icon name="file-text" size={20} />
@@ -104,6 +152,7 @@ export const PurchaseOrderDocumentModal: React.FC<PurchaseOrderDocumentModalProp
             <button
               onClick={handlePrint}
               className="px-3.5 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold uppercase transition-all flex items-center gap-1.5 border border-white/10"
+              title="Print A4 Purchase Order"
             >
               <Icon name="printer" size={16} />
               <span>Print</span>
@@ -111,10 +160,12 @@ export const PurchaseOrderDocumentModal: React.FC<PurchaseOrderDocumentModalProp
 
             <button
               onClick={handleExportPDF}
-              className="px-3.5 py-2 bg-[#ff8c00] hover:bg-[#e07b00] text-white rounded-xl text-xs font-bold uppercase transition-all flex items-center gap-1.5"
+              disabled={isExportingPdf}
+              className="px-3.5 py-2 bg-[#ff8c00] hover:bg-[#e07b00] disabled:opacity-50 text-black font-black rounded-xl text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 shadow-md"
+              title="Generate and download authentic PDF"
             >
               <Icon name="download" size={16} />
-              <span>Export PDF</span>
+              <span>{isExportingPdf ? 'Exporting...' : 'Export PDF'}</span>
             </button>
 
             <button
@@ -126,9 +177,9 @@ export const PurchaseOrderDocumentModal: React.FC<PurchaseOrderDocumentModalProp
           </div>
         </div>
 
-        {/* Approval Prompt Box */}
+        {/* Approval Prompt Box (Hidden during print) */}
         {showApprovalPrompt && (
-          <div className="p-4 bg-emerald-500/10 border-b border-emerald-500/30 space-y-3 print:hidden">
+          <div className="p-4 bg-emerald-500/10 border-b border-emerald-500/30 space-y-3 no-print print:hidden">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-black uppercase text-emerald-400 flex items-center gap-2">
                 <Icon name="check-circle" size={16} />
@@ -157,29 +208,37 @@ export const PurchaseOrderDocumentModal: React.FC<PurchaseOrderDocumentModalProp
           </div>
         )}
 
-        {/* PRINTABLE DOCUMENT BODY */}
-        <div className="p-6 sm:p-10 bg-white text-slate-900 overflow-y-auto flex-1 font-sans space-y-8 print:p-0 print:overflow-visible">
-          
+        {/* PRINTABLE DOCUMENT BODY (A4 Isolated Print Container) */}
+        <div 
+          id="po-print-container" 
+          className="po-document-print p-6 sm:p-10 bg-white text-slate-900 overflow-y-auto flex-1 font-sans space-y-6 print:p-0 print:m-0 print:w-full print:max-w-none print:static print:overflow-visible"
+        >
           {/* Document Header Section */}
-          <div className="flex flex-col sm:flex-row justify-between items-start border-b-2 border-slate-900 pb-6 gap-6">
+          <div className="flex flex-col sm:flex-row justify-between items-start border-b-2 border-slate-900 pb-5 gap-6 po-avoid-break">
             <div>
               <div className="flex items-center gap-3">
-                <div className="w-12 h-12 bg-amber-500 text-slate-950 font-black rounded-xl flex items-center justify-center text-xl tracking-tighter">
+                <div className="w-12 h-12 bg-amber-500 text-slate-950 font-black rounded-xl flex items-center justify-center text-xl tracking-tighter shadow-sm">
                   TS
                 </div>
                 <div>
                   <h1 className="text-2xl font-black text-slate-900 tracking-tight uppercase">
-                    TS JOINERY & TIMBER PRODUCTS
+                    {companyInfo.companyName || 'TS JOINERY & TIMBER WORKS'}
                   </h1>
                   <p className="text-xs font-bold text-slate-600">
-                    Precision Joinery, Custom Cabinetry & Architectural Woodwork
+                    {companyInfo.notes || 'Precision Joinery, Custom Cabinetry & Architectural Woodwork'}
                   </p>
                 </div>
               </div>
-              <div className="mt-3 text-xs text-slate-600 space-y-0.5">
-                <p>14 Factory Road, Montague Gardens, Cape Town, 7441</p>
-                <p>Tel: +27 (0) 21 551 9000 | Email: procurement@tsjoinery.co.za</p>
-                <p>VAT Reg: 4900128491 | Co Reg: 2018/392011/07</p>
+              <div className="mt-3 text-xs text-slate-600 space-y-0.5 font-medium">
+                <p>{companyInfo.physicalAddress || '14 Joiners Street, Industrial Area, Bloemfontein'}</p>
+                <p>
+                  {companyInfo.telephone ? `Tel: ${companyInfo.telephone}` : ''}
+                  {companyInfo.email ? ` | Email: ${companyInfo.email}` : ''}
+                </p>
+                <p>
+                  {companyInfo.vatNumber ? `VAT Reg: ${companyInfo.vatNumber}` : ''}
+                  {companyInfo.registrationNumber ? ` | Co Reg: ${companyInfo.registrationNumber}` : ''}
+                </p>
               </div>
             </div>
 
@@ -190,16 +249,24 @@ export const PurchaseOrderDocumentModal: React.FC<PurchaseOrderDocumentModalProp
               <div className="mt-2 space-y-1 text-xs">
                 <div className="flex justify-between sm:justify-end gap-4 font-mono font-bold">
                   <span className="text-slate-500">PO NUMBER:</span>
-                  <span className="text-slate-900">{po.poNumber}</span>
+                  <span className="text-slate-900 font-black">{po.poNumber}</span>
                 </div>
+                {po.masterPoNumber && po.masterPoNumber !== po.poNumber && (
+                  <div className="flex justify-between sm:justify-end gap-4 font-mono">
+                    <span className="text-slate-500">MASTER GROUP:</span>
+                    <span className="text-purple-700 font-bold">{po.masterPoNumber}</span>
+                  </div>
+                )}
                 <div className="flex justify-between sm:justify-end gap-4 font-mono">
                   <span className="text-slate-500">DATE:</span>
-                  <span className="text-slate-900">{new Date(po.createdAt).toLocaleDateString('en-ZA')}</span>
+                  <span className="text-slate-900 font-semibold">{new Date(po.createdAt).toLocaleDateString('en-ZA')}</span>
                 </div>
-                <div className="flex justify-between sm:justify-end gap-4 font-mono">
-                  <span className="text-slate-500">LINKED REQ:</span>
-                  <span className="text-amber-600 font-bold">{po.linkedRequestNumber || 'N/A'}</span>
-                </div>
+                {po.linkedRequestNumber && (
+                  <div className="flex justify-between sm:justify-end gap-4 font-mono">
+                    <span className="text-slate-500">LINKED REQ:</span>
+                    <span className="text-amber-600 font-bold">{po.linkedRequestNumber}</span>
+                  </div>
+                )}
                 <div className="flex justify-between sm:justify-end gap-4 font-mono">
                   <span className="text-slate-500">STATUS:</span>
                   <span className="font-bold text-slate-900 uppercase">{po.status}</span>
@@ -209,14 +276,14 @@ export const PurchaseOrderDocumentModal: React.FC<PurchaseOrderDocumentModalProp
           </div>
 
           {/* Supplier & Delivery Address Cards Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 po-avoid-break">
             {/* Vendor / Supplier Info */}
             <div className="border border-slate-300 rounded-xl p-4 bg-slate-50/50 space-y-2">
               <h3 className="text-xs font-black uppercase tracking-wider text-amber-700 border-b border-slate-200 pb-1 flex items-center justify-between">
                 <span>VENDOR / SUPPLIER DETAILS</span>
                 <span className="font-mono text-[10px] text-slate-500">{po.supplierCode || 'SUP'}</span>
               </h3>
-              <div className="text-xs text-slate-800 space-y-1">
+              <div className="text-xs text-slate-800 space-y-1 font-medium">
                 <p className="font-black text-sm text-slate-900 uppercase">{po.supplierName}</p>
                 {po.supplierContactPerson && <p><span className="font-bold text-slate-600">Attn:</span> {po.supplierContactPerson}</p>}
                 {po.supplierTelephone && <p><span className="font-bold text-slate-600">Tel:</span> {po.supplierTelephone}</p>}
@@ -230,12 +297,14 @@ export const PurchaseOrderDocumentModal: React.FC<PurchaseOrderDocumentModalProp
               <h3 className="text-xs font-black uppercase tracking-wider text-slate-700 border-b border-slate-200 pb-1">
                 DELIVERY DESTINATION
               </h3>
-              <div className="text-xs text-slate-800 space-y-1">
-                <p className="font-black text-sm text-slate-900 uppercase">TS Joinery Central Factory</p>
-                <p className="font-medium">{po.deliveryAddress}</p>
-                {po.deliveryInstructions && (
-                  <p className="mt-2 text-[11px] text-slate-600 bg-amber-50 p-2 rounded border border-amber-200/50">
-                    <span className="font-bold text-amber-800">Instructions:</span> {po.deliveryInstructions}
+              <div className="text-xs text-slate-800 space-y-1 font-medium">
+                <p className="font-black text-sm text-slate-900 uppercase">
+                  {branch?.branchName || po.branchName || 'TS Joinery Workshop'}
+                </p>
+                <p className="font-medium text-slate-700">{po.deliveryAddress || branch?.physicalAddress || companyInfo.physicalAddress}</p>
+                {cleanedInstructions && (
+                  <p className="mt-2 text-[11px] text-slate-700 bg-amber-50/60 p-2 rounded border border-amber-200/60">
+                    <span className="font-bold text-amber-900">Delivery Notes:</span> {cleanedInstructions}
                   </p>
                 )}
                 {po.expectedDeliveryDate && (
@@ -253,10 +322,10 @@ export const PurchaseOrderDocumentModal: React.FC<PurchaseOrderDocumentModalProp
               ORDER ITEMS & SPECIFICATIONS
             </h3>
 
-            <div className="border border-slate-300 rounded-xl overflow-hidden">
+            <div className="border border-slate-300 rounded-xl overflow-hidden shadow-sm">
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
-                  <tr className="bg-slate-900 text-white font-black uppercase tracking-wider text-[10px]">
+                  <tr className="bg-slate-900 text-white font-black uppercase tracking-wider text-[10px] print:bg-slate-900 print:text-white print:table-header-group">
                     <th className="p-3 w-12 text-center">#</th>
                     <th className="p-3">Product Description</th>
                     <th className="p-3 font-mono">Code / Part #</th>
@@ -270,13 +339,17 @@ export const PurchaseOrderDocumentModal: React.FC<PurchaseOrderDocumentModalProp
                   {po.items.map((item, idx) => {
                     const price = item.unitPrice || 0;
                     const total = item.totalPrice || (price * item.orderQuantity);
+                    const prodDesc = item.productName || item.productDescription || 'Product';
                     return (
-                      <tr key={item.id || idx} className="hover:bg-slate-50 font-medium">
+                      <tr key={item.id || idx} className="hover:bg-slate-50 font-medium po-avoid-break print:break-inside-avoid">
                         <td className="p-3 text-center text-slate-500 font-mono font-bold">{idx + 1}</td>
                         <td className="p-3">
                           <div>
                             <span className="text-[9px] font-bold text-slate-500 uppercase block font-mono">Product:</span>
-                            <p className="font-bold text-slate-900 uppercase text-xs">{item.productName}</p>
+                            <p className="font-bold text-slate-900 uppercase text-xs">{prodDesc}</p>
+                            {item.productDescription && item.productDescription !== item.productName && (
+                              <p className="text-[11px] text-slate-600">{item.productDescription}</p>
+                            )}
                             {item.location && <p className="text-[10px] text-slate-500">Bin Location: {item.location}</p>}
                           </div>
                         </td>
@@ -284,13 +357,20 @@ export const PurchaseOrderDocumentModal: React.FC<PurchaseOrderDocumentModalProp
                           <div>
                             <span className="text-[9px] font-bold text-slate-500 uppercase block font-mono">Code:</span>
                             <p className="font-bold text-purple-800 text-xs">{item.internalProductCode || item.productId}</p>
-                            {item.supplierPartNumber && <p className="text-[10px] text-slate-500">Supplier Part: {item.supplierPartNumber}</p>}
+                            {item.kanbanId && <p className="text-[10px] text-indigo-600 font-bold">Kanban: {item.kanbanId}</p>}
+                            {item.supplierPartNumber && item.supplierPartNumber !== 'N/A' && (
+                              <p className="text-[10px] text-slate-500">Supplier Part: {item.supplierPartNumber}</p>
+                            )}
                           </div>
                         </td>
-                        <td className="p-3 text-center uppercase text-slate-600 font-bold">{item.unit}</td>
+                        <td className="p-3 text-center uppercase text-slate-600 font-bold">{item.unit || 'ea'}</td>
                         <td className="p-3 text-right font-black font-mono text-slate-900 text-sm">{item.orderQuantity}</td>
-                        <td className="p-3 text-right font-mono text-slate-700">R {price.toFixed(2)}</td>
-                        <td className="p-3 text-right font-black font-mono text-slate-900 text-sm">R {total.toFixed(2)}</td>
+                        <td className="p-3 text-right font-mono text-slate-700">
+                          {price > 0 ? `R ${price.toFixed(2)}` : '—'}
+                        </td>
+                        <td className="p-3 text-right font-black font-mono text-slate-900 text-sm">
+                          {total > 0 ? `R ${total.toFixed(2)}` : '—'}
+                        </td>
                       </tr>
                     );
                   })}
@@ -300,11 +380,11 @@ export const PurchaseOrderDocumentModal: React.FC<PurchaseOrderDocumentModalProp
           </div>
 
           {/* Totals & Terms Summary */}
-          <div className="flex flex-col sm:flex-row justify-between items-start gap-6 pt-2">
+          <div className="flex flex-col sm:flex-row justify-between items-start gap-6 pt-2 po-avoid-break">
             <div className="text-xs text-slate-600 space-y-1 max-w-md">
               <p className="font-bold text-slate-900 uppercase">Standard Purchase Terms & Conditions:</p>
               <ul className="list-disc list-inside text-[11px] space-y-0.5 text-slate-500">
-                <li>PO number must appear on all invoices, delivery notes, and packages.</li>
+                <li>PO number must appear on all invoices, delivery notes, and packaging.</li>
                 <li>Delivery times must comply with stated lead times unless authorized in writing.</li>
                 <li>All materials subject to quality inspection upon arrival at receiving bay.</li>
               </ul>
@@ -321,44 +401,68 @@ export const PurchaseOrderDocumentModal: React.FC<PurchaseOrderDocumentModalProp
               </div>
               <div className="border-t border-slate-300 pt-2 flex justify-between text-sm font-black text-slate-900">
                 <span>ESTIMATED TOTAL:</span>
-                <span className="text-amber-700">R {(po.estimatedTotalValue || 0).toFixed(2)}</span>
+                <span className="text-amber-700">
+                  {(po.estimatedTotalValue && po.estimatedTotalValue > 0) ? `R ${po.estimatedTotalValue.toFixed(2)}` : '—'}
+                </span>
               </div>
             </div>
           </div>
 
-          {/* Signatures & Approvals Section */}
-          <div className="pt-8 border-t-2 border-slate-200 grid grid-cols-2 gap-8 text-xs">
-            <div className="space-y-8">
+          {/* Signatures & Authorisations Section */}
+          <div className="pt-6 border-t-2 border-slate-200 grid grid-cols-2 gap-8 text-xs po-avoid-break">
+            <div className="space-y-6">
               <div>
                 <p className="font-bold text-slate-500 uppercase text-[10px]">PREPARED BY:</p>
                 <p className="font-black text-slate-900 text-sm mt-1">{po.createdUser}</p>
-                <p className="text-[10px] text-slate-500 font-mono">{new Date(po.createdAt).toLocaleString()}</p>
+                <p className="text-[10px] text-slate-500 font-mono">{new Date(po.createdAt).toLocaleDateString('en-ZA')}</p>
               </div>
               <div className="border-b border-slate-400 w-48" />
               <p className="text-[10px] text-slate-500 uppercase">Authorized Requisitioner Signature</p>
             </div>
 
-            <div className="space-y-8">
+            <div className="space-y-6">
               <div>
                 <p className="font-bold text-slate-500 uppercase text-[10px]">APPROVED & AUTHORIZED BY:</p>
-                <p className="font-black text-emerald-800 text-sm mt-1">{po.approvedBy || 'Pending Approval'}</p>
-                {po.approvedAt && <p className="text-[10px] text-slate-500 font-mono">{new Date(po.approvedAt).toLocaleString()}</p>}
+                <p className="font-black text-emerald-800 text-sm mt-1">
+                  {po.status === 'Approved' ? (po.approvedBy || 'Authorized Approver') : 'Pending Approval'}
+                </p>
+                <p className="text-[10px] text-slate-500 font-mono">
+                  {po.approvedAt ? new Date(po.approvedAt).toLocaleDateString('en-ZA') : '(Not yet approved)'}
+                </p>
               </div>
               <div className="border-b border-slate-400 w-48" />
               <p className="text-[10px] text-slate-500 uppercase">Procurement Approval Signature</p>
             </div>
           </div>
 
-          {/* Audit History Log Footer */}
+          {/* Minimal Document Footer */}
+          <div className="pt-4 border-t border-slate-200 flex justify-between items-center text-[10px] text-slate-500 font-mono po-avoid-break">
+            <span>PO #{po.poNumber}</span>
+            <span>TS Joinery ERP • Official Procurement Document</span>
+            <span>Printed: {new Date().toLocaleDateString('en-ZA')}</span>
+          </div>
+
+          {/* Collapsible Internal Audit History (Screen Only - Hidden in Print) */}
           {po.auditTrail && po.auditTrail.length > 0 && (
-            <div className="pt-4 border-t border-slate-200 text-[10px] text-slate-500 space-y-1">
-              <p className="font-bold text-slate-700 uppercase">Document Audit Log:</p>
-              {po.auditTrail.map((aud, idx) => (
-                <div key={idx} className="flex justify-between font-mono">
-                  <span>{aud.timestamp.split('T')[0]} - {aud.action} ({aud.user})</span>
-                  <span>{aud.notes}</span>
+            <div className="no-print print:hidden pt-4 border-t border-slate-200 text-xs">
+              <button
+                onClick={() => setShowInternalAudit(!showInternalAudit)}
+                className="text-gray-500 hover:text-slate-800 font-bold uppercase text-[10px] flex items-center gap-1.5"
+              >
+                <Icon name={showInternalAudit ? "chevron-down" : "chevron-right"} size={14} />
+                <span>{showInternalAudit ? "Hide Internal Audit Trail" : "View Internal Audit Trail (System Only)"}</span>
+              </button>
+
+              {showInternalAudit && (
+                <div className="mt-3 bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-1.5 text-[11px] font-mono text-slate-600">
+                  {po.auditTrail.map((aud, idx) => (
+                    <div key={idx} className="flex justify-between border-b border-slate-100 pb-1 last:border-none">
+                      <span className="font-bold text-slate-800">{aud.timestamp.split('T')[0]} - {aud.action} ({aud.user})</span>
+                      <span className="text-slate-500">{aud.notes}</span>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
           )}
 

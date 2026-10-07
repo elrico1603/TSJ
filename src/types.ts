@@ -306,11 +306,13 @@ export interface StockRequestItem {
   receivedQuantity?: number;
   supplier: string;
   supplierName?: string;
+  supplierId?: string;
   supplierPartNumber: string;
   location: string;
   imageUrl?: string;
   notes?: string;
   requestNumber?: string;
+  stockRequestId?: string;
   kanbanId?: string;
   productDescription?: string;
   orderQuantity?: number;
@@ -424,18 +426,38 @@ export interface ProductCategory {
 }
 
 export interface Supplier {
-  id: string;
+  id: string; // Canonical Supplier ID, e.g. "SUP-001" or "SUP-2026-001"
+  supplierId?: string; // Canonical relationship ID alias
   supplierName: string;
-  supplierCode: string; // e.g. "SUP-001"
+  supplierCode: string; // Unique business code e.g. "SUP-001", "GELMAR", "SONDOR"
   contactPerson: string;
   telephone: string;
+  mobile?: string;
   email: string;
+
+  // PO Communication fields
+  poEmail?: string; // Dedicated email for Purchase Orders
+  poCcEmails?: string[]; // Dynamic array of CC emails
+  defaultPOMessage?: string; // Supplier-specific default message template
+
+  // Address Information
   physicalAddress: string;
+  postalAddress?: string;
+
+  // Business Information
+  vatNumber?: string;
+  registrationNumber?: string;
+
+  // Operational & Status
   leadTimeDays: number;
   preferredSupplier: boolean;
-  status: 'Active' | 'Archived';
+  status: 'Active' | 'Inactive' | 'Archived';
+
+  // Audit
   createdAt: string;
   updatedAt: string;
+  createdByUserId?: string;
+  updatedByUserId?: string;
 }
 
 export interface WarehouseLocation {
@@ -478,8 +500,11 @@ export interface PurchaseOrderItem {
   id: string;
   productId: string;
   productName: string;
+  productDescription?: string;
   internalProductCode: string;
   supplierPartNumber: string;
+  kanbanId?: string;
+  supplierId?: string;
   unit: string;
   orderQuantity: number;
   receivedQuantity: number;
@@ -487,6 +512,7 @@ export interface PurchaseOrderItem {
   totalPrice?: number;
   location?: string;
   category?: string;
+  stockRequestItemId?: string;
 }
 
 export interface PurchaseOrderAudit {
@@ -500,8 +526,10 @@ export interface PurchaseOrderAudit {
 export interface PurchaseOrder {
   id: string; // Document ID
   poNumber: string; // e.g. "PO-2026-000001"
+  masterPoNumber?: string; // Stable master PO identity
   companyId?: string; // "TS-JOINERY-CPT"
-  branchId?: string; // "MAIN-BRANCH"
+  branchId?: string; // Canonical Branch ID (e.g. "BR-001")
+  branchName?: string; // Canonical Branch Name for display (e.g. "Bloemfontein Central")
   
   // Linked Request
   linkedRequestId?: string; // Stock Request ID or Request Number
@@ -529,9 +557,12 @@ export interface PurchaseOrder {
 
   // Status & Approvals
   status: PurchaseOrderStatus;
-  approvedBy?: string;
+  approvedBy?: string; // Display name
+  approvedByUserId?: string; // Canonical AppUser.id
   approvedAt?: string;
-  createdUser: string;
+  createdUser: string; // Display name
+  createdByUserId?: string; // Canonical AppUser.id
+  userId?: string; // Creator ID alias for backward compatibility
   createdAt: string;
   updatedUser?: string;
   updatedAt: string;
@@ -592,7 +623,8 @@ export interface UserBranchAssignment {
 }
 
 export type PermissionAction = 'View' | 'Create' | 'Edit' | 'Delete' | 'Approve' | 'Process' | 'Print' | 'Export';
-export type PermissionState = 'allow' | 'deny' | 'inherit';
+export type PermissionState = 'allow' | 'deny';
+export type LegacyPermissionState = 'allow' | 'deny' | 'inherit';
 
 export type PermissionCategory = 
   | 'SYSTEM ADMINISTRATION'
@@ -664,7 +696,7 @@ export interface UserPermissionOverride {
   branchName?: string;
   deviceAccess?: UserDeviceAccess;
   deviceViewAccess?: Partial<Record<DeviceInterface, Record<string, boolean>>>;
-  permissions?: Record<string, Partial<Record<PermissionAction, PermissionState | boolean>>>;
+  permissions?: Record<string, Partial<Record<PermissionAction, PermissionState | LegacyPermissionState | boolean>>>;
   deviceOverrides?: Partial<Record<DeviceInterface, {
     modules?: Record<string, boolean>;
     actions?: Record<string, Partial<Record<PermissionAction, boolean>>>;

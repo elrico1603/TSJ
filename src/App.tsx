@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, Fragment } from 'react';
+import React, { useState, useEffect, useRef, Fragment, useCallback } from 'react';
 import { db, auth, APP_ID_PATH, APP_MOBILE_LINK } from './firebase';
 import {
   SA_HOLIDAYS,
@@ -10,7 +10,8 @@ import {
   GlobalNotification,
   LeaveRequest,
   AdvanceRecord,
-  getLocalDateString
+  getLocalDateString,
+  UserPermissionOverride
 } from './types';
 import {
   USER_ROLES,
@@ -20,6 +21,7 @@ import {
   AppUser,
   DEFAULT_ACCOUNTS
 } from './auth';
+import { canMutateAuthOrRBAC } from './services/previewSafety';
 import { auditLogger } from './audit';
 import { Icon } from './components/Icon';
 import { PhotoAvatar, ClockingTerminal } from './components/ClockingTerminal';
@@ -36,6 +38,8 @@ import { KanbanPreview } from './pages/KanbanPreview';
 import { QRCodeRenderer } from './components/QRCodeRenderer';
 import { QRScanService } from './components/QRScanService';
 import { NotificationCentre } from './components/NotificationCentre';
+import { UserNotification } from './types/notification';
+import { userNotificationService } from './services/userNotificationService';
 import { CURRENT_VERSION_STRING, getBuildInfoString } from './version';
 import { LeaveManagementPage } from './components/LeaveManagementPage';
 import { LeaveApplicationModal } from './components/LeaveApplicationModal';
@@ -73,24 +77,6 @@ export default function App() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [isCloudLive, setIsCloudLive] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
-  
-  // Navigation State
-  const [currentUser, setCurrentUser] = useState<any>(() => authManager.getStoredSession());
-  const [isLocked, setIsLocked] = useState(() => !authManager.getStoredSession());
-  const [appMode, setAppMode] = useState<string>(() => {
-    const session = authManager.getStoredSession();
-    return session ? permissionService.getInitialModeAndView(session).appMode : 'employee';
-  });
-  const [showPinModal, setShowPinModal] = useState(false);
-  const [unlockUsername, setUnlockUsername] = useState('');
-  const [unlockPassword, setUnlockPassword] = useState('');
-  const [pinInput, setPinInput] = useState('');
-  const [view, setView] = useState<string>(() => {
-    const session = authManager.getStoredSession();
-    return session ? permissionService.getInitialModeAndView(session).view : 'dashboard';
-  });
-  const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
-  const [actionSubMenu, setActionSubMenu] = useState<'menu' | 'clocking'>('menu');
 
   // Responsive Layout Mode, Header Search & Profile Modal State
   const getAutoLayoutMode = (): 'desktop' | 'tablet' | 'phone' => {
@@ -115,6 +101,36 @@ export default function App() {
     }
     return 'desktop';
   });
+
+  // Navigation State
+  const [currentUser, setCurrentUser] = useState<any>(() => {
+    const session = authManager.getStoredSession();
+    if (session) {
+      const ov = permissionService.getUserOverride(session);
+      return {
+        ...session,
+        deviceAccess: ov?.deviceAccess || session.deviceAccess,
+        deviceViewAccess: ov?.deviceViewAccess || session.deviceViewAccess,
+        permissions: ov?.permissions || (session as any).permissions
+      };
+    }
+    return null;
+  });
+  const [isLocked, setIsLocked] = useState(() => !authManager.getStoredSession());
+  const [appMode, setAppMode] = useState<string>(() => {
+    const session = authManager.getStoredSession();
+    return session ? permissionService.getInitialModeAndView(session, getAutoLayoutMode()).appMode : 'employee';
+  });
+  const [showPinModal, setShowPinModal] = useState(false);
+  const [unlockUsername, setUnlockUsername] = useState('');
+  const [unlockPassword, setUnlockPassword] = useState('');
+  const [pinInput, setPinInput] = useState('');
+  const [view, setView] = useState<string>(() => {
+    const session = authManager.getStoredSession();
+    return session ? permissionService.getInitialModeAndView(session, getAutoLayoutMode()).view : 'dashboard';
+  });
+  const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
+  const [actionSubMenu, setActionSubMenu] = useState<'menu' | 'clocking'>('menu');
   const [showUserProfileModal, setShowUserProfileModal] = useState<boolean>(false);
   const [headerSearchQuery, setHeaderSearchQuery] = useState<string>('');
 
@@ -179,9 +195,27 @@ export default function App() {
 
   // Global Notification & Leave Management State
   const [notifications, setNotifications] = useState<GlobalNotification[]>([]);
+  const [userNotifications, setUserNotifications] = useState<UserNotification[]>([]);
   const [showNotificationsModal, setShowNotificationsModal] = useState(false);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [showLeaveApplyModal, setShowLeaveApplyModal] = useState(false);
+
+  // Subscribe to Per-User Notifications (Phase 2B-3E Migration)
+  useEffect(() => {
+    if (!currentUser?.id) {
+      setUserNotifications([]);
+      return;
+    }
+
+    const unsubscribe = userNotificationService.subscribeToUserNotifications(
+      currentUser.id,
+      (items) => {
+        setUserNotifications(items);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [currentUser?.id]);
 
   // Subscribe to Notifications, Leave Requests, and Application Versions
   useEffect(() => {
@@ -290,25 +324,39 @@ export default function App() {
   const [addUserResult, setAddUserResult] = useState<{ type: 'success' | 'error'; title: string; message: string } | null>(null);
   const [newUserForm, setNewUserForm] = useState({ name: '', email: '', pin: '', role: 'Supervisor' });
 
-  // Permissions & Roles
+  // Permissions & Roles (Pure User-Centric Authorization)
   const userPerms = currentUser ? (userPermissions[currentUser.id] || {}) : {};
-  const isStockManager = currentUser?.role === 'Stock Manager';
+  const isStockManager = currentUser ? (
+    permissionService.hasPermission(currentUser, 'Inventory', 'Edit') ||
+    permissionService.hasPermission(currentUser, 'Purchase Orders', 'Edit')
+  ) : false;
 
-  const isSupervisorUser = !isStockManager && (userPerms.canManageUsers !== undefined 
-    ? userPerms.canManageUsers 
-    : ['Admin', 'Supervisor'].includes(currentUser?.role || ''));
+  const isSupervisorUser = currentUser ? (
+    userPerms.canManageUsers !== undefined 
+      ? userPerms.canManageUsers 
+      : (permissionService.hasPermission(currentUser, 'User Assignments', 'Edit') ||
+         permissionService.hasPermission(currentUser, 'User Assignments', 'Approve'))
+  ) : false;
 
-  const canManageOrders = !isStockManager && (userPerms.canManageOrders !== undefined 
-    ? userPerms.canManageOrders 
-    : rolePermissions.canManageOrders(currentUser?.role || ''));
+  const canManageOrders = currentUser ? (
+    userPerms.canManageOrders !== undefined 
+      ? userPerms.canManageOrders 
+      : (permissionService.hasPermission(currentUser, 'Purchase Orders', 'Edit') ||
+         permissionService.hasPermission(currentUser, 'Stock Requests', 'Edit'))
+  ) : false;
 
-  const canManageUsers = !isStockManager && (userPerms.canManageUsers !== undefined 
-    ? userPerms.canManageUsers 
-    : rolePermissions.canManageUsers(currentUser?.role || ''));
+  const canManageUsers = currentUser ? (
+    userPerms.canManageUsers !== undefined 
+      ? userPerms.canManageUsers 
+      : (permissionService.hasPermission(currentUser, 'User Assignments', 'Edit') ||
+         permissionService.canAccessMode(currentUser, 'system_admin', layoutMode))
+  ) : false;
 
-  const canViewAnalytics = !isStockManager && (userPerms.canViewAnalytics !== undefined 
-    ? userPerms.canViewAnalytics 
-    : rolePermissions.canViewAnalytics(currentUser?.role || ''));
+  const canViewAnalytics = currentUser ? (
+    userPerms.canViewAnalytics !== undefined 
+      ? userPerms.canViewAnalytics 
+      : permissionService.hasPermission(currentUser, 'Work Analytics', 'View')
+  ) : false;
 
   const updateActiveUser = async (userId: string, updates: Partial<AppUser>) => {
     try {
@@ -334,7 +382,7 @@ export default function App() {
       });
 
       // 4. Update Firestore with merge: true so it never throws if document is being initialized
-      if (db && APP_ID_PATH) {
+      if (db && APP_ID_PATH && canMutateAuthOrRBAC('updateActiveUser', userId)) {
         try {
           const targetRef = db.collection('artifacts')
             .doc(APP_ID_PATH)
@@ -616,6 +664,68 @@ export default function App() {
   };
 
   // ==========================================
+  // UNIVERSAL USER-PERMISSION PIPELINE & REACTIVITY
+  // ==========================================
+  const syncLivePermissions = useCallback((_freshOverrides?: Record<string, UserPermissionOverride>) => {
+    // 1. Re-hydrate activeUsers pool so every user in memory has their fresh deviceAccess & deviceViewAccess
+    setActiveUsers(prevUsers => {
+      const pool = prevUsers && prevUsers.length > 0 ? prevUsers : authManager.getUsers();
+      const updatedUsers = pool.map(u => {
+        const ov = permissionService.getUserOverride(u);
+        return {
+          ...u,
+          deviceAccess: ov?.deviceAccess || u.deviceAccess,
+          deviceViewAccess: ov?.deviceViewAccess || u.deviceViewAccess,
+          permissions: ov?.permissions || (u as any).permissions
+        };
+      });
+      authManager.setUsers(updatedUsers);
+      return updatedUsers;
+    });
+
+    // 2. Re-hydrate active session and currentUser with latest permissions
+    setCurrentUser((prevUser: any) => {
+      const targetUser = prevUser || authManager.getStoredSession();
+      if (!targetUser) return null;
+      const ov = permissionService.getUserOverride(targetUser);
+      const updatedUser: AppUser = {
+        ...targetUser,
+        deviceAccess: ov?.deviceAccess || targetUser.deviceAccess,
+        deviceViewAccess: ov?.deviceViewAccess || targetUser.deviceViewAccess,
+        permissions: ov?.permissions || (targetUser as any).permissions
+      };
+      authManager.saveSession(updatedUser);
+
+      // 3. Re-evaluate appMode if user was stuck in fallback 'gemini_chat' or 'restricted'
+      setAppMode((currentMode: string) => {
+        if (currentMode === 'gemini_chat' || currentMode === 'restricted') {
+          const initialRoute = permissionService.getInitialModeAndView(updatedUser, layoutMode);
+          if (initialRoute.appMode !== 'gemini_chat' && initialRoute.appMode !== 'restricted') {
+            setView(initialRoute.view || 'dashboard');
+            return initialRoute.appMode;
+          }
+        }
+        return currentMode;
+      });
+
+      return updatedUser;
+    });
+  }, [layoutMode]);
+
+  // Global live subscription to Firestore userPermissionOverrides (always active, independent of Auth state)
+  useEffect(() => {
+    let isMounted = true;
+    const unsub = permissionService.subscribeUserOverrides((overrides) => {
+      if (!isMounted) return;
+      syncLivePermissions(overrides);
+    });
+    return () => {
+      isMounted = false;
+      unsub();
+    };
+  }, [syncLivePermissions]);
+
+  // ==========================================
   // INITIALIZE FIREBASE STREAMS & SESSION HYDRATION
   // ==========================================
   useEffect(() => {
@@ -756,8 +866,6 @@ export default function App() {
                 if (!snap.empty) {
                   const users = snap.docs.map(d => {
                     const data = d.data();
-                    const defaultAcc = DEFAULT_ACCOUNTS.find(def => def.email.toLowerCase() === (data.email || '').toLowerCase());
-                    const fallbackPin = defaultAcc ? defaultAcc.pin : '1234';
                     return {
                       id: d.id,
                       ...data,
@@ -767,7 +875,7 @@ export default function App() {
                       role: data.role || 'Employee',
                       department: data.department || 'Operations',
                       active: data.active !== undefined ? data.active : true,
-                      pin: data.pin || fallbackPin,
+                      pin: data.pin || '',
                       isApproved: data.isApproved !== undefined ? data.isApproved : true
                     } as AppUser;
                   });
@@ -784,16 +892,10 @@ export default function App() {
                   });
                   setUserPermissions(perms);
                 } else {
-                  // Seed default role users if Firestore user collection is empty
+                  // If Firestore collection is empty, load defaults for in-memory session only.
+                  // NEVER write default accounts automatically to live Firestore.
                   const defaultAccounts = authManager.setUsers([]);
                   setActiveUsers(defaultAccounts);
-                  try {
-                    for (const acc of defaultAccounts) {
-                      await db.collection('artifacts').doc(APP_ID_PATH).collection('private').doc('users').collection('active').doc(acc.id).set(acc);
-                    }
-                  } catch (e) {
-                    console.warn('Unable to seed default role accounts:', e);
-                  }
                 }
                 dismissSplash();
               }, err => {
@@ -837,6 +939,19 @@ export default function App() {
             unsubs.push(() => { if (unsubPending) unsubPending(); });
           } catch (e) {
             console.warn('[FIRESTORE SYNC] Could not subscribe to pending users:', e);
+          }
+
+          // 6. User permission overrides live subscription
+          try {
+            const unsubOverrides = permissionService.subscribeUserOverrides((fresh) => {
+              if (!isMounted) return;
+              syncLivePermissions(fresh);
+            });
+            if (unsubOverrides) {
+              unsubs.push(unsubOverrides);
+            }
+          } catch (e) {
+            console.warn('[FIRESTORE SYNC] Could not subscribe to user permission overrides:', e);
           }
 
         } else {
@@ -1269,30 +1384,12 @@ TS Joinery Kanban System`
     const trimmedUser = unlockUsername.trim().toLowerCase();
     const trimmedPass = unlockPassword.trim();
 
-    // 1. Check for Super User Bypass
-    if (trimmedPass === SUPER_USER_PIN) {
-      setIsLocked(false);
-      const localAdmin = { id: 'local-admin', name: 'Super Admin', role: 'Admin', isApproved: true };
-      setCurrentUser(localAdmin);
-      auditLogger.log('LOCAL_UNLOCK', localAdmin.name, 'Super PIN used to unlock terminal');
-      setShowPinModal(false);
-      setUnlockUsername('');
-      setUnlockPassword('');
-      setAppMode('employee');
-      setView('dashboard');
-      announce("Terminal unlocked with Super Master bypass.");
-      return;
-    }
-
-    // 2. Validate against registered active users
-    const matchedUser = activeUsers.find(
-      u => u.isApproved && 
-      (u.email?.toLowerCase().trim() === trimmedUser || u.name?.toLowerCase().trim() === trimmedUser) &&
-      u.pin === trimmedPass
-    );
+    // Validate against registered active users (Standard User-Centric Authorization)
+    const matchedUser = authManager.authenticateUser(activeUsers, trimmedUser, trimmedPass);
 
     if (matchedUser) {
       setIsLocked(false);
+      const override = permissionService.getUserOverride(matchedUser);
       const normUser: AppUser = {
         ...matchedUser,
         firstName: matchedUser.firstName || matchedUser.name?.split(' ')[0] || 'User',
@@ -1300,13 +1397,16 @@ TS Joinery Kanban System`
         email: matchedUser.email || '',
         role: matchedUser.role || 'Employee',
         department: matchedUser.department || 'Operations',
-        active: matchedUser.active !== undefined ? matchedUser.active : true
+        active: matchedUser.active !== undefined ? matchedUser.active : true,
+        deviceAccess: override?.deviceAccess || matchedUser.deviceAccess,
+        deviceViewAccess: override?.deviceViewAccess || matchedUser.deviceViewAccess,
+        permissions: override?.permissions || (matchedUser as any).permissions
       };
       authManager.saveSession(normUser);
       setCurrentUser(normUser);
       auditLogger.log('LOCAL_UNLOCK', normUser.email, `Unlocked Management Hub as ${normUser.role}`);
       
-      const { appMode: initMode, view: initView } = permissionService.getInitialModeAndView(normUser);
+      const { appMode: initMode, view: initView } = permissionService.getInitialModeAndView(normUser, layoutMode);
       console.log('[AUTH ROUTING]', {
         User: normUser.email,
         Role: normUser.role,
@@ -1387,7 +1487,8 @@ TS Joinery Kanban System`
         const uPerms = userPermissions[u.id] || {};
         return uPerms.canManageUsers !== undefined 
           ? uPerms.canManageUsers 
-          : ['Admin', 'Supervisor'].includes(u.role);
+          : (permissionService.hasPermission(u, 'User Assignments', 'Approve') ||
+             permissionService.hasPermission(u, 'User Assignments', 'Edit'));
       })()
     );
 
@@ -2211,38 +2312,7 @@ TS Joinery Kanban System`
               </button>
             </form>
 
-            {/* Quick Select Accounts */}
-            <div className="pt-4 border-t border-white/10 space-y-2">
-              <p className="text-[10px] font-black uppercase text-gray-500 tracking-wider">Quick Accounts (Click to Fill):</p>
-              <div className="flex flex-wrap gap-1.5 justify-center">
-                {[
-                  { label: 'Admin', email: 'elrico@tsjoinery.co.za', pin: SECURITY.SUPER_USER_PIN },
-                  { label: 'Clocking Kiosk', email: 'clocking@tsjoinery.co.za', pin: '0000' },
-                  { label: 'HR', email: 'frans@tsjoinery.co.za', pin: '1234' },
-                  { label: 'Manager', email: 'janah@tsjoinery.co.za', pin: '1234' },
-                  { label: 'Marietjie', email: 'marietjie@tsjoinery.co.za', pin: '1234' },
-                  { label: 'Purchasing', email: 'purchasing@tsjoinery.co.za', pin: '1234' },
-                ].map(acc => (
-                  <button
-                    key={acc.email}
-                    type="button"
-                    onClick={() => {
-                      setAuthForm({ ...authForm, email: acc.email, pin: acc.pin });
-                      if (loginError) setLoginError('');
-                      const emailInputEl = document.getElementById('login_form_email') as HTMLInputElement;
-                      if (emailInputEl) emailInputEl.value = acc.email;
-                      const pinInputEl = document.getElementById('login_form_pin') as HTMLInputElement;
-                      if (pinInputEl) pinInputEl.value = acc.pin;
-                    }}
-                    className="px-2.5 py-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[10px] font-mono text-gray-300 hover:text-white transition-colors"
-                  >
-                    {acc.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="text-[10px] font-mono text-gray-600">
+            <div className="pt-4 border-t border-white/10 text-[10px] font-mono text-gray-600">
               v{systemVersion} • TimberSmith Joinery (Pty) Ltd
             </div>
           </div>
@@ -2375,12 +2445,10 @@ TS Joinery Kanban System`
             <div className="w-px h-8 bg-white/10 mx-1 hidden sm:block"></div>
             <div className="flex items-center gap-2.5">
               {(() => {
-                const filteredNotifs = notificationService.filterForUser(
-                  notifications,
-                  currentUser?.role || (isLocked ? 'Artisan' : 'Admin'),
-                  currentUser?.email || (isLocked ? '' : 'frans@tsjoinery.co.za')
-                );
-                const unreadCount = filteredNotifs.filter(n => !n.isRead).length;
+                const visibleUserNotifs = userNotifications.filter(n => n.priority !== 'silent');
+                const unreadCount = currentUser?.id
+                  ? visibleUserNotifs.filter(n => !n.isRead).length
+                  : 0;
 
                 return (
                   <button 
@@ -4378,22 +4446,30 @@ TS Joinery Kanban System`
       <NotificationCentre
         isOpen={showNotificationsModal}
         onClose={() => setShowNotificationsModal(false)}
-        notifications={notificationService.filterForUser(
-          notifications,
-          currentUser?.role || (isLocked ? 'Artisan' : 'Admin'),
-          currentUser?.email || (isLocked ? '' : 'frans@tsjoinery.co.za')
-        )}
-        onMarkAsRead={(id) => notificationService.markAsRead(id)}
-        onMarkAllAsRead={() => notificationService.markAllAsRead()}
-        onDeleteNotification={(id) => notificationService.deleteNotification(id)}
+        notifications={userNotifications}
+        onMarkAsRead={(id) => {
+          if (currentUser?.id) {
+            userNotificationService.markAsRead(currentUser.id, id);
+          }
+        }}
+        onMarkAllAsRead={() => {
+          if (currentUser?.id) {
+            userNotificationService.markAllAsRead(currentUser.id);
+          }
+        }}
+        onDeleteNotification={(id) => {
+          if (currentUser?.id) {
+            userNotificationService.deleteNotification(currentUser.id, id);
+          }
+        }}
         onNavigateToPage={(relatedPage) => {
           if (relatedPage === 'leave_management') setAppMode('leave');
           else if (relatedPage === 'orders') setAppMode('orders');
           else if (relatedPage === 'analytics') setAppMode('analytics');
           else if (relatedPage === 'admin') setAppMode('admin');
         }}
-        userRole={currentUser?.role || (isLocked ? 'Artisan' : 'Admin')}
-        userEmail={currentUser?.email || (isLocked ? '' : 'frans@tsjoinery.co.za')}
+        userRole={currentUser?.role}
+        userEmail={currentUser?.email || currentUser?.name}
       />
 
       {/* Leave Application Modal */}
@@ -4422,7 +4498,9 @@ TS Joinery Kanban System`
               return 0;
             })();
 
-            const unreadNotifications = notifications.filter(n => !n.isRead).length;
+            const unreadNotifications = currentUser?.id
+              ? userNotifications.filter(n => !n.isRead && n.priority !== 'silent').length
+              : 0;
 
             const authPhoneItems = permissionService.getAuthorizedPhoneNavItems(currentUser, {
               basketCount,

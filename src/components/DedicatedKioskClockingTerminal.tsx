@@ -142,25 +142,25 @@ export const DedicatedKioskClockingTerminal: React.FC<DedicatedKioskClockingTerm
                 className="bg-[#1f1f24] text-xs font-black uppercase text-[#ff8c00] border border-[#ff8c00]/40 rounded-2xl px-3 py-2.5 outline-none cursor-pointer hover:bg-[#282830] transition-colors shadow-lg"
               >
                 <option value="" disabled>Management Portals ▾</option>
-                {permissionService.canAccessMode(currentUser?.role, 'system_admin') && (
+                {permissionService.canAccessMode(currentUser, 'system_admin') && (
                   <option value="system_admin">System Administration</option>
                 )}
-                {permissionService.canAccessMode(currentUser?.role, 'admin') && (
+                {permissionService.canAccessMode(currentUser, 'admin') && (
                   <option value="admin">Employer Registration</option>
                 )}
-                {permissionService.canAccessMode(currentUser?.role, 'analytics') && (
+                {permissionService.canAccessMode(currentUser, 'analytics') && (
                   <option value="analytics">Work Analytics</option>
                 )}
-                {permissionService.canAccessMode(currentUser?.role, 'purchase_orders') && (
+                {permissionService.canAccessMode(currentUser, 'purchase_orders') && (
                   <option value="purchase_orders">Purchase Orders</option>
                 )}
-                {permissionService.canAccessMode(currentUser?.role, 'product_master') && (
+                {permissionService.canAccessMode(currentUser, 'product_master') && (
                   <option value="product_master">Product Master</option>
                 )}
-                {permissionService.canAccessMode(currentUser?.role, 'dispatch') && (
+                {permissionService.canAccessMode(currentUser, 'dispatch') && (
                   <option value="dispatch">Dispatch & Receiving</option>
                 )}
-                {permissionService.canAccessMode(currentUser?.role, 'leave') && (
+                {permissionService.canAccessMode(currentUser, 'leave') && (
                   <option value="leave">Leave Management</option>
                 )}
               </select>

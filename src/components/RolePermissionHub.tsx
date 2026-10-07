@@ -19,6 +19,16 @@ import {
 } from '../services/permissionService';
 import { companyService } from '../services/companyService';
 import { db, APP_ID_PATH } from '../firebase';
+import { canMutateAuthOrRBAC } from '../services/previewSafety';
+import {
+  NotificationEventDefinition,
+  NotificationPolicy,
+  NotificationGroup,
+  NotificationPolicyPriority,
+  NOTIFICATION_GROUP_LABELS
+} from '../types/notification';
+import { notificationEventRegistry } from '../services/notificationEventRegistry';
+import { notificationPolicyService } from '../services/notificationPolicyService';
 
 export interface RolePermissionHubProps {
   currentUser?: any;
@@ -29,7 +39,7 @@ export interface RolePermissionHubProps {
   deleteActiveUser?: (user: AppUser) => Promise<any>;
   updateActiveUser?: (userId: string, updates: Partial<AppUser>) => Promise<any>;
   announce?: (msg: string) => void;
-  initialSubTab?: 'matrix' | 'users' | 'audit';
+  initialSubTab?: 'matrix' | 'users' | 'audit' | 'policies';
 }
 
 export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
@@ -43,17 +53,65 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
   announce,
   initialSubTab = 'users'
 }) => {
-  const isAdmin = currentUser?.role === 'Admin' || currentUser?.role === 'Administrator';
-  const isManager = ['Supervisor', 'Manager', 'HR', 'Stock Manager'].includes(currentUser?.role || '');
-  const isReadOnly = !isAdmin;
+  const canEditUsers = permissionService.hasPermission(currentUser, 'User Assignments', 'Edit');
+  const canApproveUsers = permissionService.hasPermission(currentUser, 'User Assignments', 'Approve');
+  const canViewUsers = permissionService.hasPermission(currentUser, 'User Assignments', 'View');
+  const canAccessAdmin = permissionService.canAccessDeviceView(currentUser, 'system_admin') || permissionService.canAccessDeviceView(currentUser, 'admin');
+  
+  // Explicit functional permissions for Notification Policy Centre (Zero role authority)
+  const canViewPolicies = permissionService.hasPermission(currentUser, 'Notifications', 'View');
+  const canEditPolicies = permissionService.hasPermission(currentUser, 'Notifications', 'Edit');
 
-  const [subTab, setSubTab] = useState<'users' | 'roles' | 'audit'>(initialSubTab === 'matrix' ? 'roles' : (initialSubTab as any) || 'users');
+  const hasAccess = canViewUsers || canEditUsers || canApproveUsers || canAccessAdmin || canViewPolicies;
+  const isReadOnly = !canEditUsers;
+
+  const [subTab, setSubTab] = useState<'users' | 'roles' | 'audit' | 'policies'>(
+    initialSubTab === 'matrix' ? 'roles' : (initialSubTab as any) || 'users'
+  );
 
   useEffect(() => {
     if (initialSubTab) {
       setSubTab(initialSubTab === 'matrix' ? 'roles' : (initialSubTab as any));
     }
   }, [initialSubTab]);
+
+  // ================= NOTIFICATION POLICY CENTRE STATE =================
+  const [policies, setPolicies] = useState<NotificationPolicy[]>(
+    notificationPolicyService.getAllEffectivePolicies()
+  );
+  const [policySearch, setPolicySearch] = useState('');
+  const [selectedPolicyGroup, setSelectedPolicyGroup] = useState<NotificationGroup | 'all'>('all');
+  const [policyQuickFilter, setPolicyQuickFilter] = useState<'all' | 'enabled' | 'disabled' | 'has_recipients' | 'no_recipients'>('all');
+  const [editingPolicy, setEditingPolicy] = useState<NotificationPolicy | null>(null);
+  const [policyForm, setPolicyForm] = useState<{
+    enabled: boolean;
+    priority: NotificationPolicyPriority;
+    recipientUserIds: string[];
+    coalesceEnabled: boolean;
+    coalesceWindowMinutes: number;
+  }>({
+    enabled: true,
+    priority: 'normal',
+    recipientUserIds: [],
+    coalesceEnabled: false,
+    coalesceWindowMinutes: 0
+  });
+  const [recipientSearch, setRecipientSearch] = useState('');
+  const [isSavingPolicy, setIsSavingPolicy] = useState(false);
+  const [policyNotice, setPolicyNotice] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
+
+  // Subscribe to real-time policy updates
+  useEffect(() => {
+    const unsub = notificationPolicyService.subscribeToPolicies(updatedPolicies => {
+      setPolicies(updatedPolicies);
+    });
+    return () => unsub();
+  }, []);
+
+  // Eligible active users for recipient assignment (Strictly AppUser.id)
+  const eligibleUsers: AppUser[] = (activeUsers && activeUsers.length > 0 ? activeUsers : authManager.getUsers()).filter(u =>
+    Boolean(u.id && u.active !== false && u.isApproved !== false && (u.status || '').toLowerCase() !== 'inactive')
+  );
 
   // Core States
   const [roles, setRoles] = useState<RoleDefinition[]>(permissionService.getLocalRoles());
@@ -399,7 +457,7 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
           role: roleName,
           roleId: targetRoleId
         });
-      } else if (db && APP_ID_PATH) {
+      } else if (db && APP_ID_PATH && canMutateAuthOrRBAC('assignRole', user.id)) {
         await db.collection('artifacts')
           .doc(APP_ID_PATH)
           .collection('private')
@@ -552,7 +610,7 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
     setEditingUser(user);
     const assignedRoleId = user.roleId || userRolesMap[user.id || user.email]?.roleId || roles.find(r => r.roleName.toLowerCase() === (user.role || '').toLowerCase())?.id || roles[0]?.id || '';
     const userBranch = branches.find(b => b.id === user.branchId || b.branchName === user.branchName) || branches[0];
-    const userOverride = permissionService.getUserOverride(user.id || user.email);
+    const userOverride = permissionService.getUserOverride(user);
 
     const initialDeviceViewAccess = {
       phone: { ...(userOverride?.deviceViewAccess?.phone || user.deviceViewAccess?.phone || {}) },
@@ -624,6 +682,7 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
   };
 
   const handleResetUserPermissionsToInherit = () => {
+    if (isReadOnly) return;
     const next: Record<string, Partial<Record<PermissionAction, 'allow' | 'deny' | 'inherit'>>> = {};
     PERMISSION_CATEGORIES_CONFIG.flatMap(c => c.modules).forEach(moduleName => {
       next[moduleName] = {};
@@ -634,15 +693,74 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
     setUserPermissionOverridesBuffer(next);
   };
 
+  // Global Matrix Control: Set every action in every module to explicit 'allow' or 'deny'
   const handleSetAllUserPermissions = (state: 'allow' | 'deny') => {
-    const next: Record<string, Partial<Record<PermissionAction, 'allow' | 'deny' | 'inherit'>>> = {};
-    PERMISSION_CATEGORIES_CONFIG.flatMap(c => c.modules).forEach(moduleName => {
-      next[moduleName] = {};
-      ALL_PERMISSION_ACTIONS.forEach(act => {
-        next[moduleName]![act] = state;
+    if (isReadOnly) return;
+    setUserPermissionOverridesBuffer(prev => {
+      const next = { ...prev };
+      PERMISSION_CATEGORIES_CONFIG.flatMap(c => c.modules).forEach(moduleName => {
+        const modObj: Partial<Record<PermissionAction, 'allow' | 'deny' | 'inherit'>> = {
+          ...(next[moduleName] || {})
+        };
+        ALL_PERMISSION_ACTIONS.forEach(act => {
+          modObj[act] = state;
+        });
+        next[moduleName] = modObj;
       });
+      return next;
     });
-    setUserPermissionOverridesBuffer(next);
+  };
+
+  // Bulk Row Control: Set all actions for a specific module to explicit 'allow' or 'deny'
+  const handleRowSetAll = (moduleName: string, state: 'allow' | 'deny') => {
+    if (isReadOnly) return;
+    setUserPermissionOverridesBuffer(prev => {
+      const updatedRow: Partial<Record<PermissionAction, 'allow' | 'deny' | 'inherit'>> = {
+        ...(prev[moduleName] || {})
+      };
+      ALL_PERMISSION_ACTIONS.forEach(act => {
+        updatedRow[act] = state;
+      });
+      return {
+        ...prev,
+        [moduleName]: updatedRow
+      };
+    });
+  };
+
+  // Bulk Column Control: Set a specific action to explicit 'allow' or 'deny' across all modules
+  const handleColumnSetAll = (action: PermissionAction, state: 'allow' | 'deny') => {
+    if (isReadOnly) return;
+    setUserPermissionOverridesBuffer(prev => {
+      const next = { ...prev };
+      PERMISSION_CATEGORIES_CONFIG.flatMap(c => c.modules).forEach(moduleName => {
+        next[moduleName] = {
+          ...(next[moduleName] || {}),
+          [action]: state
+        };
+      });
+      return next;
+    });
+  };
+
+  // Bulk Category Control: Set all actions for all modules in a category to explicit 'allow' or 'deny'
+  const handleCategorySetAll = (category: string, state: 'allow' | 'deny') => {
+    if (isReadOnly) return;
+    const catGroup = PERMISSION_CATEGORIES_CONFIG.find(c => c.category === category);
+    if (!catGroup) return;
+    setUserPermissionOverridesBuffer(prev => {
+      const next = { ...prev };
+      catGroup.modules.forEach(moduleName => {
+        const modObj: Partial<Record<PermissionAction, 'allow' | 'deny' | 'inherit'>> = {
+          ...(next[moduleName] || {})
+        };
+        ALL_PERMISSION_ACTIONS.forEach(act => {
+          modObj[act] = state;
+        });
+        next[moduleName] = modObj;
+      });
+      return next;
+    });
   };
 
   // Save Edit User with Admin Lockout Protection
@@ -650,14 +768,12 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
     e.preventDefault();
     if (isReadOnly || !editingUser) return;
 
-    // Administrator Lockout Protection
-    const isEditingSelf = editingUser.email.toLowerCase().trim() === currentUser?.email?.toLowerCase().trim() ||
+    // Self-Deactivation Protection: Prevent user from locking themselves out
+    const isEditingSelf = (editingUser.email && currentUser?.email && editingUser.email.toLowerCase().trim() === currentUser.email.toLowerCase().trim()) ||
                           editingUser.id === currentUser?.id;
-    if (isEditingSelf) {
-      if (editUserForm.active === false) {
-        alert('Administrator Protection: You cannot deactivate your own active administrator account.');
-        return;
-      }
+    if (isEditingSelf && editUserForm.active === false) {
+      alert('Protection: You cannot deactivate your own active account.');
+      return;
     }
 
     setIsSavingUser(true);
@@ -679,7 +795,6 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
         firstName,
         lastName,
         email: editUserForm.email.trim().toLowerCase(),
-        pin: editUserForm.pin.trim(),
         role: roleName,
         roleId: roleId,
         branchId,
@@ -691,9 +806,14 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
         deviceViewAccess: editUserForm.deviceViewAccess
       };
 
+      // Only update PIN/password if explicitly provided and intentionally changed
+      if (editUserForm.pin && editUserForm.pin.trim() !== '' && editUserForm.pin.trim() !== (editingUser.pin || '')) {
+        updates.pin = editUserForm.pin.trim();
+      }
+
       if (updateActiveUser) {
         await updateActiveUser(editingUser.id, updates);
-      } else if (db && APP_ID_PATH) {
+      } else if (db && APP_ID_PATH && canMutateAuthOrRBAC('updateUser', editingUser.id)) {
         await db.collection('artifacts')
           .doc(APP_ID_PATH)
           .collection('private')
@@ -773,7 +893,7 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
     try {
       if (updateActiveUser) {
         await updateActiveUser(user.id, { active: newActive });
-      } else if (db && APP_ID_PATH) {
+      } else if (db && APP_ID_PATH && canMutateAuthOrRBAC('updateActiveStatus', user.id)) {
         await db.collection('artifacts')
           .doc(APP_ID_PATH)
           .collection('private')
@@ -797,7 +917,7 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
     try {
       if (updateActiveUser) {
         await updateActiveUser(user.id, { pin: newPin.trim() });
-      } else if (db && APP_ID_PATH) {
+      } else if (db && APP_ID_PATH && canMutateAuthOrRBAC('updateQuickPin', user.id)) {
         await db.collection('artifacts')
           .doc(APP_ID_PATH)
           .collection('private')
@@ -851,13 +971,13 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
     log.date.includes(auditSearch)
   );
 
-  if (!isAdmin && !isManager) {
+  if (!hasAccess) {
     return (
       <div className="bg-neutral-900 border border-red-500/30 rounded-2xl p-8 text-center space-y-4 font-sans">
         <Icon name="shield-off" size={48} className="mx-auto text-red-400" />
         <h2 className="text-xl font-black uppercase text-white tracking-wider">Access Restricted</h2>
         <p className="text-sm text-gray-400 max-w-md mx-auto">
-          Role & Permission Management is restricted strictly to Administrators and Authorized Supervisors.
+          Role & Permission Management is restricted strictly to users with authorized User Assignments or System Administration access.
         </p>
       </div>
     );
@@ -944,7 +1064,7 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
             }`}
           >
             <Icon name="shield" size={16} />
-            <span>Role Definitions & Baseline</span>
+            <span>Role Classification (Metadata Only)</span>
             <span className="px-1.5 py-0.5 bg-white/20 text-white text-[10px] font-mono rounded-full">
               {roles.length} Roles
             </span>
@@ -964,6 +1084,23 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
               {auditLogs.length} Entries
             </span>
           </button>
+
+          {canViewPolicies && (
+            <button
+              onClick={() => setSubTab('policies')}
+              className={`px-4 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center space-x-2 whitespace-nowrap ${
+                subTab === 'policies'
+                  ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/30'
+                  : 'bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white'
+              }`}
+            >
+              <Icon name="bell" size={16} />
+              <span>Notification Policies</span>
+              <span className="px-1.5 py-0.5 bg-white/20 text-white text-[10px] font-mono rounded-full">
+                24 Events
+              </span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -1095,6 +1232,9 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
                       </span>
                     </div>
                     <p className="text-xs text-gray-400 mt-1">{selectedRoleObj.description}</p>
+                    <p className="text-[11px] text-amber-400/90 font-mono mt-1">
+                      ℹ Pure User-Centric Model: Roles serve as metadata/classification labels only. Functional and device permissions are granted exclusively at the user account level.
+                    </p>
                   </div>
 
                   <div className="flex items-center space-x-3">
@@ -1629,6 +1769,517 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
               </table>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ================= SUBTAB 4: NOTIFICATION POLICY CENTRE ================= */}
+      {subTab === 'policies' && canViewPolicies && (
+        <div className="space-y-6">
+          {/* Header Banner */}
+          <div className="bg-neutral-900 border border-white/10 rounded-2xl p-6 shadow-xl space-y-4">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-purple-500/20 text-purple-400 rounded-xl border border-purple-500/30">
+                    <Icon name="bell" size={22} />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-black uppercase text-white tracking-wider flex items-center gap-2">
+                      Notification Policy Centre
+                      <span className="px-2 py-0.5 bg-purple-500/20 text-purple-300 text-[10px] font-mono rounded-full border border-purple-500/30">
+                        24 Canonical Events
+                      </span>
+                    </h2>
+                    <p className="text-xs text-gray-400 font-mono mt-0.5">
+                      Configure event routing, explicit recipient users (AppUser.id), alert priorities, and coalescing windows.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Status Notice */}
+              {policyNotice && (
+                <div className={`px-4 py-2 rounded-xl text-xs flex items-center gap-2 border animate-in fade-in duration-200 ${
+                  policyNotice.type === 'success'
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                    : policyNotice.type === 'error'
+                    ? 'bg-red-500/10 border-red-500/30 text-red-400'
+                    : 'bg-purple-500/10 border-purple-500/30 text-purple-300'
+                }`}>
+                  <Icon name={policyNotice.type === 'success' ? 'check' : 'info'} size={14} />
+                  <span>{policyNotice.message}</span>
+                  <button onClick={() => setPolicyNotice(null)} className="ml-2 text-gray-400 hover:text-white">
+                    <Icon name="x" size={12} />
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* View Only Warning for non-editors */}
+            {!canEditPolicies && (
+              <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-center gap-2 text-xs text-amber-400">
+                <Icon name="alert-triangle" size={16} />
+                <span>
+                  <strong>View Only Mode:</strong> You have permission to inspect notification policies. Modifying or saving policies requires the explicit <strong>SETTINGS → Notifications → Edit</strong> permission.
+                </span>
+              </div>
+            )}
+
+            {/* Bulk Controls Bar */}
+            <div className="pt-3 border-t border-white/10 flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-black uppercase text-gray-400 tracking-wider">Global Controls:</span>
+                <button
+                  type="button"
+                  disabled={!canEditPolicies}
+                  onClick={async () => {
+                    if (!canEditPolicies) return;
+                    const allDefs = notificationPolicyService.getAllEventDefinitions();
+                    for (const def of allDefs) {
+                      const pol = policies.find(p => p.eventId === def.eventId) || notificationPolicyService.getEffectivePolicy(def.eventId)!;
+                      if (!pol.enabled) {
+                        await notificationPolicyService.savePolicy({
+                          ...pol,
+                          enabled: true,
+                          updatedAt: new Date().toISOString(),
+                          updatedByUserId: currentUser?.id || 'system'
+                        });
+                      }
+                    }
+                    setPolicyNotice({ type: 'success', message: 'All 24 notification events enabled successfully.' });
+                  }}
+                  className={`px-2.5 py-1 rounded-lg font-black text-[10px] uppercase tracking-wider transition-all ${
+                    canEditPolicies
+                      ? 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                      : 'bg-white/5 text-gray-500 border border-white/5 cursor-not-allowed'
+                  }`}
+                >
+                  Enable All
+                </button>
+                <button
+                  type="button"
+                  disabled={!canEditPolicies}
+                  onClick={async () => {
+                    if (!canEditPolicies) return;
+                    const allDefs = notificationPolicyService.getAllEventDefinitions();
+                    for (const def of allDefs) {
+                      const pol = policies.find(p => p.eventId === def.eventId) || notificationPolicyService.getEffectivePolicy(def.eventId)!;
+                      if (pol.enabled) {
+                        await notificationPolicyService.savePolicy({
+                          ...pol,
+                          enabled: false,
+                          updatedAt: new Date().toISOString(),
+                          updatedByUserId: currentUser?.id || 'system'
+                        });
+                      }
+                    }
+                    setPolicyNotice({ type: 'info', message: 'All 24 notification events disabled.' });
+                  }}
+                  className={`px-2.5 py-1 rounded-lg font-black text-[10px] uppercase tracking-wider transition-all ${
+                    canEditPolicies
+                      ? 'bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30'
+                      : 'bg-white/5 text-gray-500 border border-white/5 cursor-not-allowed'
+                  }`}
+                >
+                  Disable All
+                </button>
+                <button
+                  type="button"
+                  disabled={!canEditPolicies}
+                  onClick={async () => {
+                    if (!canEditPolicies) return;
+                    if (!window.confirm('Reset all 24 events to canonical registry defaults? Configured recipients will be cleared.')) return;
+                    await notificationPolicyService.resetAllPolicies();
+                    setPolicyNotice({ type: 'info', message: 'All 24 events reset to canonical registry defaults.' });
+                  }}
+                  className={`px-2.5 py-1 rounded-lg font-black text-[10px] uppercase tracking-wider transition-all ${
+                    canEditPolicies
+                      ? 'bg-white/5 hover:bg-white/10 text-gray-300 border border-white/10'
+                      : 'bg-white/5 text-gray-500 border border-white/5 cursor-not-allowed'
+                  }`}
+                >
+                  Reset All to Defaults
+                </button>
+              </div>
+
+              {selectedPolicyGroup !== 'all' && (
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-black uppercase text-purple-400 tracking-wider">
+                    {NOTIFICATION_GROUP_LABELS[selectedPolicyGroup]}:
+                  </span>
+                  <button
+                    type="button"
+                    disabled={!canEditPolicies}
+                    onClick={async () => {
+                      if (!canEditPolicies) return;
+                      const groupDefs = notificationEventRegistry.getEventsByGroup(selectedPolicyGroup);
+                      for (const def of groupDefs) {
+                        const pol = policies.find(p => p.eventId === def.eventId) || notificationPolicyService.getEffectivePolicy(def.eventId)!;
+                        if (!pol.enabled) {
+                          await notificationPolicyService.savePolicy({
+                            ...pol,
+                            enabled: true,
+                            updatedAt: new Date().toISOString(),
+                            updatedByUserId: currentUser?.id || 'system'
+                          });
+                        }
+                      }
+                      setPolicyNotice({ type: 'success', message: `All events in "${NOTIFICATION_GROUP_LABELS[selectedPolicyGroup]}" enabled.` });
+                    }}
+                    className="px-2 py-0.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded text-[9px] font-black uppercase tracking-wider"
+                  >
+                    Enable Group
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!canEditPolicies}
+                    onClick={async () => {
+                      if (!canEditPolicies) return;
+                      const groupDefs = notificationEventRegistry.getEventsByGroup(selectedPolicyGroup);
+                      for (const def of groupDefs) {
+                        const pol = policies.find(p => p.eventId === def.eventId) || notificationPolicyService.getEffectivePolicy(def.eventId)!;
+                        if (pol.enabled) {
+                          await notificationPolicyService.savePolicy({
+                            ...pol,
+                            enabled: false,
+                            updatedAt: new Date().toISOString(),
+                            updatedByUserId: currentUser?.id || 'system'
+                          });
+                        }
+                      }
+                      setPolicyNotice({ type: 'info', message: `All events in "${NOTIFICATION_GROUP_LABELS[selectedPolicyGroup]}" disabled.` });
+                    }}
+                    className="px-2 py-0.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded text-[9px] font-black uppercase tracking-wider"
+                  >
+                    Disable Group
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!canEditPolicies}
+                    onClick={async () => {
+                      if (!canEditPolicies) return;
+                      const groupDefs = notificationEventRegistry.getEventsByGroup(selectedPolicyGroup);
+                      for (const def of groupDefs) {
+                        await notificationPolicyService.resetPolicy(def.eventId);
+                      }
+                      setPolicyNotice({ type: 'info', message: `All events in "${NOTIFICATION_GROUP_LABELS[selectedPolicyGroup]}" reset to defaults.` });
+                    }}
+                    className="px-2 py-0.5 bg-white/5 hover:bg-white/10 text-gray-300 border border-white/10 rounded text-[9px] font-black uppercase tracking-wider"
+                  >
+                    Reset Group
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Filters & Search Bar */}
+          <div className="bg-neutral-900 border border-white/10 rounded-2xl p-4 shadow-xl space-y-3">
+            <div className="flex flex-col md:flex-row items-center justify-between gap-3">
+              {/* Search Box */}
+              <div className="relative w-full md:w-96">
+                <input
+                  type="text"
+                  placeholder="Search by event name, ID, module, description..."
+                  value={policySearch}
+                  onChange={e => setPolicySearch(e.target.value)}
+                  className="w-full bg-black/60 border border-white/10 rounded-xl pl-9 pr-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500"
+                />
+                <Icon name="search" size={14} className="absolute left-3 top-2.5 text-gray-500" />
+              </div>
+
+              {/* Quick Filters */}
+              <div className="flex items-center gap-1 overflow-x-auto custom-scrollbar w-full md:w-auto pb-1">
+                {(['all', 'enabled', 'disabled', 'has_recipients', 'no_recipients'] as const).map(filter => {
+                  const labels: Record<typeof filter, string> = {
+                    all: 'All',
+                    enabled: 'Enabled',
+                    disabled: 'Disabled',
+                    has_recipients: 'Has Recipients',
+                    no_recipients: 'No Recipients'
+                  };
+                  return (
+                    <button
+                      key={filter}
+                      type="button"
+                      onClick={() => setPolicyQuickFilter(filter)}
+                      className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all shrink-0 ${
+                        policyQuickFilter === filter
+                          ? 'bg-purple-600 text-white shadow-md'
+                          : 'bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white border border-white/5'
+                      }`}
+                    >
+                      {labels[filter]}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Canonical Group Filter Bar */}
+            <div className="flex gap-1.5 overflow-x-auto custom-scrollbar pb-1 pt-1 border-t border-white/5">
+              <button
+                type="button"
+                onClick={() => setSelectedPolicyGroup('all')}
+                className={`px-3 py-1 rounded-xl text-[10px] font-black uppercase tracking-wider whitespace-nowrap transition-all shrink-0 flex items-center gap-1.5 ${
+                  selectedPolicyGroup === 'all'
+                    ? 'bg-purple-600 text-white shadow'
+                    : 'bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white border border-white/5'
+                }`}
+              >
+                <Icon name="bell" size={12} />
+                <span>All Groups</span>
+              </button>
+              {(Object.keys(NOTIFICATION_GROUP_LABELS) as NotificationGroup[]).map(grp => {
+                const groupIcons: Record<NotificationGroup, string> = {
+                  attention: 'alert-triangle',
+                  clocking: 'clock',
+                  leave: 'calendar',
+                  money_borrowing: 'banknote',
+                  stock_procurement: 'shopping-cart',
+                  dispatch_receiving: 'truck',
+                  users_security: 'shield',
+                  kanban: 'kanban',
+                  system_deployment: 'activity',
+                  other: 'bell'
+                };
+                return (
+                  <button
+                    key={grp}
+                    type="button"
+                    onClick={() => setSelectedPolicyGroup(grp)}
+                    className={`px-3 py-1 rounded-xl text-[10px] font-black uppercase tracking-wider whitespace-nowrap transition-all shrink-0 flex items-center gap-1.5 ${
+                      selectedPolicyGroup === grp
+                        ? 'bg-purple-600 text-white shadow'
+                        : 'bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white border border-white/5'
+                    }`}
+                  >
+                    <Icon name={groupIcons[grp] || 'bell'} size={12} />
+                    <span>{NOTIFICATION_GROUP_LABELS[grp]}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Policy Cards Grid */}
+          {(() => {
+            const allDefs = notificationPolicyService.getAllEventDefinitions();
+            const filteredDefs = allDefs.filter(def => {
+              const pol = policies.find(p => p.eventId === def.eventId) || notificationPolicyService.getEffectivePolicy(def.eventId);
+              if (!pol) return false;
+
+              if (selectedPolicyGroup !== 'all' && def.groupId !== selectedPolicyGroup) return false;
+
+              if (policyQuickFilter === 'enabled' && !pol.enabled) return false;
+              if (policyQuickFilter === 'disabled' && pol.enabled) return false;
+              if (policyQuickFilter === 'has_recipients' && (!pol.recipientUserIds || pol.recipientUserIds.length === 0)) return false;
+              if (policyQuickFilter === 'no_recipients' && pol.recipientUserIds && pol.recipientUserIds.length > 0) return false;
+
+              if (policySearch.trim()) {
+                const q = policySearch.toLowerCase().trim();
+                const matchName = def.eventName.toLowerCase().includes(q);
+                const matchId = def.eventId.toLowerCase().includes(q);
+                const matchDesc = (def.description || '').toLowerCase().includes(q);
+                const matchModule = def.moduleId.toLowerCase().includes(q);
+                if (!matchName && !matchId && !matchDesc && !matchModule) return false;
+              }
+
+              return true;
+            });
+
+            if (filteredDefs.length === 0) {
+              return (
+                <div className="bg-neutral-900 border border-white/10 rounded-2xl p-12 text-center space-y-3 shadow-xl">
+                  <div className="w-12 h-12 bg-white/5 rounded-full flex items-center justify-center mx-auto text-gray-500">
+                    <Icon name="bell" size={24} />
+                  </div>
+                  <h3 className="text-sm font-black uppercase tracking-wider text-white">No Notification Policies Found</h3>
+                  <p className="text-xs text-gray-500 max-w-sm mx-auto">
+                    No canonical events match the selected search query or group filter.
+                  </p>
+                </div>
+              );
+            }
+
+            return (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {filteredDefs.map(def => {
+                  const pol = policies.find(p => p.eventId === def.eventId) || notificationPolicyService.getEffectivePolicy(def.eventId)!;
+                  const groupIcons: Record<NotificationGroup, string> = {
+                    attention: 'alert-triangle',
+                    clocking: 'clock',
+                    leave: 'calendar',
+                    money_borrowing: 'banknote',
+                    stock_procurement: 'shopping-cart',
+                    dispatch_receiving: 'truck',
+                    users_security: 'shield',
+                    kanban: 'kanban',
+                    system_deployment: 'activity',
+                    other: 'bell'
+                  };
+
+                  const getPriorityStyle = (priority: NotificationPolicyPriority) => {
+                    switch (priority) {
+                      case 'critical':
+                        return 'bg-red-500/20 text-red-400 border-red-500/40 animate-pulse';
+                      case 'high':
+                        return 'bg-amber-500/20 text-amber-400 border-amber-500/40';
+                      case 'normal':
+                        return 'bg-blue-500/20 text-blue-400 border-blue-500/40';
+                      case 'info':
+                        return 'bg-sky-500/20 text-sky-400 border-sky-500/40';
+                      case 'silent':
+                      default:
+                        return 'bg-gray-500/20 text-gray-400 border-gray-500/40';
+                    }
+                  };
+
+                  const configuredRecipients = pol.recipientUserIds || [];
+
+                  return (
+                    <div
+                      key={def.eventId}
+                      className={`bg-neutral-900 border rounded-2xl p-5 shadow-xl transition-all space-y-4 ${
+                        pol.enabled
+                          ? 'border-white/10 hover:border-purple-500/40'
+                          : 'border-white/5 opacity-70 bg-black/40'
+                      }`}
+                    >
+                      {/* Top Bar: Group, Module, and Status */}
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="p-1.5 bg-purple-500/10 text-purple-400 rounded-lg border border-purple-500/20">
+                            <Icon name={groupIcons[def.groupId] || 'bell'} size={14} />
+                          </span>
+                          <span className="text-[10px] font-black uppercase tracking-wider text-purple-400">
+                            {NOTIFICATION_GROUP_LABELS[def.groupId]}
+                          </span>
+                          <span className="text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-white/5 text-gray-400 border border-white/10">
+                            mod: {def.moduleId}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase font-mono border ${
+                            pol.enabled
+                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                              : 'bg-gray-500/10 text-gray-400 border-gray-500/30'
+                          }`}>
+                            {pol.enabled ? '● Enabled' : '○ Disabled'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Event Title & Description */}
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="text-base font-black text-white">{def.eventName}</h3>
+                          <span className="text-[10px] font-mono text-gray-500">({def.eventId})</span>
+                        </div>
+                        <p className="text-xs text-gray-400 mt-1 line-clamp-2 leading-relaxed">
+                          {def.description}
+                        </p>
+                      </div>
+
+                      {/* Parameters: Priority & Coalescing */}
+                      <div className="flex items-center gap-3 pt-1 border-t border-white/5 text-xs">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] font-bold text-gray-500 uppercase">Priority:</span>
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase border font-mono ${getPriorityStyle(pol.priority)}`}>
+                            {pol.priority}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] font-bold text-gray-500 uppercase">Coalescing:</span>
+                          <span className="text-[10px] font-mono text-gray-300">
+                            {pol.coalesceEnabled ? `${pol.coalesceWindowMinutes} min` : 'Off'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Recipients List & Warnings */}
+                      <div className="pt-2 border-t border-white/5 space-y-2">
+                        {pol.enabled && configuredRecipients.length === 0 && (
+                          <div className="p-2 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-center gap-2 text-[11px] text-amber-400 font-bold">
+                            <Icon name="alert-triangle" size={14} />
+                            <span>NO RECIPIENTS CONFIGURED — Alerts for this event will be dropped until users are assigned.</span>
+                          </div>
+                        )}
+
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
+                            Recipients: <strong className="text-white font-mono">{configuredRecipients.length} Users</strong>
+                          </span>
+                          {configuredRecipients.length > 0 && (
+                            <span className="text-[10px] text-gray-500 font-mono">
+                              Explicit AppUser.id
+                            </span>
+                          )}
+                        </div>
+
+                        {configuredRecipients.length > 0 ? (
+                          <div className="flex flex-wrap gap-1.5">
+                            {configuredRecipients.slice(0, 4).map(uid => {
+                              const u = eligibleUsers.find(user => user.id === uid);
+                              return (
+                                <span
+                                  key={uid}
+                                  className="px-2 py-0.5 bg-white/5 border border-white/10 rounded-lg text-[10px] font-sans text-gray-300 flex items-center gap-1"
+                                >
+                                  <Icon name="user" size={10} className="text-purple-400" />
+                                  <span>{u?.name || uid}</span>
+                                </span>
+                              );
+                            })}
+                            {configuredRecipients.length > 4 && (
+                              <span className="px-2 py-0.5 bg-white/5 border border-white/10 rounded-lg text-[10px] font-mono text-gray-500">
+                                +{configuredRecipients.length - 4} more
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <p className="text-[11px] text-gray-600 italic">No recipient users assigned.</p>
+                        )}
+                      </div>
+
+                      {/* Action Bar */}
+                      <div className="pt-3 border-t border-white/10 flex items-center justify-between">
+                        <span className="text-[10px] font-mono text-gray-500">
+                          {pol.updatedAt ? `Updated: ${new Date(pol.updatedAt).toLocaleDateString()}` : 'Canonical Default'}
+                        </span>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingPolicy(pol);
+                            setPolicyForm({
+                              enabled: pol.enabled,
+                              priority: pol.priority,
+                              recipientUserIds: [...(pol.recipientUserIds || [])],
+                              coalesceEnabled: pol.coalesceEnabled,
+                              coalesceWindowMinutes: pol.coalesceWindowMinutes || (pol.coalesceEnabled ? 60 : 0)
+                            });
+                            setRecipientSearch('');
+                            setPolicyNotice(null);
+                          }}
+                          className={`px-3 py-1.5 rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 ${
+                            canEditPolicies
+                              ? 'bg-purple-600 hover:bg-purple-500 text-white shadow-lg shadow-purple-600/20'
+                              : 'bg-white/10 hover:bg-white/20 text-gray-300'
+                          }`}
+                        >
+                          <Icon name={canEditPolicies ? 'edit-3' : 'eye'} size={14} />
+                          <span>{canEditPolicies ? 'Edit Policy' : 'View Details'}</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -2271,33 +2922,43 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
                       </select>
                     </div>
 
-                    <div className="flex items-center gap-1.5 shrink-0">
+                    <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex items-center gap-1 bg-white/5 p-1 rounded-xl border border-white/10">
+                        <span className="text-[9px] font-mono uppercase text-gray-400 px-1 font-bold">Matrix:</span>
+                        <button
+                          type="button"
+                          disabled={isReadOnly}
+                          onClick={() => handleSetAllUserPermissions('allow')}
+                          className="px-2.5 py-1 bg-emerald-600/20 hover:bg-emerald-600/35 text-emerald-300 border border-emerald-500/40 rounded-lg text-[10px] font-bold uppercase transition-all flex items-center gap-1 shadow-sm cursor-pointer disabled:opacity-40"
+                          title="Global Enable All: Set all functional permissions to explicit ALLOW"
+                        >
+                          <Icon name="check" size={11} />
+                          <span>Enable All</span>
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isReadOnly}
+                          onClick={() => handleSetAllUserPermissions('deny')}
+                          className="px-2.5 py-1 bg-red-600/20 hover:bg-red-600/35 text-red-300 border border-red-500/40 rounded-lg text-[10px] font-bold uppercase transition-all flex items-center gap-1 shadow-sm cursor-pointer disabled:opacity-40"
+                          title="Global Disable All: Set all functional permissions to explicit DENY"
+                        >
+                          <Icon name="x" size={11} />
+                          <span>Disable All</span>
+                        </button>
+                      </div>
                       <button
                         type="button"
+                        disabled={isReadOnly}
                         onClick={handleResetUserPermissionsToInherit}
-                        className="px-2.5 py-1.5 bg-white/5 hover:bg-white/10 text-gray-300 border border-white/10 rounded-xl text-[10px] font-bold uppercase transition-all"
-                        title="Reset all overrides back to role defaults"
+                        className="px-2.5 py-1.5 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-gray-200 border border-white/10 rounded-xl text-[10px] font-bold uppercase transition-all disabled:opacity-40"
+                        title="Reset all permissions to Default Deny (Unset)"
                       >
-                        Reset All to Inherit
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleSetAllUserPermissions('allow')}
-                        className="px-2.5 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 rounded-xl text-[10px] font-bold uppercase transition-all"
-                      >
-                        Allow All
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleSetAllUserPermissions('deny')}
-                        className="px-2.5 py-1.5 bg-red-600/20 hover:bg-red-600/30 text-red-300 border border-red-500/30 rounded-xl text-[10px] font-bold uppercase transition-all"
-                      >
-                        Deny All
+                        Reset (Unset)
                       </button>
                     </div>
                   </div>
 
-                  {/* 3-State Legend */}
+                  {/* 3-State Legend (Pure User-Centric Authorization) */}
                   <div className="flex items-center gap-4 text-[10px] font-mono text-gray-400 px-1">
                     <span className="flex items-center gap-1">
                       <span className="w-3.5 h-3.5 rounded bg-emerald-600/30 border border-emerald-500 text-emerald-300 flex items-center justify-center font-bold">✓</span>
@@ -2309,7 +2970,7 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
                     </span>
                     <span className="flex items-center gap-1">
                       <span className="w-3.5 h-3.5 rounded bg-white/5 border border-white/15 text-gray-400 flex items-center justify-center font-bold">—</span>
-                      <span>INHERITED (From Role)</span>
+                      <span>DEFAULT DENY (Unset)</span>
                     </span>
                   </div>
 
@@ -2318,9 +2979,38 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
                     <table className="w-full text-left text-xs">
                       <thead className="bg-black/70 text-gray-400 font-mono uppercase text-[9px] sticky top-0 z-10 border-b border-white/10">
                         <tr>
-                          <th className="p-2.5 min-w-[150px]">Module</th>
+                          <th className="p-2.5 min-w-[240px]">
+                            <div className="flex flex-col gap-0.5">
+                              <span className="font-bold text-gray-300 text-[10px]">Module / Resource</span>
+                              <span className="text-[8px] text-gray-500 font-sans normal-case">Row shortcuts apply to module</span>
+                            </div>
+                          </th>
                           {ALL_PERMISSION_ACTIONS.map(action => (
-                            <th key={action} className="p-2 text-center min-w-[50px]">{action}</th>
+                            <th key={action} className="p-2 text-center min-w-[70px]">
+                              <div className="flex flex-col items-center gap-1">
+                                <span className="font-bold text-gray-200 tracking-wider text-[10px]">{action}</span>
+                                <div className="flex flex-col gap-1 w-full max-w-[62px]">
+                                  <button
+                                    type="button"
+                                    disabled={isReadOnly}
+                                    onClick={() => handleColumnSetAll(action, 'allow')}
+                                    title={`Set ${action} = ALLOW across all modules`}
+                                    className="w-full px-1 py-0.5 rounded bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-300 border border-emerald-500/35 text-[7.5px] font-bold uppercase tracking-tight transition-all whitespace-nowrap cursor-pointer disabled:opacity-40"
+                                  >
+                                    Enable All
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={isReadOnly}
+                                    onClick={() => handleColumnSetAll(action, 'deny')}
+                                    title={`Set ${action} = DENY across all modules`}
+                                    className="w-full px-1 py-0.5 rounded bg-red-600/20 hover:bg-red-600/40 text-red-300 border border-red-500/35 text-[7.5px] font-bold uppercase tracking-tight transition-all whitespace-nowrap cursor-pointer disabled:opacity-40"
+                                  >
+                                    Disable All
+                                  </button>
+                                </div>
+                              </div>
+                            </th>
                           ))}
                         </tr>
                       </thead>
@@ -2337,7 +3027,30 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
                               <React.Fragment key={catGroup.category}>
                                 <tr className="bg-white/5 font-mono text-[10px] text-purple-300 font-bold uppercase tracking-wider">
                                   <td colSpan={1 + ALL_PERMISSION_ACTIONS.length} className="px-3 py-1.5">
-                                    {catGroup.category}
+                                    <div className="flex items-center justify-between">
+                                      <span>{catGroup.category}</span>
+                                      <div className="flex items-center gap-2 font-mono text-[9px] lowercase">
+                                        <button
+                                          type="button"
+                                          disabled={isReadOnly}
+                                          onClick={() => handleCategorySetAll(catGroup.category, 'allow')}
+                                          className="text-emerald-400 hover:text-emerald-300 uppercase font-bold tracking-wider cursor-pointer disabled:opacity-40"
+                                          title={`Enable all modules in ${catGroup.category}`}
+                                        >
+                                          Enable Category
+                                        </button>
+                                        <span className="text-gray-600">|</span>
+                                        <button
+                                          type="button"
+                                          disabled={isReadOnly}
+                                          onClick={() => handleCategorySetAll(catGroup.category, 'deny')}
+                                          className="text-red-400 hover:text-red-300 uppercase font-bold tracking-wider cursor-pointer disabled:opacity-40"
+                                          title={`Disable all modules in ${catGroup.category}`}
+                                        >
+                                          Disable Category
+                                        </button>
+                                      </div>
+                                    </div>
                                   </td>
                                 </tr>
 
@@ -2347,7 +3060,31 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
                                   return (
                                     <tr key={moduleName} className="hover:bg-white/5 transition-colors">
                                       <td className="p-2 font-medium text-gray-200 text-[11px]">
-                                        {moduleName}
+                                        <div className="flex items-center justify-between gap-2">
+                                          <span className="truncate font-semibold text-gray-200" title={moduleName}>
+                                            {moduleName}
+                                          </span>
+                                          <div className="flex items-center gap-1 shrink-0">
+                                            <button
+                                              type="button"
+                                              disabled={isReadOnly}
+                                              onClick={() => handleRowSetAll(moduleName, 'allow')}
+                                              title={`Enable All: Set all permissions for ${moduleName} to ALLOW`}
+                                              className="px-1.5 py-0.5 rounded bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-300 border border-emerald-500/35 text-[8px] font-bold uppercase tracking-tight transition-all whitespace-nowrap cursor-pointer disabled:opacity-40"
+                                            >
+                                              Enable All
+                                            </button>
+                                            <button
+                                              type="button"
+                                              disabled={isReadOnly}
+                                              onClick={() => handleRowSetAll(moduleName, 'deny')}
+                                              title={`Disable All: Set all permissions for ${moduleName} to DENY`}
+                                              className="px-1.5 py-0.5 rounded bg-red-600/20 hover:bg-red-600/40 text-red-300 border border-red-500/35 text-[8px] font-bold uppercase tracking-tight transition-all whitespace-nowrap cursor-pointer disabled:opacity-40"
+                                            >
+                                              Disable All
+                                            </button>
+                                          </div>
+                                        </div>
                                       </td>
 
                                       {ALL_PERMISSION_ACTIONS.map(act => {
@@ -2356,23 +3093,16 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
 
                                         let buttonClass = 'bg-white/5 border-white/10 text-gray-500 hover:border-white/30';
                                         let label = '—';
-                                        let title = `Inherited from role (${roleVal ? 'Allowed' : 'Denied'}) - Click to override`;
+                                        let title = 'Default DENY (Unset) - Click to Allow';
 
                                         if (overrideState === 'allow') {
                                           buttonClass = 'bg-emerald-600/30 border-emerald-500 text-emerald-300 shadow-sm font-black';
                                           label = '✓';
-                                          title = 'Explicitly ALLOWED (Override) - Click to Deny';
+                                          title = 'Explicitly ALLOWED - Click to Deny';
                                         } else if (overrideState === 'deny') {
                                           buttonClass = 'bg-red-600/30 border-red-500 text-red-300 shadow-sm font-black';
                                           label = '✕';
-                                          title = 'Explicitly DENIED (Override) - Click to Inherit';
-                                        } else {
-                                          // Inherited
-                                          if (roleVal) {
-                                            label = '— (✓)';
-                                          } else {
-                                            label = '— (✕)';
-                                          }
+                                          title = 'Explicitly DENIED - Click to reset to Default Deny';
                                         }
 
                                         return (
@@ -2403,7 +3133,7 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
               {/* Modal Footer */}
               <div className="flex items-center justify-between pt-3 border-t border-white/10 shrink-0">
                 <div className="text-[11px] text-gray-400 font-mono">
-                  * Explicit user overrides take immediate precedence over role baseline permissions.
+                  * Pure User-Centric: Role is metadata only. Explicit user permissions govern all functional and device view access.
                 </div>
 
                 <div className="flex items-center space-x-2">
@@ -2676,6 +3406,354 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
                 Permanently Delete
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ================= POLICY EDIT MODAL ================= */}
+      {editingPolicy && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-neutral-900 border border-white/10 rounded-3xl w-full max-w-2xl p-6 space-y-5 shadow-2xl max-h-[92vh] flex flex-col">
+            {/* Header */}
+            <div className="flex justify-between items-start pb-3 border-b border-white/10 shrink-0">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 bg-purple-500/20 text-purple-300 text-[10px] font-black uppercase font-mono rounded">
+                    {NOTIFICATION_GROUP_LABELS[editingPolicy.groupId]}
+                  </span>
+                  <span className="text-[10px] font-mono text-gray-500">
+                    {editingPolicy.eventId}
+                  </span>
+                </div>
+                <h3 className="text-lg font-black text-white uppercase tracking-tight">
+                  {editingPolicy.eventName}
+                </h3>
+                <p className="text-xs text-gray-400">
+                  {notificationPolicyService.getEventDefinition(editingPolicy.eventId)?.description}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setEditingPolicy(null)}
+                className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white"
+              >
+                <Icon name="x" size={18} />
+              </button>
+            </div>
+
+            {/* Form */}
+            <form
+              onSubmit={async e => {
+                e.preventDefault();
+                if (!canEditPolicies || !editingPolicy) return;
+                setIsSavingPolicy(true);
+                try {
+                  const updatedPolicy: NotificationPolicy = {
+                    ...editingPolicy,
+                    enabled: policyForm.enabled,
+                    priority: policyForm.priority,
+                    recipientUserIds: policyForm.recipientUserIds,
+                    coalesceEnabled: policyForm.coalesceEnabled,
+                    coalesceWindowMinutes: policyForm.coalesceEnabled ? (policyForm.coalesceWindowMinutes || 60) : 0,
+                    updatedAt: new Date().toISOString(),
+                    updatedByUserId: currentUser?.id || 'system'
+                  };
+
+                  await notificationPolicyService.savePolicy(updatedPolicy);
+                  setEditingPolicy(null);
+                  setPolicyNotice({
+                    type: 'success',
+                    message: `Policy for ${updatedPolicy.eventName} saved successfully.`
+                  });
+                } catch (err: any) {
+                  setPolicyNotice({ type: 'error', message: err.message || 'Failed to save policy.' });
+                } finally {
+                  setIsSavingPolicy(false);
+                }
+              }}
+              className="space-y-5 flex-1 overflow-y-auto custom-scrollbar pr-1"
+            >
+              {/* Enabled / Disabled Toggle */}
+              <div className="bg-black/40 border border-white/5 rounded-2xl p-4 flex items-center justify-between">
+                <div>
+                  <label className="text-xs font-black uppercase tracking-wider text-white">Event Delivery Status</label>
+                  <p className="text-[11px] text-gray-400 mt-0.5">
+                    When disabled, business events of this type produce zero notifications.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={!canEditPolicies}
+                  onClick={() => setPolicyForm(prev => ({ ...prev, enabled: !prev.enabled }))}
+                  className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-2 ${
+                    policyForm.enabled
+                      ? 'bg-emerald-500 text-black shadow-lg shadow-emerald-500/20'
+                      : 'bg-white/10 text-gray-400 hover:bg-white/20'
+                  }`}
+                >
+                  <Icon name={policyForm.enabled ? 'check' : 'x'} size={14} />
+                  <span>{policyForm.enabled ? 'Enabled' : 'Disabled'}</span>
+                </button>
+              </div>
+
+              {/* Priority Selector */}
+              <div className="space-y-2">
+                <label className="text-xs font-black uppercase tracking-wider text-gray-300">
+                  Notification Priority
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                  {(['critical', 'high', 'normal', 'info', 'silent'] as NotificationPolicyPriority[]).map(p => {
+                    const isSelected = policyForm.priority === p;
+                    const priorityThemes: Record<NotificationPolicyPriority, string> = {
+                      critical: isSelected ? 'bg-red-500 text-white border-red-400' : 'bg-red-500/10 text-red-300 border-red-500/30',
+                      high: isSelected ? 'bg-amber-500 text-black border-amber-400' : 'bg-amber-500/10 text-amber-300 border-amber-500/30',
+                      normal: isSelected ? 'bg-blue-600 text-white border-blue-400' : 'bg-blue-500/10 text-blue-300 border-blue-500/30',
+                      info: isSelected ? 'bg-sky-500 text-black border-sky-400' : 'bg-sky-500/10 text-sky-300 border-sky-500/30',
+                      silent: isSelected ? 'bg-gray-400 text-black border-gray-300' : 'bg-gray-500/10 text-gray-400 border-gray-500/30'
+                    };
+                    return (
+                      <button
+                        key={p}
+                        type="button"
+                        disabled={!canEditPolicies}
+                        onClick={() => setPolicyForm(prev => ({ ...prev, priority: p }))}
+                        className={`p-2.5 rounded-xl border font-black text-xs uppercase tracking-wider transition-all flex flex-col items-center justify-center gap-1 ${priorityThemes[p]}`}
+                      >
+                        <span>{p}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {policyForm.priority === 'silent' && (
+                  <p className="text-[11px] text-gray-400 italic bg-white/5 border border-white/5 rounded-xl p-2.5">
+                    ℹ️ SILENT — This event will not appear in the notification bell. It is captured strictly for audit trail history.
+                  </p>
+                )}
+              </div>
+
+              {/* Recipient User Selector (AppUser.id) */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    <label className="text-xs font-black uppercase tracking-wider text-gray-300">
+                      Explicit Recipient Users
+                    </label>
+                    <p className="text-[10px] text-gray-500 font-mono">
+                      Recipients are explicit AppUser.id values. Roles and departments have zero routing authority.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={!canEditPolicies}
+                      onClick={() => setPolicyForm(prev => ({ ...prev, recipientUserIds: eligibleUsers.map(u => u.id) }))}
+                      className="px-2 py-1 bg-white/5 hover:bg-white/10 text-purple-400 border border-white/10 rounded-lg text-[10px] font-black uppercase tracking-wider"
+                    >
+                      Select All
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!canEditPolicies}
+                      onClick={() => setPolicyForm(prev => ({ ...prev, recipientUserIds: [] }))}
+                      className="px-2 py-1 bg-white/5 hover:bg-white/10 text-gray-400 border border-white/10 rounded-lg text-[10px] font-black uppercase tracking-wider"
+                    >
+                      Clear All
+                    </button>
+                  </div>
+                </div>
+
+                {/* Recipient Search */}
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Filter eligible users by name, email, department..."
+                    value={recipientSearch}
+                    onChange={e => setRecipientSearch(e.target.value)}
+                    className="w-full bg-black/60 border border-white/10 rounded-xl pl-8 pr-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500"
+                  />
+                  <Icon name="search" size={14} className="absolute left-2.5 top-2.5 text-gray-500" />
+                </div>
+
+                {/* Recipient Checkbox List */}
+                <div className="border border-white/10 rounded-2xl p-2 bg-black/40 max-h-56 overflow-y-auto custom-scrollbar space-y-1">
+                  {(() => {
+                    const filteredUsers = eligibleUsers.filter(u => {
+                      if (!recipientSearch.trim()) return true;
+                      const q = recipientSearch.toLowerCase().trim();
+                      return (
+                        u.name.toLowerCase().includes(q) ||
+                        (u.email || '').toLowerCase().includes(q) ||
+                        (u.department || '').toLowerCase().includes(q) ||
+                        (u.branchName || '').toLowerCase().includes(q)
+                      );
+                    });
+
+                    if (filteredUsers.length === 0) {
+                      return (
+                        <p className="text-center py-6 text-xs text-gray-500">
+                          No eligible active users match the search filter.
+                        </p>
+                      );
+                    }
+
+                    return filteredUsers.map(u => {
+                      const isChecked = policyForm.recipientUserIds.includes(u.id);
+                      return (
+                        <div
+                          key={u.id}
+                          onClick={() => {
+                            if (!canEditPolicies) return;
+                            setPolicyForm(prev => {
+                              const exists = prev.recipientUserIds.includes(u.id);
+                              return {
+                                ...prev,
+                                recipientUserIds: exists
+                                  ? prev.recipientUserIds.filter(id => id !== u.id)
+                                  : [...prev.recipientUserIds, u.id]
+                              };
+                            });
+                          }}
+                          className={`p-2.5 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
+                            isChecked
+                              ? 'bg-purple-900/20 border-purple-500/40 text-white'
+                              : 'bg-black/20 border-white/5 hover:bg-white/5 text-gray-300'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              readOnly
+                              className="rounded border-gray-700 text-purple-600 focus:ring-purple-600 bg-black/50 pointer-events-none"
+                            />
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-xs text-white">{u.name}</span>
+                                <span className="text-[10px] font-mono text-purple-400 bg-purple-500/10 px-1.5 rounded">
+                                  {u.id}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2 text-[10px] text-gray-500">
+                                <span>{u.email}</span>
+                                {u.department && <span>• {u.department}</span>}
+                                {u.branchName && <span>• {u.branchName}</span>}
+                              </div>
+                            </div>
+                          </div>
+
+                          <span className={`text-[10px] font-black uppercase font-mono px-2 py-0.5 rounded ${
+                            isChecked ? 'bg-purple-500/20 text-purple-300' : 'text-gray-600'
+                          }`}>
+                            {isChecked ? 'RECIPIENT' : 'EXCLUDED'}
+                          </span>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+                <div className="flex justify-between items-center text-[10px] text-gray-400 font-mono px-1">
+                  <span>Selected: <strong>{policyForm.recipientUserIds.length}</strong> of {eligibleUsers.length} active users</span>
+                  {policyForm.recipientUserIds.length === 0 && (
+                    <span className="text-amber-400 font-bold">⚠️ Warning: No recipients selected</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Coalescing Settings */}
+              <div className="space-y-3 bg-black/40 border border-white/5 rounded-2xl p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <label className="text-xs font-black uppercase tracking-wider text-white">Event Coalescing</label>
+                    <p className="text-[11px] text-gray-400 mt-0.5">
+                      Combines repeated notifications of the same event into a single card with a multiplier badge (e.g. ×3).
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={!canEditPolicies}
+                    onClick={() => setPolicyForm(prev => ({
+                      ...prev,
+                      coalesceEnabled: !prev.coalesceEnabled,
+                      coalesceWindowMinutes: !prev.coalesceEnabled ? (prev.coalesceWindowMinutes || 60) : 0
+                    }))}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
+                      policyForm.coalesceEnabled
+                        ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/20'
+                        : 'bg-white/10 text-gray-400'
+                    }`}
+                  >
+                    {policyForm.coalesceEnabled ? 'Coalescing ON' : 'Coalescing OFF'}
+                  </button>
+                </div>
+
+                {policyForm.coalesceEnabled && (
+                  <div className="space-y-1.5 pt-2 border-t border-white/5">
+                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                      Coalescing Window Duration
+                    </label>
+                    <div className="grid grid-cols-5 gap-2">
+                      {[15, 30, 60, 120, 1440].map(mins => (
+                        <button
+                          key={mins}
+                          type="button"
+                          disabled={!canEditPolicies}
+                          onClick={() => setPolicyForm(prev => ({ ...prev, coalesceWindowMinutes: mins }))}
+                          className={`py-2 rounded-xl text-xs font-black font-mono transition-all border ${
+                            policyForm.coalesceWindowMinutes === mins
+                              ? 'bg-purple-600 text-white border-purple-400 shadow'
+                              : 'bg-white/5 text-gray-400 border-white/5 hover:bg-white/10'
+                          }`}
+                        >
+                          {mins >= 60 ? `${mins / 60}h` : `${mins}m`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center justify-between pt-4 border-t border-white/10 shrink-0">
+                <button
+                  type="button"
+                  disabled={!canEditPolicies || isSavingPolicy}
+                  onClick={async () => {
+                    if (!canEditPolicies || !editingPolicy) return;
+                    if (!window.confirm('Reset this event policy to canonical defaults?')) return;
+                    await notificationPolicyService.resetPolicy(editingPolicy.eventId);
+                    setEditingPolicy(null);
+                    setPolicyNotice({
+                      type: 'info',
+                      message: `Policy for ${editingPolicy.eventName} reset to canonical defaults.`
+                    });
+                  }}
+                  className="px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 text-xs font-black uppercase rounded-xl transition-all"
+                >
+                  Reset to Default
+                </button>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditingPolicy(null)}
+                    className="px-4 py-2 bg-white/10 text-gray-300 text-xs font-bold rounded-xl hover:bg-white/20"
+                  >
+                    Cancel
+                  </button>
+                  {canEditPolicies && (
+                    <button
+                      type="submit"
+                      disabled={isSavingPolicy}
+                      className="px-5 py-2 bg-purple-600 hover:bg-purple-500 text-white font-black text-xs uppercase rounded-xl shadow-lg shadow-purple-600/30 flex items-center gap-2"
+                    >
+                      {isSavingPolicy ? <Icon name="refresh-cw" size={14} className="animate-spin" /> : <Icon name="check" size={14} />}
+                      <span>Save Policy</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            </form>
           </div>
         </div>
       )}
