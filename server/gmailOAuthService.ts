@@ -152,6 +152,33 @@ export class GmailOAuthService {
     }
   }
 
+  // Trusted frontend base origins for OAuth redirection (no open redirect allowed)
+  private static readonly TRUSTED_RETURN_ORIGINS = new Set([
+    'https://timbersmith-terminal.netlify.app',
+    'https://tsjoinery.co.za',
+    'https://www.tsjoinery.co.za',
+    'http://localhost:3000',
+    'http://localhost:5173'
+  ]);
+
+  /**
+   * Sanitizes and validates the return URL to prevent open-redirect vulnerabilities.
+   * If invalid or untrusted origin, safely falls back to canonical Netlify app URL.
+   */
+  public sanitizeReturnUrl(returnUrl?: string): string {
+    const defaultUrl = 'https://timbersmith-terminal.netlify.app/';
+    if (!returnUrl || typeof returnUrl !== 'string') return defaultUrl;
+    try {
+      const parsed = new URL(returnUrl.trim());
+      if (GmailOAuthService.TRUSTED_RETURN_ORIGINS.has(parsed.origin)) {
+        return parsed.toString();
+      }
+    } catch {
+      // Malformed URL, fall through to defaultUrl
+    }
+    return defaultUrl;
+  }
+
   /**
    * Generates authorization URL with PKCE and an authenticated, encrypted state token.
    * Multi-instance Cloud Run safe.
@@ -170,6 +197,8 @@ export class GmailOAuthService {
       throw new Error('Employee email must be an authorized @tsjoinery.co.za company account.');
     }
 
+    const safeReturnUrl = this.sanitizeReturnUrl(appReturnUrl);
+
     // 1. Generate PKCE code verifier and S256 code challenge
     const codeVerifier = crypto.randomBytes(32).toString('base64url');
     const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
@@ -178,7 +207,7 @@ export class GmailOAuthService {
     const state = this.encryptToken({
       codeVerifier,
       employeeEmail: normalizedEmail,
-      appReturnUrl,
+      appReturnUrl: safeReturnUrl,
       createdAt: Date.now(),
       nonce: crypto.randomBytes(16).toString('base64url')
     });
@@ -316,7 +345,7 @@ export class GmailOAuthService {
     return {
       sessionId: sessionDoc.sessionId,
       googleEmail: authenticatedGoogleEmail,
-      appReturnUrl: stateData.appReturnUrl,
+      appReturnUrl: this.sanitizeReturnUrl(stateData.appReturnUrl),
       user: authoritativeUser
     };
   }

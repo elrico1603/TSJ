@@ -28,17 +28,19 @@ async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
 
+  // Canonical trusted frontend origins allowlist (no wildcard suffixes permitted)
+  const TRUSTED_ORIGINS = new Set([
+    'https://timbersmith-terminal.netlify.app',
+    'https://tsjoinery.co.za',
+    'https://www.tsjoinery.co.za',
+    'http://localhost:3000',
+    'http://localhost:5173'
+  ]);
+
   // Cross-Origin Resource Sharing (CORS) with credentials support
   app.use((req, res, next) => {
     const origin = req.headers.origin;
-    const allowedOrigins = [
-      'https://timbersmith-terminal.netlify.app',
-      'https://tsjoinery.co.za',
-      'https://www.tsjoinery.co.za',
-      'http://localhost:3000',
-      'http://localhost:5173'
-    ];
-    if (origin && (allowedOrigins.includes(origin) || origin.endsWith('.run.app') || origin.endsWith('.netlify.app'))) {
+    if (origin && TRUSTED_ORIGINS.has(origin)) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Access-Control-Allow-Credentials', 'true');
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
