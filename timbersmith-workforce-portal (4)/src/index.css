@@ -1,0 +1,241 @@
+@import "tailwindcss";
+
+@keyframes scan { 0% { top: 0%; } 100% { top: 100%; } }
+@keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+.animate-shake { animation: shake 0.2s ease-in-out infinite; }
+.custom-scrollbar::-webkit-scrollbar { width: 6px; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background: #333; border-radius: 10px; }
+
+/* Safe Area Insets Support for Android / Mobile */
+:root {
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+}
+
+.pt-safe { padding-top: env(safe-area-inset-top, 0px); }
+.pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
+.pl-safe { padding-left: env(safe-area-inset-left, 0px); }
+.pr-safe { padding-right: env(safe-area-inset-right, 0px); }
+
+.mt-safe { margin-top: env(safe-area-inset-top, 0px); }
+.mb-safe { margin-bottom: env(safe-area-inset-bottom, 0px); }
+
+/* Apply app background default and overflow limit unless printing */
+html {
+  background: #111111;
+  color-scheme: dark;
+}
+
+body { 
+  background: #111111; 
+  margin: 0; 
+  color: white; 
+  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; 
+  overflow: hidden; 
+  height: 100vh;
+  height: 100dvh;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+
+video { transform: none !important; border-radius: 2.5rem; }
+.glass { background: rgba(0, 0, 0, 0.4); backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.08); }
+.tooltip-arrow { border-left: 8px solid transparent; border-right: 8px solid transparent; border-top: 8px solid rgba(0,0,0,0.9); }
+input::placeholder, textarea::placeholder { color: #555; }
+input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1); cursor: pointer; }
+
+@keyframes pulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+
+/* Print Engine Overrides */
+@media print {
+    * {
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+    }
+    @page {
+        size: A4 portrait;
+        margin: 12mm 15mm;
+    }
+    html, body { 
+        margin: 0 !important;
+        padding: 0 !important;
+        background: #ffffff !important; 
+        color: #000000 !important; 
+        overflow: visible !important; 
+        height: auto !important; 
+        min-height: 100% !important;
+        width: 100% !important;
+        position: static !important;
+    }
+    
+    /* Hide everything in the body by default */
+    body {
+        visibility: hidden !important;
+        background: #ffffff !important;
+    }
+
+    #root, main, .app-container {
+        overflow: visible !important;
+        height: auto !important;
+        min-height: 0 !important;
+        position: static !important;
+    }
+    
+    /* Only show the target print containers and their descendants */
+    #printCanvas, #printCanvas *,
+    #pdf-export-container, #pdf-export-container *,
+    #ppe-print-certificate, #ppe-print-certificate *,
+    #ppe-certificate-print-container, #ppe-certificate-print-container *,
+    .ppe-certificate-print, .ppe-certificate-print *,
+    #po-print-container, #po-print-container *,
+    .po-document-print, .po-document-print * {
+        visibility: visible !important;
+    }
+
+    .print-wrapper {
+        position: static !important;
+        overflow: visible !important;
+        height: auto !important;
+        min-height: 0 !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        background: white !important;
+        display: block !important;
+    }
+    
+    #printCanvas {
+        position: fixed !important;
+        left: 0 !important;
+        top: 0 !important;
+        width: 210mm !important;
+        height: 297mm !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        border: none !important;
+        box-shadow: none !important;
+        background: white !important;
+        border-radius: 0 !important;
+        z-index: 9999999 !important;
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+    }
+
+    #pdf-export-container {
+        position: relative !important;
+        left: auto !important;
+        top: auto !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        margin: 0 auto !important;
+        padding: 0 !important;
+        border: none !important;
+        box-shadow: none !important;
+        background: white !important;
+        border-radius: 0 !important;
+        z-index: auto !important;
+        overflow: visible !important;
+        height: auto !important;
+        display: block !important;
+    }
+
+    #ppe-print-certificate,
+    #ppe-certificate-print-container,
+    .ppe-certificate-print,
+    #po-print-container,
+    .po-document-print {
+        position: absolute !important;
+        left: 0 !important;
+        top: 0 !important;
+        width: 100% !important;
+        height: auto !important;
+        min-height: 0 !important;
+        overflow: visible !important;
+        display: block !important;
+        background: #ffffff !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        border: none !important;
+        box-shadow: none !important;
+    }
+
+    .po-avoid-break {
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+    }
+
+    .report-print-footer {
+        display: flex !important;
+        position: fixed !important;
+        bottom: 0 !important;
+        left: 0 !important;
+        right: 0 !important;
+        width: 100% !important;
+        background: white !important;
+        padding-top: 6px !important;
+        border-top: 1px solid #aaa !important;
+    }
+
+    .no-print,
+    header,
+    aside,
+    button,
+    nav,
+    .sidebar,
+    .toolbar,
+    .zoom-controls,
+    .grid-background,
+    .dotted-workspace-background,
+    .selection-borders,
+    .resize-handles,
+    .guidelines,
+    .developer-overlays { 
+        display: none !important; 
+        visibility: hidden !important;
+    }
+
+    tr, td, th, .avoid-break, .ppe-avoid-break { 
+        page-break-inside: avoid !important; 
+        break-inside: avoid !important; 
+    }
+
+    .ppe-undertaking-box,
+    .ppe-signatures-block,
+    .ppe-header-block,
+    .ppe-metadata-block {
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+    }
+
+    table, .ppe-items-table { 
+        page-break-inside: auto !important; 
+        break-inside: auto !important;
+        page-break-after: auto !important;
+        break-after: auto !important;
+        width: 100% !important;
+    }
+
+    .ppe-table-row {
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+    }
+}
+
+.bg-watermark {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-image: 
+        linear-gradient(to bottom, rgba(12, 12, 12, 0.82), rgba(12, 12, 12, 0.92)),
+        url('./assets/images/workshop_bg_1782391840737.jpg');
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    opacity: 1; 
+    z-index: -10; 
+    pointer-events: none; 
+}
