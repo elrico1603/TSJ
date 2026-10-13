@@ -5,6 +5,7 @@ import { purchaseOrderService } from '../services/purchaseOrderService';
 import { companyService } from '../services/companyService';
 import { permissionService } from '../services/permissionService';
 import { downloadPurchaseOrderPdf } from '../services/purchaseOrderPdfService';
+import { SendPurchaseOrderModal } from './SendPurchaseOrderModal';
 
 interface PurchaseOrderDocumentModalProps {
   po: PurchaseOrder;
@@ -26,6 +27,7 @@ export const PurchaseOrderDocumentModal: React.FC<PurchaseOrderDocumentModalProp
   const [approvalNotes, setApprovalNotes] = useState('');
   const [showApprovalPrompt, setShowApprovalPrompt] = useState(false);
   const [showInternalAudit, setShowInternalAudit] = useState(false);
+  const [showSendModal, setShowSendModal] = useState(false);
 
   // Authoritative company and branch information
   const companyInfo = companyService.getLocalCompanyInfo();
@@ -33,6 +35,9 @@ export const PurchaseOrderDocumentModal: React.FC<PurchaseOrderDocumentModalProp
   const branch = branches.find(b => b.id === po.branchId || b.branchCode === po.branchId);
 
   const canApprove = (po.status === 'Draft' || po.status === 'Pending Approval') &&
+    permissionService.hasPermission(currentUser, 'Purchase Orders', 'Approve');
+
+  const canSendPO = permissionService.hasPermission(currentUser, 'Purchase Orders', 'Edit') ||
     permissionService.hasPermission(currentUser, 'Purchase Orders', 'Approve');
 
   const handleApproveSubmit = async () => {
@@ -167,6 +172,17 @@ export const PurchaseOrderDocumentModal: React.FC<PurchaseOrderDocumentModalProp
               <Icon name="download" size={16} />
               <span>{isExportingPdf ? 'Exporting...' : 'Export PDF'}</span>
             </button>
+
+            {canSendPO && (
+              <button
+                onClick={() => setShowSendModal(true)}
+                className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-black rounded-xl text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 shadow-md"
+                title="Send Purchase Order via Google Workspace Gmail"
+              >
+                <Icon name="send" size={16} />
+                <span>Send PO</span>
+              </button>
+            )}
 
             <button
               onClick={onClose}
@@ -468,6 +484,20 @@ export const PurchaseOrderDocumentModal: React.FC<PurchaseOrderDocumentModalProp
 
         </div>
       </div>
+
+      {/* Send Purchase Order via Gmail Modal */}
+      {showSendModal && (
+        <SendPurchaseOrderModal
+          po={po}
+          currentUser={currentUser}
+          onClose={() => setShowSendModal(false)}
+          onSent={() => {
+            onStatusChanged();
+            setShowSendModal(false);
+          }}
+          announce={announce}
+        />
+      )}
     </div>
   );
 };

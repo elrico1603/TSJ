@@ -103,4 +103,23 @@ export function canMutateSupplier(
   return true;
 }
 
+export function canSendLiveGmail(): boolean {
+  if (typeof window === 'undefined') {
+    return process.env.NODE_ENV === 'production';
+  }
+  const hostname = (window.location.hostname || '').toLowerCase();
+  if ((window as any).__FORCE_PRODUCTION_WRITES__ === true) {
+    return true;
+  }
+  // Disallow on dev, preview, or localhost
+  return !(
+    (import.meta as any).env?.DEV ||
+    hostname === 'localhost' ||
+    hostname === '127.0.0.1' ||
+    hostname.includes('ais-dev-') ||
+    hostname.includes('ais-pre-') ||
+    hostname.includes('webcontainer')
+  );
+}
+
 
