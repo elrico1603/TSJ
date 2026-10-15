@@ -28,6 +28,9 @@ async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
 
+  // Google Cloud Run terminates TLS at reverse proxy / load balancer; trust first proxy hop
+  app.set('trust proxy', 1);
+
   // Canonical trusted frontend origins allowlist (no wildcard suffixes permitted)
   const TRUSTED_ORIGINS = new Set([
     'https://timbersmith-terminal.netlify.app',
@@ -39,7 +42,15 @@ async function startServer() {
 
   // Cross-Origin Resource Sharing (CORS) with credentials support
   app.use((req, res, next) => {
-    const origin = req.headers.origin;
+    let origin = req.headers.origin;
+    if (!origin && req.headers.referer) {
+      try {
+        origin = new URL(req.headers.referer).origin;
+      } catch {
+        // ignore invalid referer
+      }
+    }
+
     if (origin && TRUSTED_ORIGINS.has(origin)) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -222,7 +233,11 @@ async function startServer() {
       const result = await gmailOAuthService.handleCallback(code, state);
 
       // Set short-lived secure HTTP-only session cookie (1 hour) containing ONLY the opaque random session ID
-      const isSecure = process.env.NODE_ENV === 'production' || req.secure || req.headers['x-forwarded-proto'] === 'https';
+      const isSecure =
+        process.env.NODE_ENV === 'production' ||
+        req.secure ||
+        req.headers['x-forwarded-proto'] === 'https' ||
+        (req.headers.host || '').includes('.run.app');
       const cookieParts = [
         `ts_gmail_session=${result.sessionId}`,
         'Path=/',
@@ -232,7 +247,6 @@ async function startServer() {
       ];
       if (isSecure) {
         cookieParts.push('Secure');
-        cookieParts.push('Partitioned');
       }
       res.setHeader('Set-Cookie', cookieParts.join('; '));
 
@@ -254,6 +268,7 @@ async function startServer() {
   // Returns safe boolean and email without exposing credentials
   app.get('/api/auth/google/status', async (req, res) => {
     try {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
       const cookies = parseCookies(req);
       const sessionId = cookies.ts_gmail_session;
       const status = await gmailOAuthService.getSessionStatus(sessionId);
@@ -272,7 +287,11 @@ async function startServer() {
       if (sessionId) {
         await gmailOAuthService.logout(sessionId);
       }
-      const isSecure = process.env.NODE_ENV === 'production' || req.secure || req.headers['x-forwarded-proto'] === 'https';
+      const isSecure =
+        process.env.NODE_ENV === 'production' ||
+        req.secure ||
+        req.headers['x-forwarded-proto'] === 'https' ||
+        (req.headers.host || '').includes('.run.app');
       const cookieParts = [
         'ts_gmail_session=',
         'Path=/',
@@ -282,7 +301,6 @@ async function startServer() {
       ];
       if (isSecure) {
         cookieParts.push('Secure');
-        cookieParts.push('Partitioned');
       }
       res.setHeader('Set-Cookie', cookieParts.join('; '));
       return res.json({ success: true });

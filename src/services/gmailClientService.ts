@@ -86,7 +86,8 @@ class GmailClientService {
       const response = await fetch(`${baseUrl}/api/auth/google/status`, {
         method: 'GET',
         headers: this.getHeaders(),
-        credentials: 'include'
+        credentials: 'include',
+        cache: 'no-store'
       });
 
       if (!response.ok) {
@@ -110,7 +111,8 @@ class GmailClientService {
 
     const response = await fetch(url, {
       method: 'GET',
-      headers: { Accept: 'application/json' }
+      headers: { Accept: 'application/json' },
+      cache: 'no-store'
     });
 
     if (!response.ok) {
