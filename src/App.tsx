@@ -62,6 +62,7 @@ import { permissionService } from './services/permissionService';
 import { DedicatedKioskClockingTerminal } from './components/DedicatedKioskClockingTerminal';
 import { GeminiChatHub } from './components/chat/GeminiChatHub';
 import { MobileDeploymentView } from './components/MobileDeploymentView';
+import { gmailClientService, OAuthNotice } from './services/gmailClientService';
 
 const { SUPER_USER_PIN } = SECURITY;
 
@@ -236,6 +237,22 @@ export default function App() {
       unsubLeave();
       unsubVersions();
     };
+  }, []);
+
+  // Google OAuth Redirect Notice Handler (Phase 4B Visible Error / Success Display)
+  const [oauthNotice, setOauthNotice] = useState<OAuthNotice | null>(null);
+
+  useEffect(() => {
+    const notice = gmailClientService.getAuthNotice();
+    if (notice) {
+      setOauthNotice(notice);
+      gmailClientService.clearAuthNotice();
+      if (notice.type === 'error') {
+        announce(`Google Workspace error: ${notice.message}`);
+      } else {
+        announce(notice.message);
+      }
+    }
   }, []);
   
   // Kanban Job Cards State
@@ -2192,6 +2209,42 @@ TS Joinery Kanban System`
 
       {/* PWA Native Install Prompt Modal */}
       <PWAInstallModal />
+
+      {/* Google Workspace OAuth Notice Banner (Visible Feedback) */}
+      {oauthNotice && (
+        <div
+          role="alert"
+          aria-live="assertive"
+          className={`fixed top-4 left-1/2 -translate-x-1/2 z-[100] max-w-lg w-[calc(100%-2rem)] p-4 rounded-2xl shadow-2xl border backdrop-blur-xl flex items-start gap-3 transition-all ${
+            oauthNotice.type === 'error'
+              ? 'bg-rose-950/95 border-rose-500/50 text-rose-100 shadow-rose-950/50'
+              : 'bg-emerald-950/95 border-emerald-500/50 text-emerald-100 shadow-emerald-950/50'
+          }`}
+        >
+          <div className={`p-2 rounded-xl mt-0.5 shrink-0 ${
+            oauthNotice.type === 'error' ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'
+          }`}>
+            <Icon name={oauthNotice.type === 'error' ? 'alert-triangle' : 'check'} size={18} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h4 className="text-xs font-black uppercase tracking-wider">
+              {oauthNotice.type === 'error' ? 'Google Workspace Connection Failed' : 'Google Workspace Connected'}
+            </h4>
+            <p className="text-xs text-white/80 mt-1 leading-relaxed break-words">
+              {oauthNotice.message}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setOauthNotice(null)}
+            className="p-1 text-white/40 hover:text-white transition-colors"
+            title="Dismiss notice"
+            aria-label="Dismiss notice"
+          >
+            <Icon name="x" size={16} />
+          </button>
+        </div>
+      )}
 
       {/* Printable template container */}
       {printingEmployee && (

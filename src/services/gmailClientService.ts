@@ -32,27 +32,92 @@ export interface SendPOClientResult {
   sentAt: string;
 }
 
+export interface OAuthNotice {
+  type: 'error' | 'success';
+  message: string;
+  email?: string;
+  timestamp: number;
+}
+
 class GmailClientService {
   constructor() {
     this.cleanAuthUrlParams();
   }
 
   /**
-   * Cleans any non-sensitive oauth redirect query parameters from the browser address bar
+   * Captures and cleans OAuth redirect query parameters from the browser address bar.
+   * Stores any returned errors or confirmation notices in sessionStorage for visible display.
    */
   private cleanAuthUrlParams(): void {
     if (typeof window === 'undefined') return;
     try {
       const url = new URL(window.location.href);
-      if (url.searchParams.has('google_auth') || url.searchParams.has('session_id') || url.searchParams.has('google_email')) {
+      const oauthError = url.searchParams.get('oauth_error') || url.searchParams.get('error') || url.searchParams.get('error_description');
+      const googleAuth = url.searchParams.get('google_auth');
+      const googleEmail = url.searchParams.get('google_email');
+
+      if (oauthError) {
+        try {
+          sessionStorage.setItem('ts_gmail_oauth_notice', JSON.stringify({
+            type: 'error',
+            message: decodeURIComponent(oauthError),
+            timestamp: Date.now()
+          }));
+        } catch {}
+      } else if (googleAuth === 'success') {
+        try {
+          sessionStorage.setItem('ts_gmail_oauth_notice', JSON.stringify({
+            type: 'success',
+            message: `Google Workspace connected successfully${googleEmail ? ` for ${googleEmail}` : ''}.`,
+            email: googleEmail || undefined,
+            timestamp: Date.now()
+          }));
+        } catch {}
+      }
+
+      if (
+        url.searchParams.has('google_auth') ||
+        url.searchParams.has('session_id') ||
+        url.searchParams.has('google_email') ||
+        url.searchParams.has('oauth_error') ||
+        url.searchParams.has('error') ||
+        url.searchParams.has('error_description')
+      ) {
         url.searchParams.delete('session_id');
         url.searchParams.delete('google_auth');
         url.searchParams.delete('google_email');
+        url.searchParams.delete('oauth_error');
+        url.searchParams.delete('error');
+        url.searchParams.delete('error_description');
         window.history.replaceState({}, document.title, url.toString());
       }
     } catch (e) {
       // ignore
     }
+  }
+
+  /**
+   * Retrieves any pending OAuth redirect error or success notice
+   */
+  public getAuthNotice(): OAuthNotice | null {
+    if (typeof window === 'undefined') return null;
+    try {
+      const raw = sessionStorage.getItem('ts_gmail_oauth_notice');
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Clears consumed OAuth notice
+   */
+  public clearAuthNotice(): void {
+    if (typeof window === 'undefined') return;
+    try {
+      sessionStorage.removeItem('ts_gmail_oauth_notice');
+    } catch {}
   }
 
   /**
@@ -80,10 +145,11 @@ class GmailClientService {
   /**
    * Checks current Google Workspace OAuth session status
    */
-  public async checkGoogleStatus(): Promise<GoogleConnectionStatus> {
+  public async checkGoogleStatus(employeeEmail?: string): Promise<GoogleConnectionStatus> {
     try {
       const baseUrl = this.getApiBaseUrl();
-      const response = await fetch(`${baseUrl}/api/auth/google/status`, {
+      const query = employeeEmail ? `?employeeEmail=${encodeURIComponent(employeeEmail)}` : '';
+      const response = await fetch(`${baseUrl}/api/auth/google/status${query}`, {
         method: 'GET',
         headers: this.getHeaders(),
         credentials: 'include',
@@ -127,12 +193,13 @@ class GmailClientService {
   /**
    * Disconnects / Logs out the active Google session
    */
-  public async disconnectGoogle(): Promise<void> {
+  public async disconnectGoogle(employeeEmail?: string): Promise<void> {
     const baseUrl = this.getApiBaseUrl();
     await fetch(`${baseUrl}/api/auth/google/logout`, {
       method: 'POST',
       headers: this.getHeaders(),
-      credentials: 'include'
+      credentials: 'include',
+      body: JSON.stringify({ employeeEmail })
     });
   }
 

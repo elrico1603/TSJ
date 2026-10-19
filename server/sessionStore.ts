@@ -20,6 +20,17 @@ import { getServerFirestore } from './firebaseAdmin';
  */
 
 export const OAUTH_SESSIONS_COLLECTION_PATH = 'artifacts/timbersmith-terminal-v1/private/oauth_sessions';
+export const OAUTH_CREDENTIALS_COLLECTION_PATH = 'artifacts/timbersmith-terminal-v1/private/oauth_credentials';
+
+export interface StoredOAuthCredential {
+  userId: string;
+  googleEmail: string;
+  employeeEmail: string;
+  encryptedRefreshToken: string;
+  createdAt: number;
+  updatedAt: number;
+  status: 'active' | 'revoked';
+}
 
 export interface OAuthSessionDoc {
   sessionId: string;
@@ -240,6 +251,96 @@ export class SessionStore {
 
     await docRef.delete();
     return true;
+  }
+
+  /**
+   * Updates an active session's access token and expiry after a refresh
+   */
+  public async updateSessionToken(sessionId: string, accessToken: string, tokenExpiresAt: number): Promise<void> {
+    if (!this.isValidSessionId(sessionId)) {
+      throw new Error('Invalid session ID for token update.');
+    }
+    if (isServerPreviewEnvironment() && !this.dbAdapter) {
+      return;
+    }
+    const db = this.getDb();
+    await db.collection(OAUTH_SESSIONS_COLLECTION_PATH).doc(sessionId).update({
+      accessToken,
+      tokenExpiresAt
+    });
+  }
+
+  /**
+   * Stores encrypted OAuth refresh token at rest in restricted Firestore credentials collection.
+   * Keyed deterministically by authoritative TS Hub userId.
+   */
+  public async saveCredential(cred: StoredOAuthCredential): Promise<void> {
+    if (isServerPreviewEnvironment() && !this.dbAdapter) {
+      return;
+    }
+    if (!cred.userId || !cred.encryptedRefreshToken) {
+      throw new Error('Valid userId and encryptedRefreshToken are required to save credentials.');
+    }
+    const db = this.getDb();
+    await db.collection(OAUTH_CREDENTIALS_COLLECTION_PATH).doc(cred.userId).set({
+      userId: cred.userId,
+      googleEmail: cred.googleEmail.trim().toLowerCase(),
+      employeeEmail: cred.employeeEmail.trim().toLowerCase(),
+      encryptedRefreshToken: cred.encryptedRefreshToken,
+      createdAt: cred.createdAt || Date.now(),
+      updatedAt: Date.now(),
+      status: 'active'
+    });
+  }
+
+  /**
+   * Retrieves active stored OAuth credential by userId
+   */
+  public async getCredential(userId: unknown): Promise<StoredOAuthCredential | null> {
+    if (!userId || typeof userId !== 'string') {
+      return null;
+    }
+    try {
+      const db = this.getDb();
+      const snap = await db.collection(OAUTH_CREDENTIALS_COLLECTION_PATH).doc(userId).get();
+      if (!snap.exists) {
+        return null;
+      }
+      const data = snap.data() as StoredOAuthCredential | undefined;
+      if (!data || data.status !== 'active') {
+        return null;
+      }
+      return data;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Revokes stored credential for user
+   */
+  public async revokeCredential(userId: unknown): Promise<boolean> {
+    if (!userId || typeof userId !== 'string') {
+      return false;
+    }
+    if (isServerPreviewEnvironment() && !this.dbAdapter) {
+      return false;
+    }
+    try {
+      const db = this.getDb();
+      const docRef = db.collection(OAUTH_CREDENTIALS_COLLECTION_PATH).doc(userId);
+      const snap = await docRef.get();
+      if (!snap.exists) {
+        return false;
+      }
+      await docRef.update({
+        status: 'revoked',
+        revokedAt: Date.now()
+      });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /**

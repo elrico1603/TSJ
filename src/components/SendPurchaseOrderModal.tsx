@@ -91,17 +91,28 @@ export const SendPurchaseOrderModal: React.FC<SendPurchaseOrderModalProps> = ({
         setIsGeneratingPdf(false);
       });
 
-    // 3. Check Google Workspace OAuth Session Status
+    // 3. Check for pending OAuth notices and Google Workspace OAuth Session Status
+    const notice = gmailClientService.getAuthNotice();
+    if (notice) {
+      if (notice.type === 'error') {
+        setSendError(`Google Workspace authorization failed: ${notice.message}`);
+      } else if (notice.type === 'success') {
+        setSendSuccessMessage(notice.message);
+      }
+      gmailClientService.clearAuthNotice();
+    }
+
+    const employeeEmail = currentUser?.email || 'elrico@tsjoinery.co.za';
     setIsCheckingStatus(true);
     gmailClientService
-      .checkGoogleStatus()
+      .checkGoogleStatus(employeeEmail)
       .then(status => {
         setGoogleStatus(status);
       })
       .finally(() => {
         setIsCheckingStatus(false);
       });
-  }, [po]);
+  }, [po, currentUser?.email]);
 
   // CC Address Management
   const handleAddCc = () => {
@@ -142,7 +153,8 @@ export const SendPurchaseOrderModal: React.FC<SendPurchaseOrderModalProps> = ({
 
   const handleDisconnectGoogle = async () => {
     try {
-      await gmailClientService.disconnectGoogle();
+      const employeeEmail = currentUser?.email || 'elrico@tsjoinery.co.za';
+      await gmailClientService.disconnectGoogle(employeeEmail);
       setGoogleStatus({ connected: false, googleEmail: null, canSend: false });
       if (announce) announce('Google Workspace disconnected.');
     } catch (err: any) {

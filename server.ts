@@ -9,6 +9,7 @@ import { createServer as createViteServer } from 'vite';
 import { serverStorage, ALLOWED_IMAGE_MIME_TYPES, MAX_PHOTO_FILE_SIZE_BYTES } from './server/storageService';
 import { serverGemini } from './server/geminiService';
 import { gmailOAuthService, SendPOPayload } from './server/gmailOAuthService';
+import { sessionStore } from './server/sessionStore';
 import { StorageUploadRequest } from './src/types/storage';
 import { ChatGenerateRequest } from './src/types/chat';
 
@@ -218,16 +219,36 @@ async function startServer() {
   // 5.2 Google OAuth Callback Handler
   // Validates state, exchanges authorization code, strictly validates @tsjoinery.co.za match, sets secure cookie
   app.get('/api/auth/google/callback', async (req, res) => {
-    try {
-      const { code, state, error } = req.query as { code?: string; state?: string; error?: string };
+    let returnUrl = 'https://timbersmith-terminal.netlify.app/';
+    const { code, state, error, error_description } = req.query as {
+      code?: string;
+      state?: string;
+      error?: string;
+      error_description?: string;
+    };
 
+    if (state) {
+      try {
+        const stateData = gmailOAuthService.decryptToken<{ appReturnUrl?: string }>(state);
+        if (stateData?.appReturnUrl) {
+          returnUrl = gmailOAuthService.sanitizeReturnUrl(stateData.appReturnUrl);
+        }
+      } catch {}
+    }
+
+    try {
       if (error) {
-        console.warn('[API /api/auth/google/callback] Google reported error:', error);
-        return res.redirect(`https://timbersmith-terminal.netlify.app/?oauth_error=${encodeURIComponent(error)}`);
+        console.warn('[API /api/auth/google/callback] Google reported error:', error, error_description);
+        const errorMsg = error_description || error;
+        const errRedirect = new URL(returnUrl);
+        errRedirect.searchParams.set('oauth_error', errorMsg);
+        return res.redirect(errRedirect.toString());
       }
 
       if (!code || !state) {
-        return res.redirect(`https://timbersmith-terminal.netlify.app/?oauth_error=${encodeURIComponent('Missing authorization code or state parameter.')}`);
+        const errRedirect = new URL(returnUrl);
+        errRedirect.searchParams.set('oauth_error', 'Missing authorization code or state parameter.');
+        return res.redirect(errRedirect.toString());
       }
 
       const result = await gmailOAuthService.handleCallback(code, state);
@@ -250,28 +271,30 @@ async function startServer() {
       }
       res.setHeader('Set-Cookie', cookieParts.join('; '));
 
-      // Redirect cleanly back to the application WITHOUT session ID or any sensitive credentials in the URL
-      const targetUrl = new URL(result.appReturnUrl || 'https://timbersmith-terminal.netlify.app/');
+      // Redirect cleanly back to the application with auth notice in query params
+      const targetUrl = new URL(result.appReturnUrl || returnUrl);
       targetUrl.searchParams.set('google_auth', 'success');
       targetUrl.searchParams.set('google_email', result.googleEmail);
 
       return res.redirect(targetUrl.toString());
     } catch (err: any) {
       console.error('[API /api/auth/google/callback] Callback failure:', err.message);
-      return res.redirect(
-        `https://timbersmith-terminal.netlify.app/?oauth_error=${encodeURIComponent(err.message || 'Callback failed')}`
-      );
+      const errRedirect = new URL(returnUrl);
+      errRedirect.searchParams.set('oauth_error', err.message || 'Callback failed');
+      return res.redirect(errRedirect.toString());
     }
   });
 
   // 5.3 Google Account Connection Status
-  // Returns safe boolean and email without exposing credentials
+  // Strictly read-only: returns safe connection status without exposing credentials or minting sessions
   app.get('/api/auth/google/status', async (req, res) => {
     try {
       res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
       const cookies = parseCookies(req);
       const sessionId = cookies.ts_gmail_session;
-      const status = await gmailOAuthService.getSessionStatus(sessionId);
+      const employeeEmail = String(req.query.employeeEmail || '').trim();
+
+      const status = await gmailOAuthService.getSessionStatus(sessionId, employeeEmail);
       return res.json(status);
     } catch (err: any) {
       console.error('[API /api/auth/google/status] Error:', err.message);
@@ -284,9 +307,9 @@ async function startServer() {
     try {
       const cookies = parseCookies(req);
       const sessionId = cookies.ts_gmail_session;
-      if (sessionId) {
-        await gmailOAuthService.logout(sessionId);
-      }
+      const employeeEmail = String(req.body?.employeeEmail || req.query.employeeEmail || '').trim();
+      await gmailOAuthService.logout(sessionId, employeeEmail);
+
       const isSecure =
         process.env.NODE_ENV === 'production' ||
         req.secure ||
@@ -315,17 +338,18 @@ async function startServer() {
     try {
       const cookies = parseCookies(req);
       const sessionId = cookies.ts_gmail_session;
+      const payload = req.body as SendPOPayload;
 
-      if (!sessionId) {
+      if (!payload) {
+        return res.status(400).json({ success: false, error: 'Missing request body payload.' });
+      }
+
+      // Enforce authenticated session ownership: a valid session cookie is strictly required
+      if (!sessionId || !sessionStore.isValidSessionId(sessionId)) {
         return res.status(401).json({
           success: false,
           error: 'Unauthorized: No active Google Workspace session found. Please connect Google Workspace.'
         });
-      }
-
-      const payload = req.body as SendPOPayload;
-      if (!payload) {
-        return res.status(400).json({ success: false, error: 'Missing request body payload.' });
       }
 
       const sendResult = await gmailOAuthService.executePurchaseOrderSend(sessionId, payload, req);

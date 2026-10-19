@@ -56,6 +56,12 @@ export interface OAuthCallbackResult {
   user: AuthoritativeUser;
 }
 
+export const GOOGLE_OAUTH_SCOPES = [
+  'openid',
+  'https://www.googleapis.com/auth/userinfo.email',
+  'https://www.googleapis.com/auth/gmail.send'
+] as const;
+
 // Fallback transient key in case GOOGLE_CLIENT_SECRET is missing during local start
 const FALLBACK_SECRET = 'ts-hub-internal-crypto-salt-' + (process.env.SESSION_SECRET || 'tsjoinery-co-za-default-secret-salt-key-991');
 
@@ -213,7 +219,14 @@ export class GmailOAuthService {
     });
 
     const redirectUri = this.getRedirectUri();
-    const scope = 'https://www.googleapis.com/auth/gmail.send';
+    // Scope strictly includes identity scopes (openid, userinfo.email) for verified identity resolution
+    // and send-only Gmail scope (gmail.send) for Purchase Order transmission
+    const scopes = [
+      'openid',
+      'https://www.googleapis.com/auth/userinfo.email',
+      'https://www.googleapis.com/auth/gmail.send'
+    ];
+    const scope = scopes.join(' ');
 
     const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
     authUrl.searchParams.set('client_id', clientId);
@@ -223,8 +236,8 @@ export class GmailOAuthService {
     authUrl.searchParams.set('state', state);
     authUrl.searchParams.set('code_challenge', codeChallenge);
     authUrl.searchParams.set('code_challenge_method', 'S256');
-    authUrl.searchParams.set('access_type', 'online'); // Attended flow, no refresh token needed
-    authUrl.searchParams.set('prompt', 'consent');
+    authUrl.searchParams.set('access_type', 'offline'); // Offline access to obtain refresh token for durable PO sending
+    authUrl.searchParams.set('prompt', 'consent'); // Explicit consent guarantees refresh token issuance
     authUrl.searchParams.set('login_hint', normalizedEmail);
 
     return {
@@ -288,6 +301,8 @@ export class GmailOAuthService {
       access_token: string;
       expires_in?: number;
       token_type?: string;
+      refresh_token?: string;
+      id_token?: string;
     };
 
     if (!tokenData.access_token) {
@@ -300,7 +315,9 @@ export class GmailOAuthService {
     });
 
     if (!userInfoResponse.ok) {
-      throw new Error('Failed to retrieve user profile from Google userinfo API.');
+      const errText = await userInfoResponse.text().catch(() => '');
+      console.error('[Google OAuth] Userinfo request failed:', userInfoResponse.status, errText);
+      throw new Error(`Failed to retrieve user profile from Google userinfo API (${userInfoResponse.status}: ${userInfoResponse.statusText}).`);
     }
 
     const userInfo = await userInfoResponse.json() as { email?: string };
@@ -328,7 +345,31 @@ export class GmailOAuthService {
     }
     const authoritativeUser = userLookupRes.user;
 
-    // 6. Phase A: Create Shared Server-Side Firestore Session
+    // 6. Durable Credential Storage: Encrypt refresh token at rest if provided
+    if (tokenData.refresh_token) {
+      const encryptedRefreshToken = this.encryptToken({
+        refreshToken: tokenData.refresh_token,
+        googleEmail: authenticatedGoogleEmail,
+        userId: authoritativeUser.id,
+        createdAt: Date.now()
+      });
+
+      try {
+        await this.sessionStoreInstance.saveCredential({
+          userId: authoritativeUser.id,
+          googleEmail: authenticatedGoogleEmail,
+          employeeEmail: authoritativeUser.email,
+          encryptedRefreshToken,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          status: 'active'
+        });
+      } catch (saveErr: any) {
+        console.warn('[Google OAuth] Notice: Could not save durable credential:', saveErr.message);
+      }
+    }
+
+    // 7. Phase A: Create Shared Server-Side Firestore Session
     const expiresInSeconds = tokenData.expires_in || 3600;
     const expiresAt = Date.now() + (expiresInSeconds * 1000) - (60 * 1000); // 1-minute safety buffer
 
@@ -341,7 +382,7 @@ export class GmailOAuthService {
       tokenExpiresAt: expiresAt
     });
 
-    // 7. Return ONLY the opaque random session ID
+    // 8. Return ONLY the opaque random session ID
     return {
       sessionId: sessionDoc.sessionId,
       googleEmail: authenticatedGoogleEmail,
@@ -351,29 +392,171 @@ export class GmailOAuthService {
   }
 
   /**
-   * Retrieves safe client status for the session without exposing any secrets.
+   * Refreshes an expired Google access token using the stored encrypted refresh token.
+   * Server-to-server exchange against Google's token endpoint.
    */
-  public async getSessionStatus(sessionId?: string): Promise<ClientSafeSessionStatus> {
-    if (!sessionId || !this.sessionStoreInstance.isValidSessionId(sessionId)) {
-      return { connected: false, googleEmail: null, canSend: false };
+  public async refreshAccessToken(encryptedRefreshToken: string): Promise<{ accessToken: string; expiresIn: number }> {
+    const decrypted = this.decryptToken<{
+      refreshToken?: string;
+      googleEmail?: string;
+      userId?: string;
+    }>(encryptedRefreshToken);
+
+    const rawRefreshToken = decrypted?.refreshToken;
+    if (!rawRefreshToken) {
+      throw new Error('Failed to decrypt stored Google refresh token.');
     }
-    const session = await this.sessionStoreInstance.getSession(sessionId);
-    return this.sessionStoreInstance.toClientSafeStatus(session);
+
+    const clientId = this.getClientId();
+    const clientSecret = this.getClientSecret();
+    if (!clientId || !clientSecret) {
+      throw new Error('Google OAuth credentials not configured on server.');
+    }
+
+    const tokenUrl = 'https://oauth2.googleapis.com/token';
+    const params = new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: rawRefreshToken,
+      grant_type: 'refresh_token'
+    });
+
+    const tokenResponse = await this.fetchImpl(tokenUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params.toString()
+    });
+
+    if (!tokenResponse.ok) {
+      const errBody = await tokenResponse.text().catch(() => '');
+      console.error('[Google OAuth] Token refresh failed:', errBody);
+      throw new Error(`Google token refresh failed: ${tokenResponse.statusText}`);
+    }
+
+    const tokenData = await tokenResponse.json() as {
+      access_token: string;
+      expires_in?: number;
+      token_type?: string;
+    };
+
+    if (!tokenData.access_token) {
+      throw new Error('Google refresh response did not contain an access_token.');
+    }
+
+    return {
+      accessToken: tokenData.access_token,
+      expiresIn: tokenData.expires_in || 3600
+    };
   }
 
   /**
-   * Revokes the active session in Firestore.
+   * Transparently mints a fresh active session using the user's stored durable credential
    */
-  public async logout(sessionId?: string): Promise<boolean> {
-    if (!sessionId || !this.sessionStoreInstance.isValidSessionId(sessionId)) {
-      return false;
+  public async restoreSessionFromCredential(employeeEmail: string): Promise<OAuthSessionDoc | null> {
+    const normalized = (employeeEmail || '').trim().toLowerCase();
+    if (!normalized || !normalized.endsWith('@tsjoinery.co.za')) {
+      return null;
     }
+
+    const userLookupRes = await this.userLookupInstance.lookupUser(normalized);
+    if (!userLookupRes.success || !userLookupRes.user) {
+      return null;
+    }
+    const user = userLookupRes.user;
+
+    const cred = await this.sessionStoreInstance.getCredential(user.id);
+    if (!cred || cred.status !== 'active' || !cred.encryptedRefreshToken) {
+      return null;
+    }
+
+    // Verify RBAC
+    const authDecision = await this.permissionServiceInstance.authorizePurchaseOrderSend(user);
+    if (!authDecision.authorized) {
+      return null;
+    }
+
     try {
-      return await this.sessionStoreInstance.revokeSession(sessionId);
-    } catch (e: any) {
-      console.warn('[GmailOAuthService] Logout revocation notice:', e.message);
-      return false;
+      const { accessToken, expiresIn } = await this.refreshAccessToken(cred.encryptedRefreshToken);
+      const expiresAt = Date.now() + (expiresIn * 1000) - (60 * 1000);
+      const sessionDoc = await this.sessionStoreInstance.createSession({
+        userId: user.id,
+        googleEmail: cred.googleEmail,
+        employeeEmail: user.email,
+        ttlSeconds: expiresIn,
+        accessToken,
+        tokenExpiresAt: expiresAt
+      });
+      return sessionDoc;
+    } catch (err: any) {
+      console.warn('[GmailOAuthService] restoreSessionFromCredential failed:', err.message);
+      return null;
     }
+  }
+
+  /**
+   * Retrieves safe client status for the session or stored credentials without exposing secrets.
+   */
+  public async getSessionStatus(
+    sessionId?: string,
+    employeeEmail?: string
+  ): Promise<ClientSafeSessionStatus> {
+    if (sessionId && this.sessionStoreInstance.isValidSessionId(sessionId)) {
+      const session = await this.sessionStoreInstance.getSession(sessionId);
+      if (session) {
+        return this.sessionStoreInstance.toClientSafeStatus(session);
+      }
+    }
+
+    // Check durable stored credentials for employeeEmail
+    const normalized = (employeeEmail || '').trim().toLowerCase();
+    if (normalized && normalized.endsWith('@tsjoinery.co.za')) {
+      try {
+        const userLookup = await this.userLookupInstance.lookupUser(normalized);
+        if (userLookup.success && userLookup.user) {
+          const cred = await this.sessionStoreInstance.getCredential(userLookup.user.id);
+          if (cred && cred.status === 'active' && cred.encryptedRefreshToken) {
+            const authDecision = await this.permissionServiceInstance.authorizePurchaseOrderSend(userLookup.user);
+            return {
+              connected: true,
+              googleEmail: cred.googleEmail,
+              canSend: authDecision.authorized
+            };
+          }
+        }
+      } catch {}
+    }
+
+    return { connected: false, googleEmail: null, canSend: false };
+  }
+
+  /**
+   * Revokes the active session and stored credential in Firestore.
+   */
+  public async logout(sessionId?: string, employeeEmail?: string): Promise<boolean> {
+    let success = false;
+    if (sessionId && this.sessionStoreInstance.isValidSessionId(sessionId)) {
+      try {
+        const session = await this.sessionStoreInstance.getSession(sessionId);
+        if (session) {
+          await this.sessionStoreInstance.revokeCredential(session.userId);
+        }
+        success = await this.sessionStoreInstance.revokeSession(sessionId);
+      } catch (e: any) {
+        console.warn('[GmailOAuthService] Logout revocation notice:', e.message);
+      }
+    }
+
+    if (employeeEmail) {
+      try {
+        const userRes = await this.userLookupInstance.lookupUser(employeeEmail);
+        if (userRes.success && userRes.user) {
+          await this.sessionStoreInstance.revokeCredential(userRes.user.id);
+          success = true;
+        }
+      } catch {}
+    }
+
+    return success;
   }
 
   /**
@@ -420,8 +603,25 @@ export class GmailOAuthService {
       throw new Error(`Forbidden: User ${authoritativeUser.email} is not authorized to send Purchase Orders. ${authDecision.reason}`);
     }
 
+    // Automatic server-side access token refresh if near or past expiration
+    let activeAccessToken = session.accessToken;
+    const now = Date.now();
+    if (session.tokenExpiresAt && now >= (session.tokenExpiresAt - 60000)) {
+      const cred = await this.sessionStoreInstance.getCredential(authoritativeUser.id);
+      if (cred && cred.status === 'active' && cred.encryptedRefreshToken) {
+        try {
+          const refreshed = await this.refreshAccessToken(cred.encryptedRefreshToken);
+          activeAccessToken = refreshed.accessToken;
+          const newExpiresAt = now + (refreshed.expiresIn * 1000) - 60000;
+          await this.sessionStoreInstance.updateSessionToken(sessionId, activeAccessToken, newExpiresAt);
+        } catch (refreshErr: any) {
+          console.warn('[GmailOAuthService] Token refresh attempt notice:', refreshErr.message);
+        }
+      }
+    }
+
     // 6 & 7. Construct & Transmit MIME message using server-side access token
-    return await this.sendMimeMessage(session.accessToken, session.googleEmail, payload);
+    return await this.sendMimeMessage(activeAccessToken, session.googleEmail, payload);
   }
 
   /**
