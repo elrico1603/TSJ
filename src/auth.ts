@@ -6,6 +6,26 @@ import { auditLogger } from './audit';
 import { permissionService } from './services/permissionService';
 import { UserDeviceAccess, PermissionAction } from './types';
 
+// Pluggable test adapter for isolated unit testing
+let customDbAdapter: any = null;
+export function setFirestoreDbForTesting(customDb?: any): void {
+  customDbAdapter = customDb || null;
+}
+export function getAuthFirestore(): any {
+  return customDbAdapter || db;
+}
+
+// Active in-flight mutex set tracking normalized emails to prevent concurrent race conditions
+const inFlightEmailOperations = new Set<string>();
+
+/**
+ * Normalizes email address by trimming whitespace and converting to lowercase.
+ */
+export function normalizeUserEmail(email: unknown): string {
+  if (typeof email !== 'string') return '';
+  return email.trim().toLowerCase();
+}
+
 export const USER_ROLES = ['Administrator', 'Manager', 'HR', 'Purchasing', 'Clocking Terminal', 'Stock Manager', 'Supervisor', 'Employee'] as const;
 export type UserRole = typeof USER_ROLES[number];
 
@@ -217,8 +237,6 @@ export const authManager = {
       if (isPlaceholderTestUser(u)) return; // Skip dummy test accounts to keep admin lists clean
 
       let email = String(u.email).toLowerCase().trim();
-      // Alias frans -> franz
-      if (email === 'frans@tsjoinery.co.za') email = 'franz@tsjoinery.co.za';
 
       const existing = canonicalMap.get(email);
       if (existing) {
@@ -226,7 +244,8 @@ export const authManager = {
         canonicalMap.set(email, {
           ...existing,
           ...u,
-          id: u.id || existing.id,
+          // Canonical master account 'usr-admin-elrico' preserves its canonical ID
+          id: existing.id === 'usr-admin-elrico' ? 'usr-admin-elrico' : (u.id || existing.id),
           name: u.name || existing.name,
           firstName: u.firstName || (u.name ? u.name.split(' ')[0] : existing.firstName),
           lastName: u.lastName || (u.name ? u.name.split(' ').slice(1).join(' ') : existing.lastName),
@@ -409,73 +428,248 @@ export const authManager = {
     return null;
   },
 
-  async registerUserRequest(request: Omit<AppUser, 'status' | 'isApproved' | 'createdAt'>): Promise<AppUser> {
-    const entry: AppUser = {
-      ...request,
-      status: 'pending',
-      isApproved: false,
-      createdAt: new Date().toISOString()
-    };
-
-    await auditLogger.log('REGISTRATION_REQUEST', request.email, `Requested ${request.role} access`);
-
-    if (db && APP_ID_PATH) {
-      try {
-        await db.collection('artifacts')
-          .doc(APP_ID_PATH)
-          .collection('private')
-          .doc('users')
-          .collection('pending')
-          .doc(request.id)
-          .set(entry);
-      } catch (error) {
-        console.warn('Unable to persist registration request:', error);
-      }
+  /**
+   * Verifies that the normalized email address does not already exist in:
+   * 1. In-flight operations set (concurrency guard)
+   * 2. In-memory local users pool and DEFAULT_ACCOUNTS
+   * 3. Firestore 'active' users collection
+   * 4. Firestore 'pending' users collection (optional, based on checkPending)
+   * 
+   * FAILS CLOSED: If any database error occurs during lookup, it throws an error.
+   */
+  async assertEmailUniqueness(
+    email: string,
+    options?: {
+      excludeActiveUserId?: string;
+      excludePendingUserId?: string;
+      checkPending?: boolean;
+    }
+  ): Promise<string> {
+    const normalizedEmail = normalizeUserEmail(email);
+    if (!normalizedEmail || !normalizedEmail.includes('@') || !normalizedEmail.includes('.')) {
+      throw new Error("A valid email address is required.");
     }
 
-    return entry;
-  },
+    // 1. Check in-memory users pool
+    const localUsers = this.getUsers();
+    const existingLocal = localUsers.find(u => {
+      const uEmail = normalizeUserEmail(u.email);
+      if (uEmail !== normalizedEmail) return false;
+      if (options?.excludeActiveUserId && u.id === options.excludeActiveUserId) return false;
+      return true;
+    });
+    if (existingLocal) {
+      throw new Error(`User with email '${normalizedEmail}' already exists (ID: ${existingLocal.id}).`);
+    }
 
-  async approvePendingUser(user: AppUser): Promise<AppUser> {
-    await auditLogger.log('USER_APPROVED', user.email, `Approved role ${user.role}`);
+    // 2. Check DEFAULT_ACCOUNTS (protecting canonical accounts like usr-admin-elrico)
+    const defaultMatch = DEFAULT_ACCOUNTS.find(def => {
+      const defEmail = normalizeUserEmail(def.email);
+      if (defEmail !== normalizedEmail) return false;
+      if (options?.excludeActiveUserId && def.id === options.excludeActiveUserId) return false;
+      return true;
+    });
+    if (defaultMatch) {
+      throw new Error(`User with email '${normalizedEmail}' already exists in system defaults (ID: ${defaultMatch.id}).`);
+    }
 
-    const approvedUser: AppUser = { ...user, status: 'active', isApproved: true };
-
-    if (db && APP_ID_PATH && canMutateAuthOrRBAC('approvePendingUser', user.id)) {
+    // 3. Check Firestore active & pending collections (fail closed on any database error)
+    const database = getAuthFirestore();
+    if (database && APP_ID_PATH) {
       try {
-        await db.collection('artifacts')
+        const activeSnap = await database.collection('artifacts')
           .doc(APP_ID_PATH)
           .collection('private')
           .doc('users')
           .collection('active')
-          .doc(user.id)
-          .set(approvedUser);
+          .where('email', '==', normalizedEmail)
+          .get();
 
-        await db.collection('artifacts')
-          .doc(APP_ID_PATH)
-          .collection('private')
-          .doc('users')
-          .collection('pending')
-          .doc(user.id)
-          .delete();
-      } catch (error) {
-        console.warn('Unable to approve pending user in Firestore:', error);
+        if (activeSnap && !activeSnap.empty && Array.isArray(activeSnap.docs)) {
+          const conflicting = activeSnap.docs.find((d: any) => d.id !== options?.excludeActiveUserId);
+          if (conflicting) {
+            throw new Error(`User with email '${normalizedEmail}' already exists in active users.`);
+          }
+        }
+
+        if (options?.checkPending) {
+          const pendingSnap = await database.collection('artifacts')
+            .doc(APP_ID_PATH)
+            .collection('private')
+            .doc('users')
+            .collection('pending')
+            .where('email', '==', normalizedEmail)
+            .get();
+
+          if (pendingSnap && !pendingSnap.empty && Array.isArray(pendingSnap.docs)) {
+            const conflicting = pendingSnap.docs.find((d: any) => d.id !== options?.excludePendingUserId);
+            if (conflicting) {
+              throw new Error(`A registration request for '${normalizedEmail}' is already pending approval.`);
+            }
+          }
+        }
+      } catch (err: any) {
+        if (err.message && (err.message.includes('already exists') || err.message.includes('pending approval'))) {
+          throw err;
+        }
+        console.error('[AUTH UNIQUENESS] Database uniqueness check error:', err);
+        throw new Error(`Unable to verify user uniqueness in database: ${err.message || 'Database error'}`);
       }
     }
 
-    return approvedUser;
+    return normalizedEmail;
+  },
+
+  async registerUserRequest(request: Omit<AppUser, 'status' | 'isApproved' | 'createdAt'>): Promise<AppUser> {
+    const name = (request.name || '').trim();
+    if (!name) {
+      throw new Error("Full Name is required.");
+    }
+    const pin = (request.pin || '').trim();
+    if (!pin) {
+      throw new Error("Password / PIN is required.");
+    }
+
+    const normalizedEmail = normalizeUserEmail(request.email);
+    if (!normalizedEmail || !normalizedEmail.includes('@') || !normalizedEmail.includes('.')) {
+      throw new Error("A valid email address is required.");
+    }
+
+    // In-flight concurrency guard: serialize simultaneous requests for the same email
+    if (inFlightEmailOperations.has(normalizedEmail)) {
+      throw new Error(`A registration request for '${normalizedEmail}' is already in progress.`);
+    }
+    inFlightEmailOperations.add(normalizedEmail);
+
+    try {
+      // 1. Strict duplicate validation against active users and pending requests (FAILS CLOSED)
+      await this.assertEmailUniqueness(normalizedEmail, { checkPending: true });
+
+      const entry: AppUser = {
+        ...request,
+        name,
+        email: normalizedEmail,
+        pin,
+        status: 'pending',
+        isApproved: false,
+        createdAt: new Date().toISOString()
+      };
+
+      await auditLogger.log('REGISTRATION_REQUEST', normalizedEmail, `Requested ${request.role} access`);
+
+      const database = getAuthFirestore();
+      if (database && APP_ID_PATH) {
+        try {
+          await database.collection('artifacts')
+            .doc(APP_ID_PATH)
+            .collection('private')
+            .doc('users')
+            .collection('pending')
+            .doc(request.id)
+            .set(entry);
+        } catch (error: any) {
+          console.error('Unable to persist registration request:', error);
+          throw new Error(`Failed to submit registration request: ${error.message || 'Database write error'}`);
+        }
+      }
+
+      return entry;
+    } finally {
+      inFlightEmailOperations.delete(normalizedEmail);
+    }
+  },
+
+  async approvePendingUser(user: AppUser): Promise<AppUser> {
+    const normalizedEmail = normalizeUserEmail(user.email);
+    if (!normalizedEmail || !normalizedEmail.includes('@')) {
+      throw new Error("A valid user email is required for approval.");
+    }
+
+    // In-flight concurrency guard
+    if (inFlightEmailOperations.has(normalizedEmail)) {
+      throw new Error(`An approval or creation operation for '${normalizedEmail}' is already in progress.`);
+    }
+    inFlightEmailOperations.add(normalizedEmail);
+
+    try {
+      // 1. Strict duplicate check in active users collection and local pool (FAILS CLOSED)
+      // Must reject if an active user already has this email
+      await this.assertEmailUniqueness(normalizedEmail, {
+        excludeActiveUserId: user.id,
+        checkPending: false
+      });
+
+      const approvedUser: AppUser = {
+        ...user,
+        email: normalizedEmail,
+        status: 'active',
+        isApproved: true
+      };
+
+      const database = getAuthFirestore();
+      if (database && APP_ID_PATH && canMutateAuthOrRBAC('approvePendingUser', user.id)) {
+        try {
+          const activeDocRef = database.collection('artifacts')
+            .doc(APP_ID_PATH)
+            .collection('private')
+            .doc('users')
+            .collection('active')
+            .doc(user.id);
+
+          const pendingDocRef = database.collection('artifacts')
+            .doc(APP_ID_PATH)
+            .collection('private')
+            .doc('users')
+            .collection('pending')
+            .doc(user.id);
+
+          // Verify pending request exists before approving to prevent double approval
+          const pendingSnap = await pendingDocRef.get();
+          if (!pendingSnap || !pendingSnap.exists) {
+            // Check if user was already approved concurrently
+            const activeSnap = await activeDocRef.get();
+            if (activeSnap && activeSnap.exists) {
+              return approvedUser;
+            }
+            throw new Error(`Pending registration request '${user.id}' not found or already processed.`);
+          }
+
+          // Atomic batch: write to active and delete from pending simultaneously
+          if (database.batch) {
+            const batch = database.batch();
+            batch.set(activeDocRef, approvedUser);
+            batch.delete(pendingDocRef);
+            await batch.commit();
+          } else {
+            await activeDocRef.set(approvedUser);
+            await pendingDocRef.delete();
+          }
+        } catch (error: any) {
+          console.error('Unable to approve pending user in Firestore:', error);
+          throw new Error(`Firestore user approval failed: ${error.message || 'Database error'}`);
+        }
+      }
+
+      this.addUserToLocalPool(approvedUser);
+      this.notifyUsersChanged();
+      await auditLogger.log('USER_APPROVED', normalizedEmail, `Approved role ${user.role}`);
+
+      return approvedUser;
+    } finally {
+      inFlightEmailOperations.delete(normalizedEmail);
+    }
   },
 
   async createActiveUser(userData: Omit<AppUser, 'id' | 'status' | 'isApproved' | 'createdAt'>): Promise<AppUser> {
     // 1. Form Validation
     const name = (userData.name || '').trim();
-    const email = (userData.email || '').trim().toLowerCase();
     const pin = (userData.pin || '').trim();
 
     if (!name) {
       throw new Error("Full Name is required.");
     }
-    if (!email || !email.includes('@') || !email.includes('.')) {
+    const normalizedEmail = normalizeUserEmail(userData.email);
+    if (!normalizedEmail || !normalizedEmail.includes('@') || !normalizedEmail.includes('.')) {
       throw new Error("A valid email address is required.");
     }
     if (!pin) {
@@ -485,153 +679,161 @@ export const authManager = {
       throw new Error("Password must be at least 6 characters.");
     }
 
-    const normalizedEmail = email;
-
-    // 2. Duplicate Check in Firestore & Local Pool
-    if (db && APP_ID_PATH) {
-      try {
-        const snap = await db.collection('artifacts')
-          .doc(APP_ID_PATH)
-          .collection('private')
-          .doc('users')
-          .collection('active')
-          .where('email', '==', normalizedEmail)
-          .get();
-
-        if (!snap.empty) {
-          throw new Error("User already exists.");
-        }
-      } catch (checkErr: any) {
-        if (checkErr.message === "User already exists.") {
-          throw checkErr;
-        }
-        console.warn("Firestore duplicate check notice:", checkErr);
-      }
+    // In-flight concurrency guard: serialize simultaneous requests for the same email
+    if (inFlightEmailOperations.has(normalizedEmail)) {
+      throw new Error(`User creation for '${normalizedEmail}' is already in progress.`);
     }
+    inFlightEmailOperations.add(normalizedEmail);
 
-    // Check in local pool & default accounts
-    const existingInLocal = internalUsersPool.find(u => (u.email || '').toLowerCase().trim() === normalizedEmail && u.active !== false);
-    if (existingInLocal) {
-      throw new Error("User already exists.");
-    }
+    try {
+      // 2. Strict Duplicate Check in Firestore & Local Pool (FAILS CLOSED)
+      await this.assertEmailUniqueness(normalizedEmail, { checkPending: false });
 
-    // 3. Firebase Authentication User Creation using a Secondary Firebase App
-    // Note: Creating via secondary Firebase app prevents the client browser from signing out
-    // or mutating the current administrator's active session.
-    let authUid = '';
-    if (canMutateAuthOrRBAC('createAuthUser', normalizedEmail)) {
-      const secondaryAppName = `user-creator-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
-      let secondaryApp: any = null;
+      // 3. Firebase Authentication User Creation using a Secondary Firebase App
+      // Note: Creating via secondary Firebase app prevents the client browser from signing out
+      // or mutating the current administrator's active session.
+      let authUid = '';
+      if (canMutateAuthOrRBAC('createAuthUser', normalizedEmail)) {
+        const secondaryAppName = `user-creator-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+        let secondaryApp: any = null;
 
-      try {
-        secondaryApp = firebase.initializeApp(firebaseConfig, secondaryAppName);
-        const userCred = await secondaryApp.auth().createUserWithEmailAndPassword(normalizedEmail, pin);
-        authUid = userCred.user?.uid || '';
-      } catch (authErr: any) {
-        if (authErr.code === 'auth/email-already-in-use') {
-          // If Auth account exists but Firestore profile was missing, we allow profile repair
-          if (existingInLocal) {
-            throw new Error("User already exists.");
+        try {
+          secondaryApp = firebase.initializeApp(firebaseConfig, secondaryAppName);
+          const userCred = await secondaryApp.auth().createUserWithEmailAndPassword(normalizedEmail, pin);
+          authUid = userCred.user?.uid || '';
+        } catch (authErr: any) {
+          if (authErr.code === 'auth/email-already-in-use') {
+            // Re-verify uniqueness in active pool
+            await this.assertEmailUniqueness(normalizedEmail, { checkPending: false });
+            console.log("Firebase Auth account already exists. Proceeding with Firestore profile creation/repair...");
+          } else if (authErr.code === 'auth/weak-password') {
+            throw new Error("Password must be at least 6 characters.");
+          } else if (authErr.code === 'auth/invalid-email') {
+            throw new Error("Invalid email address format.");
+          } else {
+            throw new Error(`Authentication creation failed: ${authErr.message || 'Unknown error'}`);
           }
-          console.log("Firebase Auth account already exists. Proceeding with Firestore profile creation/repair...");
-        } else if (authErr.code === 'auth/weak-password') {
-          throw new Error("Password must be at least 6 characters.");
-        } else if (authErr.code === 'auth/invalid-email') {
-          throw new Error("Invalid email address format.");
-        } else {
-          throw new Error(`Authentication creation failed: ${authErr.message || 'Unknown error'}`);
-        }
-      } finally {
-        if (secondaryApp) {
-          try {
-            await secondaryApp.delete();
-          } catch (delErr) {
-            console.warn("Secondary app cleanup:", delErr);
+        } finally {
+          if (secondaryApp) {
+            try {
+              await secondaryApp.delete();
+            } catch (delErr) {
+              console.warn("Secondary app cleanup:", delErr);
+            }
           }
         }
-      }
-    } else {
-      authUid = `usr-preview-${Date.now()}`;
-      console.log(`[PREVIEW SAFETY] Simulating user creation in Preview mode for ${normalizedEmail} (authUid: ${authUid})`);
-    }
-
-    // 4. Create Firestore User Profile
-    const userId = authUid || `usr-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-    const nameParts = name.split(' ');
-    const firstName = userData.firstName || nameParts[0] || 'User';
-    const lastName = userData.lastName || nameParts.slice(1).join(' ') || '';
-
-    const newUser: AppUser = {
-      id: userId,
-      name,
-      firstName,
-      lastName,
-      email: normalizedEmail,
-      pin,
-      role: userData.role || 'Employee',
-      roleId: userData.roleId || 'ROLE-EMPLOYEE',
-      department: userData.department || 'Workshop',
-      branchId: userData.branchId || 'BR-001',
-      branchName: userData.branchName || 'Bloemfontein Central',
-      physicalLocation: userData.physicalLocation || 'Bloemfontein',
-      active: true,
-      isApproved: true,
-      status: 'active',
-      createdAt: new Date().toISOString(),
-      permissions: userData.permissions || {},
-      deviceAccess: userData.deviceAccess || {
-        desktop: true,
-        phone: true,
-        tablet: false,
-        terminal: false
-      },
-      deviceViewAccess: userData.deviceViewAccess || {
-        desktop: {},
-        phone: {},
-        tablet: {},
-        terminal: {}
-      }
-    };
-
-    if (db && APP_ID_PATH && canMutateAuthOrRBAC('createFirestoreUser', newUser.id)) {
-      try {
-        await db.collection('artifacts')
-          .doc(APP_ID_PATH)
-          .collection('private')
-          .doc('users')
-          .collection('active')
-          .doc(newUser.id)
-          .set(newUser);
-      } catch (error: any) {
-        console.error('Unable to create active user in Firestore:', error);
-        throw new Error(`Firestore profile creation failed: ${error.message || 'Permission or network error'}`);
+      } else {
+        authUid = `usr-preview-${Date.now()}`;
+        console.log(`[PREVIEW SAFETY] Simulating user creation in Preview mode for ${normalizedEmail} (authUid: ${authUid})`);
       }
 
-      // 5. Verify User Profile Exists in Firestore
-      try {
-        const verifySnap = await db.collection('artifacts')
-          .doc(APP_ID_PATH)
-          .collection('private')
-          .doc('users')
-          .collection('active')
-          .doc(newUser.id)
-          .get();
+      // 4. Create Firestore User Profile
+      const userId = authUid || `usr-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      const nameParts = name.split(' ');
+      const firstName = userData.firstName || nameParts[0] || 'User';
+      const lastName = userData.lastName || nameParts.slice(1).join(' ') || '';
 
-        if (!verifySnap.exists) {
-          throw new Error("Firestore profile creation failed: Profile verification check returned not found.");
+      const newUser: AppUser = {
+        id: userId,
+        name,
+        firstName,
+        lastName,
+        email: normalizedEmail,
+        pin,
+        role: userData.role || 'Employee',
+        roleId: userData.roleId || 'ROLE-EMPLOYEE',
+        department: userData.department || 'Workshop',
+        branchId: userData.branchId || 'BR-001',
+        branchName: userData.branchName || 'Bloemfontein Central',
+        physicalLocation: userData.physicalLocation || 'Bloemfontein',
+        active: true,
+        isApproved: true,
+        status: 'active',
+        createdAt: new Date().toISOString(),
+        permissions: userData.permissions || {},
+        deviceAccess: userData.deviceAccess || {
+          desktop: true,
+          phone: true,
+          tablet: false,
+          terminal: false
+        },
+        deviceViewAccess: userData.deviceViewAccess || {
+          desktop: {},
+          phone: {},
+          tablet: {},
+          terminal: {}
         }
-      } catch (verErr: any) {
-        throw new Error(verErr.message || "Firestore profile verification failed");
+      };
+
+      const database = getAuthFirestore();
+      if (database && APP_ID_PATH && canMutateAuthOrRBAC('createFirestoreUser', newUser.id)) {
+        try {
+          await database.collection('artifacts')
+            .doc(APP_ID_PATH)
+            .collection('private')
+            .doc('users')
+            .collection('active')
+            .doc(newUser.id)
+            .set(newUser);
+        } catch (error: any) {
+          console.error('Unable to create active user in Firestore:', error);
+          throw new Error(`Firestore profile creation failed: ${error.message || 'Permission or network error'}`);
+        }
+
+        // 5. Verify User Profile Exists in Firestore
+        try {
+          const verifySnap = await database.collection('artifacts')
+            .doc(APP_ID_PATH)
+            .collection('private')
+            .doc('users')
+            .collection('active')
+            .doc(newUser.id)
+            .get();
+
+          if (!verifySnap || !verifySnap.exists) {
+            throw new Error("Firestore profile creation failed: Profile verification check returned not found.");
+          }
+        } catch (verErr: any) {
+          throw new Error(verErr.message || "Firestore profile verification failed");
+        }
+
+        // 6. Clean up any pending registration requests with the same email
+        try {
+          const pendingSnap = await database.collection('artifacts')
+            .doc(APP_ID_PATH)
+            .collection('private')
+            .doc('users')
+            .collection('pending')
+            .where('email', '==', normalizedEmail)
+            .get();
+          if (pendingSnap && !pendingSnap.empty && Array.isArray(pendingSnap.docs)) {
+            if (database.batch) {
+              const cleanupBatch = database.batch();
+              pendingSnap.docs.forEach((docSnap: any) => cleanupBatch.delete(docSnap.ref));
+              await cleanupBatch.commit();
+            } else {
+              for (const docSnap of pendingSnap.docs) {
+                if (docSnap.ref && docSnap.ref.delete) {
+                  await docSnap.ref.delete();
+                }
+              }
+            }
+          }
+        } catch (cleanErr) {
+          console.warn('Pending registration cleanup notice:', cleanErr);
+        }
       }
+
+      // 7. Refresh User List & Local Memory Pool
+      this.addUserToLocalPool(newUser);
+      this.notifyUsersChanged();
+
+      await auditLogger.log('USER_CREATED', newUser.email, `Created new active user ${newUser.name} with role ${newUser.role}`);
+
+      return newUser;
+    } finally {
+      inFlightEmailOperations.delete(normalizedEmail);
     }
-
-    // 6. Refresh User List & Local Memory Pool
-    this.addUserToLocalPool(newUser);
-    this.notifyUsersChanged();
-
-    await auditLogger.log('USER_CREATED', newUser.email, `Created new active user ${newUser.name} with role ${newUser.role}`);
-
-    return newUser;
   },
 
   async deleteActiveUser(user: AppUser): Promise<void> {
@@ -639,9 +841,10 @@ export const authManager = {
 
     await auditLogger.log('USER_DELETED', user.email || 'N/A', `Deleted active user ${user.name}`);
 
-    if (db && APP_ID_PATH && canMutateAuthOrRBAC('deleteActiveUser', user.id)) {
+    const database = getAuthFirestore();
+    if (database && APP_ID_PATH && canMutateAuthOrRBAC('deleteActiveUser', user.id)) {
       try {
-        await db.collection('artifacts')
+        await database.collection('artifacts')
           .doc(APP_ID_PATH)
           .collection('private')
           .doc('users')
@@ -657,9 +860,10 @@ export const authManager = {
   async rejectPendingUser(user: AppUser): Promise<null> {
     await auditLogger.log('USER_REJECTED', user.email, `Rejected role ${user.role}`);
 
-    if (db && APP_ID_PATH && canMutateAuthOrRBAC('rejectPendingUser', user.id)) {
+    const database = getAuthFirestore();
+    if (database && APP_ID_PATH && canMutateAuthOrRBAC('rejectPendingUser', user.id)) {
       try {
-        await db.collection('artifacts')
+        await database.collection('artifacts')
           .doc(APP_ID_PATH)
           .collection('private')
           .doc('users')

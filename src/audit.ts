@@ -7,22 +7,30 @@ export interface AuditLogEntry {
   timestamp: string;
 }
 
+let testAuditDb: any = null;
+export function setAuditDbForTesting(customDb?: any): void {
+  testAuditDb = customDb || null;
+}
+
 export const auditLogger = {
   async log(event: string, actor: string, details: string = ''): Promise<AuditLogEntry> {
     const timestamp = new Date().toISOString();
     const entry: AuditLogEntry = { event, actor, details, timestamp };
 
-    const globalWindow = window as any;
-    if (!globalWindow.auditLogEntries) {
-      globalWindow.auditLogEntries = [];
+    if (typeof window !== 'undefined') {
+      const globalWindow = window as any;
+      if (!globalWindow.auditLogEntries) {
+        globalWindow.auditLogEntries = [];
+      }
+      globalWindow.auditLogEntries.push(entry);
     }
-    globalWindow.auditLogEntries.push(entry);
 
     console.log(`[AUDIT] ${event} by ${actor}: ${details}`);
 
-    if (db && APP_ID_PATH) {
+    const database = testAuditDb || db;
+    if (database && APP_ID_PATH) {
       try {
-        await db.collection('artifacts')
+        await database.collection('artifacts')
           .doc(APP_ID_PATH)
           .collection('private')
           .doc('audit')
