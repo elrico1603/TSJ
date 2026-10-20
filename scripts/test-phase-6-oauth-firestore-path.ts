@@ -391,6 +391,62 @@ async function runTestSuite() {
   check(!store.isValidSessionId('a'.repeat(65)), 'Rejects 65-char sessionId');
   check(!store.isValidSessionId('z'.repeat(64)), 'Rejects non-hex characters');
 
+  // =========================================================================
+  // 6. PRODUCTION RUNTIME BUNDLE & BUILDPACK CONFIGURATION INTEGRITY
+  // =========================================================================
+  const fs = await import('fs');
+  const path = await import('path');
+
+  const bundlePath = path.resolve(process.cwd(), 'dist', 'server.cjs');
+  check(fs.existsSync(bundlePath), 'Compiled bundle dist/server.cjs exists');
+
+  const bundleContent = fs.readFileSync(bundlePath, 'utf8');
+
+  // Verify bundle contains the corrected 5-component paths
+  check(
+    bundleContent.includes('artifacts/timbersmith-terminal-v1/private/oauth/sessions'),
+    'Bundle dist/server.cjs strictly contains corrected sessions path (private/oauth/sessions)'
+  );
+  check(
+    bundleContent.includes('artifacts/timbersmith-terminal-v1/private/oauth/credentials'),
+    'Bundle dist/server.cjs strictly contains corrected credentials path (private/oauth/credentials)'
+  );
+
+  // Strictly verify bundle contains ZERO occurrences of legacy 4-component invalid paths
+  check(
+    !bundleContent.includes('artifacts/timbersmith-terminal-v1/private/oauth_sessions'),
+    'Bundle dist/server.cjs strictly contains ZERO occurrences of invalid oauth_sessions path'
+  );
+  check(
+    !bundleContent.includes('artifacts/timbersmith-terminal-v1/private/oauth_credentials'),
+    'Bundle dist/server.cjs strictly contains ZERO occurrences of invalid oauth_credentials path'
+  );
+  check(
+    !bundleContent.includes('private/oauth_sessions'),
+    'Bundle dist/server.cjs contains ZERO occurrences of substring private/oauth_sessions'
+  );
+  check(
+    !bundleContent.includes('private/oauth_credentials'),
+    'Bundle dist/server.cjs contains ZERO occurrences of substring private/oauth_credentials'
+  );
+
+  // Verify source server/sessionStore.ts contains ZERO occurrences of invalid paths
+  const sessionStoreSource = fs.readFileSync(path.resolve(process.cwd(), 'server', 'sessionStore.ts'), 'utf8');
+  check(
+    !sessionStoreSource.includes('private/oauth_sessions'),
+    'server/sessionStore.ts contains ZERO occurrences of private/oauth_sessions'
+  );
+  check(
+    !sessionStoreSource.includes('private/oauth_credentials'),
+    'server/sessionStore.ts contains ZERO occurrences of private/oauth_credentials'
+  );
+
+  // Verify package.json contains gcp-build to ensure Cloud Run / Cloud Buildpack invokes fresh build
+  const pkgJson = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), 'package.json'), 'utf8'));
+  check(pkgJson.scripts['gcp-build'] === 'npm run build', 'package.json contains gcp-build script for Cloud Buildpack');
+  check(pkgJson.scripts['start'] === 'node dist/server.cjs', 'package.json start command executes compiled node dist/server.cjs');
+  check(pkgJson.scripts['prestart'] === undefined, 'package.json avoids redundant prestart rebuild during container boot');
+
   console.log(`\n=== ALL ${passedTests}/${totalTests} PHASE 6 TESTS PASSED ===\n`);
 }
 
