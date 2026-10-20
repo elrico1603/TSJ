@@ -5,7 +5,7 @@
  * 1. Authorization scopes: strictly contains openid, userinfo.email, and gmail.send (no excessive scopes).
  * 2. Authorization URL contains access_type=offline and prompt=consent.
  * 3. AES-256-GCM authenticated encryption for refresh tokens at rest.
- * 4. Stored credentials persistence in restricted Firestore collection (artifacts/timbersmith-terminal-v1/private/oauth_credentials).
+ * 4. Stored credentials persistence in restricted Firestore collection (artifacts/timbersmith-terminal-v1/private/oauth/credentials).
  * 5. Automatic access token refresh via refreshAccessToken.
  * 6. Transparent session restoration from durable credential (restoreSessionFromCredential).
  * 7. OAuth callback error handling: errors are never silently swallowed and redirect with oauth_error.

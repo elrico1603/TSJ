@@ -15,41 +15,51 @@ import {
   SessionStore,
   ISessionFirestore,
   OAuthSessionDoc,
-  OAUTH_SESSIONS_COLLECTION_PATH
+  OAUTH_SESSIONS_COLLECTION_PATH,
+  OAUTH_CREDENTIALS_COLLECTION_PATH,
+  isValidCollectionPath
 } from '../server/sessionStore';
+import { getFirebaseAdminApp } from '../server/firebaseAdmin';
+import { getFirestore } from 'firebase-admin/firestore';
 
 // Mock in-memory Firestore adapter
 class MockFirestore implements ISessionFirestore {
-  public store = new Map<string, any>();
+  public sessions = new Map<string, any>();
+  public credentials = new Map<string, any>();
 
   collection(collPath: string) {
-    if (collPath !== OAUTH_SESSIONS_COLLECTION_PATH) {
+    if (!isValidCollectionPath(collPath)) {
+      throw new Error(`Value for argument "collectionPath" must point to a collection, but was "${collPath}". Your path does not contain an odd number of components.`);
+    }
+
+    if (collPath !== OAUTH_SESSIONS_COLLECTION_PATH && collPath !== OAUTH_CREDENTIALS_COLLECTION_PATH) {
       throw new Error(`Unexpected collection path: ${collPath}`);
     }
 
     const self = this;
+    const store = collPath === OAUTH_CREDENTIALS_COLLECTION_PATH ? self.credentials : self.sessions;
     return {
       doc(docId: string) {
         return {
           async get() {
-            const exists = self.store.has(docId);
+            const exists = store.has(docId);
             return {
               exists,
-              data: () => (exists ? JSON.parse(JSON.stringify(self.store.get(docId))) : undefined)
+              data: () => (exists ? JSON.parse(JSON.stringify(store.get(docId))) : undefined)
             };
           },
           async set(data: any) {
-            self.store.set(docId, JSON.parse(JSON.stringify(data)));
+            store.set(docId, JSON.parse(JSON.stringify(data)));
           },
           async update(updates: any) {
-            if (!self.store.has(docId)) {
+            if (!store.has(docId)) {
               throw new Error('Document does not exist');
             }
-            const existing = self.store.get(docId);
-            self.store.set(docId, { ...existing, ...JSON.parse(JSON.stringify(updates)) });
+            const existing = store.get(docId);
+            store.set(docId, { ...existing, ...JSON.parse(JSON.stringify(updates)) });
           },
           async delete() {
-            self.store.delete(docId);
+            store.delete(docId);
           }
         };
       }

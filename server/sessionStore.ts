@@ -6,7 +6,7 @@ import { getServerFirestore } from './firebaseAdmin';
  * Server-Side OAuth Session Store
  * TimberSmith Hub — Phase 4B Backend Infrastructure
  * 
- * Path: artifacts/timbersmith-terminal-v1/private/oauth_sessions/{sessionId}
+ * Path: artifacts/timbersmith-terminal-v1/private/oauth/sessions/{sessionId}
  * 
  * Security Invariants:
  * 1. Session IDs are cryptographically random (at least 32 bytes hex, 64 characters).
@@ -19,8 +19,19 @@ import { getServerFirestore } from './firebaseAdmin';
  * 6. Pluggable Firestore adapter allows deterministic unit testing without production database writes.
  */
 
-export const OAUTH_SESSIONS_COLLECTION_PATH = 'artifacts/timbersmith-terminal-v1/private/oauth_sessions';
-export const OAUTH_CREDENTIALS_COLLECTION_PATH = 'artifacts/timbersmith-terminal-v1/private/oauth_credentials';
+export const OAUTH_SESSIONS_COLLECTION_PATH = 'artifacts/timbersmith-terminal-v1/private/oauth/sessions';
+export const OAUTH_CREDENTIALS_COLLECTION_PATH = 'artifacts/timbersmith-terminal-v1/private/oauth/credentials';
+
+/**
+ * Validates that a Firestore collection path string is structurally valid.
+ * Firestore requires collection paths to contain an ODD number of components (1, 3, 5, etc.).
+ * Even component paths point to documents, not collections.
+ */
+export function isValidCollectionPath(collectionPath: string): boolean {
+  if (!collectionPath || typeof collectionPath !== 'string') return false;
+  const segments = collectionPath.split('/').filter(Boolean);
+  return segments.length > 0 && segments.length % 2 === 1;
+}
 
 export interface StoredOAuthCredential {
   userId: string;
@@ -278,12 +289,13 @@ export class SessionStore {
     if (isServerPreviewEnvironment() && !this.dbAdapter) {
       return;
     }
-    if (!cred.userId || !cred.encryptedRefreshToken) {
+    const cleanUserId = typeof cred.userId === 'string' ? cred.userId.trim() : '';
+    if (!cleanUserId || !cred.encryptedRefreshToken) {
       throw new Error('Valid userId and encryptedRefreshToken are required to save credentials.');
     }
     const db = this.getDb();
-    await db.collection(OAUTH_CREDENTIALS_COLLECTION_PATH).doc(cred.userId).set({
-      userId: cred.userId,
+    await db.collection(OAUTH_CREDENTIALS_COLLECTION_PATH).doc(cleanUserId).set({
+      userId: cleanUserId,
       googleEmail: cred.googleEmail.trim().toLowerCase(),
       employeeEmail: cred.employeeEmail.trim().toLowerCase(),
       encryptedRefreshToken: cred.encryptedRefreshToken,
@@ -301,8 +313,9 @@ export class SessionStore {
       return null;
     }
     try {
+      const cleanUserId = userId.trim();
       const db = this.getDb();
-      const snap = await db.collection(OAUTH_CREDENTIALS_COLLECTION_PATH).doc(userId).get();
+      const snap = await db.collection(OAUTH_CREDENTIALS_COLLECTION_PATH).doc(cleanUserId).get();
       if (!snap.exists) {
         return null;
       }
@@ -327,8 +340,9 @@ export class SessionStore {
       return false;
     }
     try {
+      const cleanUserId = userId.trim();
       const db = this.getDb();
-      const docRef = db.collection(OAUTH_CREDENTIALS_COLLECTION_PATH).doc(userId);
+      const docRef = db.collection(OAUTH_CREDENTIALS_COLLECTION_PATH).doc(cleanUserId);
       const snap = await docRef.get();
       if (!snap.exists) {
         return false;
@@ -337,6 +351,31 @@ export class SessionStore {
         status: 'revoked',
         revokedAt: Date.now()
       });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Deletes a stored credential document completely from Firestore
+   */
+  public async deleteCredential(userId: unknown): Promise<boolean> {
+    if (!userId || typeof userId !== 'string') {
+      return false;
+    }
+    if (isServerPreviewEnvironment() && !this.dbAdapter) {
+      return false;
+    }
+    try {
+      const cleanUserId = userId.trim();
+      const db = this.getDb();
+      const docRef = db.collection(OAUTH_CREDENTIALS_COLLECTION_PATH).doc(cleanUserId);
+      const snap = await docRef.get();
+      if (!snap.exists) {
+        return false;
+      }
+      await docRef.delete();
       return true;
     } catch {
       return false;
