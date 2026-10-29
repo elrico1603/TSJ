@@ -1916,9 +1916,9 @@ TS Joinery Kanban System`
       // Use the same Firebase project with a separately configured APP_ID_PATH for tests.
       // Production clocking is unchanged until the reviewed branch is deployed.
       const host = typeof window !== 'undefined' ? window.location.hostname : '';
-      const isPreviewHost = host.includes('deploy-preview-') || host.includes('branch-');
-      if (isPreviewHost && APP_ID_PATH === 'timbersmith-terminal-v1') {
-        throw new Error('Preview clocking is blocked from production employee records.');
+      const isTestHost = host === 'localhost' || host === '127.0.0.1' || host.includes('deploy-preview-') || host.includes('branch-');
+      if (isTestHost && APP_ID_PATH === 'timbersmith-terminal-v1') {
+        throw new Error('Test and preview clocking is blocked from production employee records.');
       }
       const clockTime = new Date();
       let newStatus: 'In' | 'Out' | 'Break' | 'Archived';
