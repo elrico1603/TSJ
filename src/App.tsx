@@ -2063,7 +2063,29 @@ TS Joinery Kanban System`
         updateData.shiftStartTime = null;
       }
 
-      await db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('data').collection('employees').doc(emp.id).update(updateData);
+      // Transaction prevents stale terminal state from overwriting newer clock records.
+      // A duplicate submission based on the same employee snapshot is rejected.
+      const employeeRef = db.collection('artifacts').doc(APP_ID_PATH)
+        .collection('public').doc('data').collection('employees').doc(emp.id);
+      await db.runTransaction(async transaction => {
+        const currentSnapshot = await transaction.get(employeeRef);
+        if (!currentSnapshot.exists) {
+          throw new Error('Employee record missing. Clocking NOT saved.');
+        }
+        const current = currentSnapshot.data() as Employee;
+        if (current.isArchived === true || current.status === 'Archived') {
+          throw new Error('Archived employee cannot clock.');
+        }
+        if (
+          current.status !== emp.status ||
+          (current.shiftStartTime || null) !== (emp.shiftStartTime || null) ||
+          (current.shifts || []).length !== (emp.shifts || []).length ||
+          (current.history || []).length !== (emp.history || []).length
+        ) {
+          throw new Error('Clocking state changed. Refresh before trying again.');
+        }
+        transaction.update(employeeRef, updateData);
+      });
       setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, ...updateData } : e));
       setLastClockResult(newStatus);
       setView('success_screen'); 
