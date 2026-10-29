@@ -1977,19 +1977,7 @@ TS Joinery Kanban System`
       
       console.log('[Clocking Debug] Attendance record found for:', emp.name, 'Current status:', emp.status, 'Forced intent:', forcedIntent, 'New calculated status:', newStatus, 'Stale recovery:', isStaleRecoveryAction);
       
-      setLastClockResult(newStatus);
-      setView('success_screen'); 
-      setPersonalPinInput('');
-      setSupervisorApprovalPinInput('');
-
-      if (newStatus === 'In') {
-        handleClockInSuccess(emp.name || 'Artisan');
-      } else if (newStatus === 'Out') {
-        handleClockOutSuccess(emp.name || 'Artisan');
-      } else {
-        announce(actionMsg);
-      }
-      auditLogger.log('CLOCK_EVENT', emp.name || 'Unknown Artisan', actionMsg);
+      if (!isCloudLive) throw new Error('Cloud connection unavailable. Clocking NOT saved.');
 
       let updateData: Partial<Employee> = { status: newStatus, lastClock: clockTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
 
@@ -2075,26 +2063,36 @@ TS Joinery Kanban System`
         updateData.shiftStartTime = null;
       }
 
-      setEmployees(prev => prev.map(e => e.id === emp.id ? { ...emp, ...updateData } : e));
-      console.log('[Clocking Debug] Local state refreshed for employee:', emp.id, 'New Status:', newStatus);
-      
-      setTimeout(() => { 
-        setView('dashboard'); 
-        setSelectedEmployee(null); 
-        setScanComplete(false); 
-        setPendingAction('normal'); 
-        setTimeOffReason('');
-        setLastClockResult(null); 
-        console.log('[Clocking Debug] UI refreshed back to dashboard/terminal');
-      }, 3500);
-      
-      if (isCloudLive) {
-        console.log('[Clocking Debug] Firestore update started for employee:', emp.id);
-        await db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('data').collection('employees').doc(emp.id).update(updateData); 
-        console.log('[Clocking Debug] Firestore update successful');
+      await db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('data').collection('employees').doc(emp.id).update(updateData);
+      setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, ...updateData } : e));
+      setLastClockResult(newStatus);
+      setView('success_screen'); 
+      setPersonalPinInput('');
+      setSupervisorApprovalPinInput('');
+
+      if (newStatus === 'In') {
+        handleClockInSuccess(emp.name || 'Artisan');
+      } else if (newStatus === 'Out') {
+        handleClockOutSuccess(emp.name || 'Artisan');
+      } else {
+        announce(actionMsg);
       }
+      auditLogger.log('CLOCK_EVENT', emp.name || 'Unknown Artisan', actionMsg);
+
+      setTimeout(() => {
+        setView('dashboard');
+        setSelectedEmployee(null);
+        setScanComplete(false);
+        setPendingAction('normal');
+        setTimeOffReason('');
+        setLastClockResult(null);
+      }, 3500);
     } catch(e) {
-      console.error("Crash prevented in processClockEvent:", e);
+      console.error('[CLOCKING SAVE FAILED]', e);
+      announce('Clocking NOT saved. Please inform your supervisor.');
+      alert('CLOCKING NOT SAVED. Firestore did not confirm this event. Please inform your supervisor.');
+      setView('dashboard');
+      setScanComplete(false);
     }
   };
 
