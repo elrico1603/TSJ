@@ -1911,6 +1911,18 @@ TS Joinery Kanban System`
 
   const processClockEvent = async (emp: Employee, forcedIntent?: 'In' | 'Out' | 'Break') => {
     try {
+      // Fail closed on preview deployments until a dedicated Firebase test project is configured.
+      // This prevents accidental writes to production employees during clocking tests.
+      const isProductionHost = typeof window !== 'undefined' &&
+        window.location.hostname === 'timbersmith-terminal.netlify.app';
+      if (!isProductionHost) {
+        const expectedTestProject = import.meta.env.VITE_CLOCKING_TEST_PROJECT_ID;
+        if (!expectedTestProject ||
+            expectedTestProject === 'timbersmithapp' ||
+            db.app.options.projectId !== expectedTestProject) {
+          throw new Error('Clocking test environment is not isolated from production.');
+        }
+      }
       const clockTime = new Date();
       let newStatus: 'In' | 'Out' | 'Break' | 'Archived';
       let actionMsg;
