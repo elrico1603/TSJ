@@ -30,6 +30,7 @@ import { WorkAnalytics } from './components/WorkAnalytics';
 import { EnrollmentModal } from './components/EnrollmentModal';
 import { SettingsModal } from './components/SettingsModal';
 import { EmployeeDetailsModal } from './components/EmployeeDetailsModal';
+import { SupervisorShiftReview } from './components/SupervisorShiftReview';
 import { ReportPrintTemplate } from './components/ReportPrintTemplate';
 import { PrintLayout } from './components/PrintLayout';
 import { KanbanTemplateManagerPage, DEFAULT_SAMPLE_TEMPLATE } from './components/KanbanTemplateManagerPage';
@@ -2932,6 +2933,14 @@ TS Joinery Kanban System`
                     canManageOrders={canManageOrders}
                     currentUser={currentUser}
                     announce={announce}
+                  />
+                )}
+
+                {appMode === 'admin' && view === 'dashboard' && !isLocked && (
+                  <SupervisorShiftReview
+                    employees={employees}
+                    supervisor={currentUser?.email || currentUser?.name || 'Supervisor'}
+                    onSaved={updated => setEmployees(prev => prev.map(e => e.id === updated.id ? updated : e))}
                   />
                 )}
 
