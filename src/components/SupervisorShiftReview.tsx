@@ -22,6 +22,11 @@ export function SupervisorShiftReview({ employees, supervisor, onSaved }: Props)
 
   async function approve() {
     if (!selected || saving) return;
+    // This client-side guard prevents accidental writes from local and preview builds.
+    // Server-side Firestore rules must separately enforce supervisor authorization.
+    if (typeof window === 'undefined' || window.location.hostname !== 'timbersmith-terminal.netlify.app') {
+      setError('Corrections are disabled in test and preview builds.'); return;
+    }
     const original = selected.shift;
     if (!original.clockInDateTime || !validIso(original.clockInDateTime) || !validIso(outTime)) {
       setError('A valid original clock-in and verified clock-out time are required.'); return;
@@ -46,13 +51,17 @@ export function SupervisorShiftReview({ employees, supervisor, onSaved }: Props)
         const snap = await tx.get(ref);
         if (!snap.exists) throw new Error('Employee record not found.');
         const current = snap.data() as Employee;
+        if (current.isArchived || current.status === 'Archived') throw new Error('Archived employee records cannot be corrected.');
         const currentShift = (current.shifts || [])[selected.index];
         if (!currentShift?.requiresSupervisorReview ||
             currentShift.clockInDateTime !== original.clockInDateTime ||
-            currentShift.clockOut !== original.clockOut) {
+            currentShift.clockOut !== original.clockOut ||
+            currentShift.hours !== original.hours ||
+            currentShift.date !== original.date) {
           throw new Error('Shift has changed. Refresh and review again.');
         }
         const hours = Math.round(duration / 36000) / 100;
+        const day = currentShift.date || localDay(currentShift.clockInDateTime!);
         const corrected: ShiftRecord = {
           ...currentShift,
           clockOut: finish.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}),
@@ -65,10 +74,10 @@ export function SupervisorShiftReview({ employees, supervisor, onSaved }: Props)
         const shifts = [...current.shifts];
         shifts[selected.index] = corrected;
         const history = [...(current.history || [])];
-        const day = currentShift.date || localDay(currentShift.clockInDateTime!);
         const existing = history.findIndex(h => h.date === day);
         if (existing >= 0) history[existing] = { ...history[existing], hours: Math.round((history[existing].hours + hours - (currentShift.hours || 0)) * 100) / 100 };
         else history.push({ date: day, hours });
+        // The transaction updates both the shift and its daily summary atomically.
         tx.update(ref, { shifts, history });
         tx.set(auditRef, {
           event: 'SUPERVISOR_SHIFT_CORRECTION', actor: supervisor,
