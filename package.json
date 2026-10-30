@@ -17,7 +17,7 @@
     "release:patch": "node scripts/release.js --patch",
     "release:minor": "node scripts/release.js --minor",
     "release:major": "node scripts/release.js --major",
-    "test:clocking": "tsx scripts/test-clock-event-reducer.ts && tsx scripts/test-clock-sync.ts && tsx scripts/test-clock-server-validation.ts && tsx scripts/test-clock-server-processor.ts && tsx scripts/test-clock-kiosk-identity.ts && tsx scripts/test-clock-api-transport.ts && tsx scripts/test-clock-kiosk-enrollment.ts && tsx scripts/test-clock-kiosk-server-status.ts && tsx scripts/test-clock-kiosk-revocation.ts"
+    "test:clocking": "tsx scripts/test-clock-event-reducer.ts && tsx scripts/test-clock-sync.ts && tsx scripts/test-clock-server-validation.ts && tsx scripts/test-clock-server-processor.ts && tsx scripts/test-clock-kiosk-identity.ts && tsx scripts/test-clock-api-transport.ts && tsx scripts/test-clock-kiosk-enrollment.ts && tsx scripts/test-clock-kiosk-server-status.ts && tsx scripts/test-clock-kiosk-revocation.ts && tsx scripts/test-clock-journal-isolation.ts"
   },
   "dependencies": {
     "@google-cloud/storage": "^8.0.0",
