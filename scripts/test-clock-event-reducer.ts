@@ -56,4 +56,13 @@ check('open shift older than 24 hours cannot be silently closed',()=>{
   const old={...afterIn,shiftStartTime:'2026-10-27T06:00:00.000Z'};
   assert.throws(()=>applyJournalClockEvent(old,atOut),/supervisor review/);
 });
-console.log('All 8 fictional clock-event reducer checks passed.');
+check('South African midnight date assigned correctly even on UTC server',()=>{
+  const midnightIn=event('In','2026-10-30T22:30:00.000Z');
+  const result=applyJournalClockEvent(employee(),midnightIn);
+  assert.equal(result.lastClock,'00:30');
+  const out=applyJournalClockEvent({...employee(),...result} as Employee,event('Out','2026-10-31T07:30:00.000Z'));
+  assert.equal(out.shifts?.[0].date,'2026-10-31');
+  assert.equal(out.shifts?.[0].clockIn,'00:30');
+  assert.equal(out.shifts?.[0].hours,9);
+});
+console.log('All 9 fictional clock-event reducer checks passed.');
