@@ -93,11 +93,15 @@ export function syncClockJournal(transport: ClockSyncTransport): Promise<ClockSy
 }
 
 /** Sync only after a properly authenticated transport has been supplied. */
-export function startClockSync(transport: ClockSyncTransport, intervalMs = 30000): () => void {
+export function startClockSync(
+  transport: ClockSyncTransport,
+  intervalMs = 30000,
+  canSync: () => boolean = () => true
+): () => void {
   if (typeof window === 'undefined') return () => {};
   let disposed = false;
   const attempt = () => {
-    if (!disposed && navigator.onLine) void syncClockJournal(transport).catch(console.error);
+    if (!disposed && navigator.onLine && canSync()) void syncClockJournal(transport).catch(console.error);
   };
   const timer = window.setInterval(attempt, Math.max(5000, intervalMs));
   window.addEventListener('online', attempt);
