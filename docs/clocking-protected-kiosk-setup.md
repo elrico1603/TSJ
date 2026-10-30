@@ -133,6 +133,21 @@ the registration and disable its dedicated Firebase Auth user.
 The combined test suite uses fictional in-memory fixtures. A PASS in these
 tests does not prove that registry rules are deployed or a kiosk is provisioned.
 
+## Offline journal isolation (integrity fix)
+
+The durable IndexedDB journal is shared across local test panels. Previously a
+single unscoped sync could attempt to replay **all** incomplete records through
+one transport, even if some records belonged to a different test employee.
+
+Every replay now requires an exact `employeeId` **and** `deviceId` scope.
+The fictional-worker Sandbox and owner Pilot have independent scopes and
+concurrent sync locks. A missing scope is rejected rather than interpreting
+it as "sync all". This behavior is covered by
+`scripts/test-clock-journal-isolation.ts`.
+
+This integrity fix changes only the localhost test replay wiring and shared
+journal helper. It does not migrate or modify the production Clocking flow.
+
 ## Production blockers
 
 1. Configure and test the named registry with deny-all rules.
