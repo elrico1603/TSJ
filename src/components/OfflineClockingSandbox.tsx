@@ -13,8 +13,10 @@ const TEST_EMPLOYEE_ID = 'fictional-clock-worker-001';
 const TEST_DEVICE = 'fictional-local-test-tablet';
 const isLocalhost = () => typeof window !== 'undefined' &&
   (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-const testEmployeeRef = () => db.collection('artifacts').doc(TEST_NAMESPACE)
-  .collection('public').doc('data').collection('employees').doc(TEST_EMPLOYEE_ID);
+const testDataRoot = () => db.collection('artifacts').doc(TEST_NAMESPACE)
+  .collection('public').doc('data');
+const testEmployeeRef = () => testDataRoot().collection('employees').doc(TEST_EMPLOYEE_ID);
+const testReceiptRef = (eventId: string) => testDataRoot().collection('clockEventReceipts').doc(eventId);
 
 export function OfflineClockingSandbox() {
   const [events,setEvents] = useState<ClockJournalEvent[]>([]);
@@ -58,7 +60,7 @@ export function OfflineClockingSandbox() {
     await inspectRemote();
   }
   async function inspectRemote() {
-    const snap=await testEmployeeRef().get();
+    const snap=await testEmployeeRef().get({ source: 'server' });
     const e=snap.data() as Employee | undefined;
     setRemoteState(e ? `${e.status} / ${e.shifts?.length||0} completed shifts` : 'Test employee not initialized');
   }
@@ -74,6 +76,40 @@ export function OfflineClockingSandbox() {
     const result=await syncClockJournal(createSandboxFirestoreClockTransport(TEST_NAMESPACE));
     await inspectRemote();
     setStatus(`Sync: ${result.confirmed} confirmed, ${result.pending} pending, ${result.needsReview} review. Only fictional test namespace used.`);
+  }
+  async function verifyIdempotentReplay() {
+    if (simulateOffline) throw new Error('Reconnect simulated Wi-Fi before verifying the server.');
+    const confirmed = (await listClockEvents()).filter(
+      e=>e.employeeId===TEST_EMPLOYEE_ID && e.status==='confirmed'
+    );
+    const event = confirmed[confirmed.length-1];
+    if (!event) throw new Error('No previously confirmed fictional clock event to replay.');
+    const beforeSnap = await testEmployeeRef().get({ source:'server' });
+    if (!beforeSnap.exists) throw new Error('Fictional employee missing on Firestore server.');
+    const before = beforeSnap.data() as Employee;
+    const prior = JSON.stringify({
+      status:before.status,shiftStartTime:before.shiftStartTime,
+      history:before.history,shifts:before.shifts,
+      todayHours:before.todayHours,weeklyHours:before.weeklyHours,monthlyHours:before.monthlyHours
+    });
+    // Deliberately send the same confirmed event ID a second time.
+    const receipt = await createSandboxFirestoreClockTransport(TEST_NAMESPACE)(event);
+    if (receipt.result !== 'already_committed' || receipt.eventId !== event.id)
+      throw new Error('FAIL: server did not identify the duplicate event.');
+    const savedReceipt = await testReceiptRef(event.id).get({ source:'server' });
+    if (!savedReceipt.exists || savedReceipt.data()?.eventId !== event.id)
+      throw new Error('FAIL: matching Firestore event receipt could not be verified.');
+    const afterSnap = await testEmployeeRef().get({ source:'server' });
+    if (!afterSnap.exists) throw new Error('Fictional employee disappeared during duplicate test.');
+    const after = afterSnap.data() as Employee;
+    const current = JSON.stringify({
+      status:after.status,shiftStartTime:after.shiftStartTime,
+      history:after.history,shifts:after.shifts,
+      todayHours:after.todayHours,weeklyHours:after.weeklyHours,monthlyHours:after.monthlyHours
+    });
+    if (prior !== current) throw new Error('FAIL: duplicate replay changed shift data or hours.');
+    await inspectRemote();
+    setStatus('PASS: same event ID returned already_committed; Firestore receipt verified; shifts and hours unchanged.');
   }
   const pending=events.filter(e=>e.status==='pending'||e.status==='syncing').length;
   const confirmed=events.filter(e=>e.status==='confirmed').length;
@@ -122,6 +158,9 @@ export function OfflineClockingSandbox() {
         <button type="button" disabled={busy}
           onClick={()=>void run(async()=>{await inspectRemote();setStatus('Read fictional Firestore status.');})}
           className="rounded-lg bg-gray-700 px-3 py-2 font-bold text-sm disabled:opacity-40">Verify Firestore state</button>
+        <button type="button" disabled={busy||simulateOffline}
+          onClick={()=>void run(verifyIdempotentReplay)}
+          className="rounded-lg bg-emerald-800 px-3 py-2 font-bold text-sm disabled:opacity-40">5. Verify duplicate replay (no extra hours)</button>
       </div>
       <p className="text-xs text-gray-400">
         The Wi-Fi switch simulates a failed connection without disabling your real network.
