@@ -76,6 +76,7 @@ export async function prepareOwnerClockPilot(original: Employee): Promise<Employ
     ...original,
     id:pilotId,
     status,
+    isClockedIn:status==='In',
     isArchived:false,
     shiftStartTime:start || null,
     // Pilot is an in-memory clone. Existing PIN is still used ONLY by the
@@ -126,13 +127,10 @@ export async function recordOwnerClockPilotEvent(
   });
   if (isClockPilotSimulatedOffline() || !navigator.onLine)
     return {eventId:queued.id,sync:'pending'};
-  try {
-    await syncClockJournal(createSandboxFirestoreClockTransport(CLOCK_PILOT_NAMESPACE));
-    const changed=(await listClockEvents()).find(e=>e.id===queued.id);
-    return {eventId:queued.id,sync:changed?.status==='confirmed'?'confirmed':'pending'};
-  } catch(error) {
-    // This is an ambiguous cloud failure, NOT a failed local clocking.
-    console.warn('[CLOCK PILOT] Journal saved locally; cloud confirmation pending:',error);
-    return {eventId:queued.id,sync:'pending'};
-  }
+  // Never hold up a worker at the terminal while waiting for unstable Wi-Fi.
+  // Once IndexedDB commits, acknowledge LOCAL storage immediately. A separate
+  // retry loop reconciles with Firestore, preserving this event ID on timeout.
+  void syncClockJournal(createSandboxFirestoreClockTransport(CLOCK_PILOT_NAMESPACE))
+    .catch(error=>console.warn('[CLOCK PILOT] Local journal safe; cloud sync pending:',error));
+  return {eventId:queued.id,sync:'pending'};
 }
