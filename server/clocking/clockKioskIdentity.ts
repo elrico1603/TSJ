@@ -80,6 +80,7 @@ export async function verifyRegisteredClockKiosk(
   return {
     firebaseUid:verified.uid,
     deviceId:claimedDeviceId,
+    namespace:registration.enabledNamespace,
     permittedEmployeeIds:registration.permittedEmployeeIds
   };
 }
