@@ -12,8 +12,22 @@ export function applyJournalClockEvent(employee: Employee, event: ClockJournalEv
   if (event.action === 'Break') throw new Error('Offline break workflow requires separate approval and context.');
   const timestamp = new Date(event.occurredAt);
   if (Number.isNaN(timestamp.getTime())) throw new Error('Clocking time is invalid.');
-  const displayTime = (date: Date) => date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  const localDate = (date: Date) => [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-');
+  // Site attendance dates must be independent of the tablet / Cloud Run timezone.
+  const southAfricaParts = (date: Date) => {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone:'Africa/Johannesburg', year:'numeric',month:'2-digit',day:'2-digit',
+      hour:'2-digit',minute:'2-digit',hourCycle:'h23'
+    }).formatToParts(date);
+    return Object.fromEntries(parts.map(part=>[part.type,part.value])) as Record<string,string>;
+  };
+  const displayTime = (date: Date) => {
+    const p = southAfricaParts(date);
+    return p.hour+':'+p.minute;
+  };
+  const localDate = (date: Date) => {
+    const p = southAfricaParts(date);
+    return p.year+'-'+p.month+'-'+p.day;
+  };
   if (event.action === 'In') {
     const previousStart = employee.shiftStartTime ? new Date(employee.shiftStartTime) : null;
     const elapsed = previousStart ? timestamp.getTime() - previousStart.getTime() : 0;
