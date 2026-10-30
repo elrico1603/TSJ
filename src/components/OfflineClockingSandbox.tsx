@@ -68,10 +68,14 @@ export function OfflineClockingSandbox({ employees, onLaunchOwnerPilot }: {
   }, [simulateOffline]);
   if (!isLocalhost()) return null;
 
-  async function run(task:()=>Promise<void>) {
+  async function run(task:()=>Promise<void>, target:'fictional'|'pilot'='fictional') {
     if (busy) return;
     setBusy(true);
-    try { await task(); } catch(e) { setStatus('ERROR: '+(e instanceof Error?e.message:String(e))); }
+    try { await task(); } catch(e) {
+      const message='ERROR: '+(e instanceof Error?e.message:String(e));
+      if(target==='pilot') setPilotStatus(message);
+      else setStatus(message);
+    }
     finally { await refresh().catch(console.error); setBusy(false); }
   }
   async function prepare() {
@@ -256,7 +260,7 @@ export function OfflineClockingSandbox({ employees, onLaunchOwnerPilot }: {
         </p>
         <button type="button"
           disabled={busy || !ownerProfile}
-          onClick={()=>{ if(ownerProfile) void run(()=>onLaunchOwnerPilot(ownerProfile)); }}
+          onClick={()=>{ if(ownerProfile) void run(()=>onLaunchOwnerPilot(ownerProfile),'pilot'); }}
           className="rounded-xl bg-sky-700 px-4 py-3 font-bold text-sm text-white disabled:opacity-40">
           Start Clocking Pilot — {ownerProfile ? ownerProfile.name+' '+ownerProfile.surname : 'Owner profile not loaded'}
         </button>
@@ -275,12 +279,12 @@ export function OfflineClockingSandbox({ employees, onLaunchOwnerPilot }: {
           {pilotLatest?.lastError && <p className="text-xs text-red-300">Sync detail: {pilotLatest.lastError}</p>}
           <div className="flex flex-wrap gap-2">
             <button type="button" disabled={busy||simulateOffline}
-              onClick={()=>void run(syncOwnerPilotNow)}
+              onClick={()=>void run(syncOwnerPilotNow,'pilot')}
               className="bg-sky-700 rounded-lg px-3 py-2 font-bold text-xs disabled:opacity-40">
               Sync pending test records
             </button>
             <button type="button" disabled={busy||simulateOffline||!pilotLatest}
-              onClick={()=>void run(verifyOwnerPilotFirestore)}
+              onClick={()=>void run(verifyOwnerPilotFirestore,'pilot')}
               className="bg-emerald-800 rounded-lg px-3 py-2 font-bold text-xs disabled:opacity-40">
               Verify my last event on Firestore
             </button>
