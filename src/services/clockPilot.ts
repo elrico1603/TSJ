@@ -143,7 +143,10 @@ export async function recordOwnerClockPilotEvent(
   // Never hold up a worker at the terminal while waiting for unstable Wi-Fi.
   // Once IndexedDB commits, acknowledge LOCAL storage immediately. A separate
   // retry loop reconciles with Firestore, preserving this event ID on timeout.
-  void syncClockJournal(createSandboxFirestoreClockTransport(CLOCK_PILOT_NAMESPACE))
+  void syncClockJournal(
+    createSandboxFirestoreClockTransport(CLOCK_PILOT_NAMESPACE),
+    {employeeId:selected.id,deviceId:getPilotDeviceId()}
+  )
     .catch(error=>console.warn('[CLOCK PILOT] Local journal safe; cloud sync pending:',error));
   return {eventId:queued.id,sync:'pending'};
 }
