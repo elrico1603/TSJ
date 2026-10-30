@@ -33,6 +33,7 @@ import { EmployeeDetailsModal } from './components/EmployeeDetailsModal';
 import { SupervisorShiftReview } from './components/SupervisorShiftReview';
 import { SupervisorReviewSandbox } from './components/SupervisorReviewSandbox';
 import { OfflineClockingSandbox } from './components/OfflineClockingSandbox';
+import { isClockPilotLocalhost, isOwnerClockPilotProfile, prepareOwnerClockPilot, recordOwnerClockPilotEvent } from './services/clockPilot';
 import { ReportPrintTemplate } from './components/ReportPrintTemplate';
 import { PrintLayout } from './components/PrintLayout';
 import { KanbanTemplateManagerPage, DEFAULT_SAMPLE_TEMPLATE } from './components/KanbanTemplateManagerPage';
@@ -134,6 +135,10 @@ export default function App() {
     return session ? permissionService.getInitialModeAndView(session, getAutoLayoutMode()).view : 'dashboard';
   });
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
+  // Localhost-only owner profile pilot; never connected to live payroll Clocking.
+  const [pilotClockEmployeeId, setPilotClockEmployeeId] = useState<string | null>(null);
+  const [pilotClockNotice, setPilotClockNotice] = useState<string | null>(null);
+  const pilotClockBusyRef = useRef(false);
   const [actionSubMenu, setActionSubMenu] = useState<'menu' | 'clocking'>('menu');
   const [showUserProfileModal, setShowUserProfileModal] = useState<boolean>(false);
   const [headerSearchQuery, setHeaderSearchQuery] = useState<string>('');
@@ -1452,11 +1457,17 @@ TS Joinery Kanban System`
     if (!selectedEmployee) return;
 
     const expectedCode = selectedEmployee.personalCode || selectedEmployee.pin || selectedEmployee.clockPin;
-    const isValid = 
-      (expectedCode && String(pinStr) === String(expectedCode)) ||
-      pinStr === '1234' ||
-      pinStr === '0000' ||
-      pinStr === '1001';
+    const isPilotPin = isClockPilotLocalhost() && pilotClockEmployeeId === selectedEmployee.id;
+    // In the isolated owner-profile pilot, enforce the exact existing PIN.
+    // Legacy production authentication remains unchanged until separately reviewed.
+    const isValid = isPilotPin
+      ? Boolean(expectedCode && String(pinStr) === String(expectedCode))
+      : Boolean(
+        (expectedCode && String(pinStr) === String(expectedCode)) ||
+        pinStr === '1234' ||
+        pinStr === '0000' ||
+        pinStr === '1001'
+      );
 
     console.log('[CLOCKING FLOW] Selected employee:', selectedEmployee);
     console.log('[CLOCKING FLOW] Employer verification started');
@@ -1912,7 +1923,71 @@ TS Joinery Kanban System`
     }
   };
 
+  const launchOwnerClockPilot = async (original: Employee) => {
+    if (!isClockPilotLocalhost() || !isOwnerClockPilotProfile(original)) {
+      throw new Error('Owner profile pilot is restricted to localhost.');
+    }
+    const pilot = await prepareOwnerClockPilot(original);
+    setPilotClockEmployeeId(pilot.id);
+    setPilotClockNotice(null);
+    setSelectedEmployee(pilot);
+    setPersonalPinInput('');
+    setPersonalPinError(false);
+    setPendingAction('hub_login');
+    setActionSubMenu('menu');
+    setView('personal_pin_entry');
+  };
+
   const processClockEvent = async (emp: Employee, forcedIntent?: 'In' | 'Out' | 'Break') => {
+    // An opt-in localhost pilot follows the EXISTING personal PIN and Clocking
+    // screens but writes ONLY to its isolated test journal and test Firestore.
+    if (isClockPilotLocalhost() && pilotClockEmployeeId === emp.id) {
+      if (pilotClockBusyRef.current) return;
+      pilotClockBusyRef.current = true;
+      try {
+        if (!['normal', 'hub_login', 'clock_toggle'].includes(pendingAction) || forcedIntent === 'Break') {
+          throw new Error('This pilot tests normal clock-in/out only, not breaks or special requests.');
+        }
+        const intent: 'In' | 'Out' = forcedIntent === 'In' || forcedIntent === 'Out'
+          ? forcedIntent
+          : emp.status === 'In' ? 'Out' : 'In';
+        const receipt = await recordOwnerClockPilotEvent(emp, intent);
+        const notice = receipt.sync === 'confirmed'
+          ? 'TEST CLOCKING — VERIFIED IN TEST FIRESTORE. Real employee hours were not changed.'
+          : 'TEST CLOCKING — SAVED ON THIS DEVICE. PENDING FIRESTORE SYNC. Real employee hours were not changed.';
+        setPilotClockNotice(notice);
+        setSelectedEmployee(prev => prev?.id === emp.id
+          ? { ...prev, status: intent, shiftStartTime: intent === 'In' ? new Date().toISOString() : null }
+          : prev);
+        setLastClockResult(intent);
+        setView('success_screen');
+        setPersonalPinInput('');
+        setSupervisorApprovalPinInput('');
+        setTimeout(() => {
+          setView('dashboard');
+          setSelectedEmployee(null);
+          setScanComplete(false);
+          setPendingAction('normal');
+          setActionSubMenu('menu');
+          setLastClockResult(null);
+          setPilotClockEmployeeId(null);
+          setPilotClockNotice(null);
+        }, 3500);
+      } catch(error) {
+        const msg=error instanceof Error ? error.message : 'Local clocking could not be saved.';
+        console.error('[CLOCKING PILOT SAVE FAILED]',error);
+        alert('TEST CLOCKING NOT RECORDED: '+msg);
+        setView('dashboard');
+        setScanComplete(false);
+        setSelectedEmployee(null);
+        setPilotClockEmployeeId(null);
+        setPilotClockNotice(null);
+      } finally {
+        pilotClockBusyRef.current = false;
+      }
+      return;
+    }
+
     try {
       // Preview builds must never write to the live employee collection.
       // Use the same Firebase project with a separately configured APP_ID_PATH for tests.
@@ -2936,7 +3011,7 @@ TS Joinery Kanban System`
 
                 {appMode === 'admin' && view === 'dashboard' && !isLocked && typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') && (
                   <>
-                    <OfflineClockingSandbox />
+                    <OfflineClockingSandbox employees={employees} onLaunchOwnerPilot={launchOwnerClockPilot} />
                     <SupervisorReviewSandbox />
                   </>
                 )}
@@ -3174,6 +3249,11 @@ TS Joinery Kanban System`
               </div>
             </div>
 
+            {pilotClockEmployeeId === selectedEmployee.id && (
+              <p className="text-sm font-black text-amber-300 mt-4 border border-amber-500/30 rounded-xl p-3">
+                LOCALHOST TEST MODE — Your real Clocking record will not be changed.
+              </p>
+            )}
             {actionSubMenu === 'menu' ? (
               /* MAIN EMPLOYEE ACTION MENU */
               <div className="mt-6 space-y-4">
@@ -3194,7 +3274,8 @@ TS Joinery Kanban System`
                   </span>
                 </button>
 
-                {/* Secondary Actions Grid */}
+                {/* Secondary Actions Grid - hidden for isolated Clocking-only pilot */}
+                {pilotClockEmployeeId !== selectedEmployee.id && (
                 <div className="grid grid-cols-2 gap-3">
                   {/* APPLY FOR LEAVE */}
                   <button 
@@ -3215,8 +3296,9 @@ TS Joinery Kanban System`
                   </button>
                 </div>
 
+                )}
                 {/* BREAK OPTION if clocked in or on break */}
-                {(selectedEmployee.status === 'In' || selectedEmployee.status === 'Break') && (
+                {pilotClockEmployeeId !== selectedEmployee.id && (selectedEmployee.status === 'In' || selectedEmployee.status === 'Break') && (
                   <button
                     onClick={() => {
                       setScanComplete(false);
@@ -3544,6 +3626,11 @@ TS Joinery Kanban System`
           <h2 className="text-5xl md:text-7xl font-black italic uppercase tracking-tighter text-white mb-4 leading-none">
             {lastClockResult === 'HR_Request' ? 'REQUEST SUBMITTED' : lastClockResult === 'Archive' ? 'PROFILE ARCHIVED' : 'IDENTITY VERIFIED'}
           </h2>
+          {pilotClockNotice && (
+            <p role="status" className="text-amber-300 font-black uppercase tracking-wider text-sm md:text-base mb-6 max-w-xl">
+              {pilotClockNotice}
+            </p>
+          )}
           {lastClockResult === 'HR_Request' && (
             <p className="text-emerald-400 font-bold uppercase tracking-widest text-base md:text-lg mb-6">
               Request submitted successfully and sent through for approval.
