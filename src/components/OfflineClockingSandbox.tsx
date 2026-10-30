@@ -12,6 +12,7 @@ import {
   isClockPilotSimulatedOffline, setClockPilotSimulatedOffline
 } from '../services/clockPilot';
 import { enrollRegisteredClockKiosk, getRegisteredClockKioskIdToken } from '../services/clockKioskAuth';
+import { verifyProtectedTestKioskWithServer } from '../services/clockRegisteredKioskSync';
 
 const TEST_NAMESPACE = 'timbersmith-clock-test-local';
 const TEST_EMPLOYEE_ID = 'fictional-clock-worker-001';
@@ -217,6 +218,14 @@ export function OfflineClockingSandbox({ employees, onLaunchOwnerPilot }: {
     await getRegisteredClockKioskIdToken(pilotDeviceId);
     setEnrollmentStatus('PASS: This browser has a valid signed test-kiosk identity bound to its device ID. Server registry verification is a separate step.');
   }
+  async function checkProtectedServerRegistration() {
+    const result=await verifyProtectedTestKioskWithServer(pilotDeviceId);
+    setEnrollmentStatus(
+      'PASS: Protected server verified device '+result.deviceId+
+      ', test namespace '+result.namespace+
+      ' and '+result.permittedEmployeeCount+' allowed fictional employee(s).'
+    );
+  }
   async function verifyOwnerPilotFirestore() {
     if (!ownerProfile) throw new Error('Owner profile is not available.');
     if (simulateOffline) {
@@ -332,6 +341,12 @@ export function OfflineClockingSandbox({ employees, onLaunchOwnerPilot }: {
                   className="rounded-lg border border-violet-300/60 px-4 py-3 font-black text-white disabled:opacity-40"
                   style={{backgroundColor:'#6d28d9',minHeight:44}}>
                   Verify kiosk Firebase identity
+                </button>
+                <button type="button" disabled={busy||simulateOffline}
+                  onClick={()=>void run(checkProtectedServerRegistration,'pilot')}
+                  className="rounded-lg border border-sky-300/60 px-4 py-3 font-black text-white disabled:opacity-40"
+                  style={{backgroundColor:'#075985',minHeight:44}}>
+                  Verify protected server registration
                 </button>
               </div>
               <p role="status" className="text-xs text-violet-200">{enrollmentStatus}</p>
