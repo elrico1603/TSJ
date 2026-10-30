@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { db } from '../firebase';
 import type { Employee } from '../types';
 import {
-  queueClockEvent, listClockEvents, exportClockJournal, importClockJournal,
+  queueClockEvent, listClockEvents, getUnconfirmedClockEvents, exportClockJournal, importClockJournal,
   type ClockJournalEvent
 } from '../services/clockJournal';
 import { syncClockJournal } from '../services/clockSync';
@@ -111,6 +111,58 @@ export function OfflineClockingSandbox() {
     await inspectRemote();
     setStatus('PASS: same event ID returned already_committed; Firestore receipt verified; shifts and hours unchanged.');
   }
+  async function verifyLostAcknowledgementRecovery() {
+    if (simulateOffline) throw new Error('Reconnect simulated Wi-Fi before this test.');
+    // Do not mix this scenario with unfinished or quarantined events.
+    const unfinished = await getUnconfirmedClockEvents();
+    if (unfinished.length) throw new Error('Resolve existing pending or review events before the lost-response test.');
+    const beforeSnap = await testEmployeeRef().get({ source:'server' });
+    if (!beforeSnap.exists) throw new Error('Initialize fictional Firestore employee first.');
+    const before = beforeSnap.data() as Employee;
+    if (before.status !== 'In' && before.status !== 'Out')
+      throw new Error('Fictional employee must be In or Out to run this test.');
+    const event = await queueClockEvent({
+      employeeId:TEST_EMPLOYEE_ID,deviceId:TEST_DEVICE,
+      action:before.status==='In'?'Out':'In',occurredAt:new Date().toISOString()
+    });
+    const transport = createSandboxFirestoreClockTransport(TEST_NAMESPACE);
+    let dropped = false;
+    const failedSync = await syncClockJournal(async current => {
+      const receipt = await transport(current);
+      if (current.id===event.id && !dropped) {
+        dropped=true;
+        // Simulate a response lost AFTER Firestore committed the transaction.
+        throw new Error('SIMULATED: Wi-Fi dropped after Firestore commit, before receipt reached tablet.');
+      }
+      return receipt;
+    });
+    if (!dropped || failedSync.pending!==1)
+      throw new Error('FAIL: simulated lost response was not preserved as pending.');
+    const savedReceipt = await testReceiptRef(event.id).get({ source:'server' });
+    if (!savedReceipt.exists) throw new Error('FAIL: Firestore did not commit the original event.');
+    const committedSnap = await testEmployeeRef().get({ source:'server' });
+    const committed = committedSnap.data() as Employee;
+    const committedState = JSON.stringify({
+      status:committed.status,shiftStartTime:committed.shiftStartTime,
+      history:committed.history,shifts:committed.shifts,
+      todayHours:committed.todayHours,weeklyHours:committed.weeklyHours,monthlyHours:committed.monthlyHours
+    });
+    const replay = await transport(event);
+    if (replay.result!=='already_committed' || replay.eventId!==event.id)
+      throw new Error('FAIL: backend could not identify the retry as already committed.');
+    const retrySync = await syncClockJournal(transport);
+    if (retrySync.confirmed!==1) throw new Error('FAIL: tablet did not confirm the original pending event.');
+    const afterSnap=await testEmployeeRef().get({ source:'server' });
+    const after=afterSnap.data() as Employee;
+    const finalState = JSON.stringify({
+      status:after.status,shiftStartTime:after.shiftStartTime,
+      history:after.history,shifts:after.shifts,
+      todayHours:after.todayHours,weeklyHours:after.weeklyHours,monthlyHours:after.monthlyHours
+    });
+    if (committedState!==finalState) throw new Error('FAIL: duplicate replay changed shift data or hours.');
+    await inspectRemote();
+    setStatus('PASS: Firestore committed, Wi-Fi response was lost, tablet retained pending event, retry returned already_committed, and hours remained unchanged.');
+  }
   const pending=events.filter(e=>e.status==='pending'||e.status==='syncing').length;
   const confirmed=events.filter(e=>e.status==='confirmed').length;
   const review=events.filter(e=>e.status==='needs_review').length;
@@ -161,6 +213,9 @@ export function OfflineClockingSandbox() {
         <button type="button" disabled={busy||simulateOffline}
           onClick={()=>void run(verifyIdempotentReplay)}
           className="rounded-lg bg-emerald-800 px-3 py-2 font-bold text-sm disabled:opacity-40">5. Verify duplicate replay (no extra hours)</button>
+        <button type="button" disabled={busy||simulateOffline}
+          onClick={()=>void run(verifyLostAcknowledgementRecovery)}
+          className="rounded-lg bg-violet-800 px-3 py-2 font-bold text-sm disabled:opacity-40">6. Test lost server response + safe retry</button>
       </div>
       <p className="text-xs text-gray-400">
         The Wi-Fi switch simulates a failed connection without disabling your real network.
