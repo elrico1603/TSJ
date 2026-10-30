@@ -12,6 +12,7 @@ import { gmailOAuthService, SendPOPayload } from './server/gmailOAuthService';
 import { sessionStore } from './server/sessionStore';
 import { getServerFirestore } from './server/firebaseAdmin';
 import { verifyRegisteredClockKiosk, KioskAuthorizationError } from './server/clocking/clockKioskIdentity';
+import { getClockKioskRegistryFirestore } from './server/clocking/clockKioskRegistry';
 import { processVerifiedClockEvent } from './server/clocking/clockEventProcessor';
 import { ClockValidationError } from './server/clocking/clockEventValidation';
 import { StorageUploadRequest } from './src/types/storage';
@@ -91,7 +92,9 @@ async function startServer() {
           return res.status(401).json({error:'Verified kiosk token and device enrollment required.'});
         }
         const firestore = getServerFirestore();
-        const verified = await verifyRegisteredClockKiosk(match[1], deviceId, firestore);
+        const verified = await verifyRegisteredClockKiosk(
+          match[1], deviceId, getClockKioskRegistryFirestore()
+        );
         const receipt = await processVerifiedClockEvent(
           firestore, verified.namespace, req.body?.event, verified
         );
