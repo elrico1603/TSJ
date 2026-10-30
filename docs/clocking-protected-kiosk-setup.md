@@ -64,7 +64,7 @@ not be changed during the pilot.
    This action needs Admin SDK credentials and writes only a test-device
    record to the separate registry; it will fail if the test employee does not
    exist in the isolated test namespace.
-5. The command displays a **single-use Firebase custom token**. Never paste
+5. The command displays a **short-lived Firebase custom token**. Never paste
    the token into ChatGPT, GitHub, email, issue trackers or screenshots. Enter
    it only in the localhost enrollment field and select **Enroll this test kiosk**.
 6. Select **Verify kiosk Firebase identity**. This validates the signed device
@@ -73,6 +73,38 @@ not be changed during the pilot.
    `TSJ_ENABLE_CLOCK_TEST_API=true` in a local development environment and
    verifies its identity against `tsj-clock-registry`. It is hard-disabled in
    production/Cloud Run/Netlify environments.
+
+## Read-only server identity verification
+
+The **Verify kiosk Firebase identity** button checks only the locally signed
+Firebase ID token. For an independently verified registry result, enable the
+nonproduction test API **only in a local development environment** and select
+**Verify protected server registration**. This checks the token against the
+protected registry database and returns only the test device ID, test namespace
+and number of allowed fictional employees.
+
+The status API has no production route and is not enabled until an
+administrator deliberately sets `TSJ_ENABLE_CLOCK_TEST_API=true` locally.
+It must never grant access to real clock records.
+
+## Lost device / emergency revocation
+
+If a registered test tablet is lost or compromised, the protected registry can
+be marked revoked and the dedicated Firebase Auth user disabled:
+
+```powershell
+npx tsx scripts/revoke-clock-test-device.ts --device=<DEVICE_ID>
+```
+
+This is a no-write dry run. To actually revoke a device requires the local
+operator to confirm the protected registry rules and pass `--revoke`.
+The existing TimberSmith users and production data must never be modified.
+
+**Custom-token limitation:** Firebase custom tokens expire after one hour,
+but a successful sign-in creates a refreshable authenticated session. Treat
+the enrollment token as a secret and never assume one-time presentation by
+itself guarantees single-use enforcement. For a compromised device, revoke
+the registration and disable its dedicated Firebase Auth user.
 
 ## Security design
 
