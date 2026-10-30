@@ -79,6 +79,7 @@ async function startServer() {
   // CLOSED BY DEFAULT: test-only API, never active when NODE_ENV=production.
   // No browser user PIN or anonymous Firebase session can authorize this route.
   if (process.env.NODE_ENV !== 'production' &&
+      !process.env.K_SERVICE && !process.env.NETLIFY &&
       process.env.TSJ_ENABLE_CLOCK_TEST_API === 'true') {
     app.post('/api/clocking/test-replay', async (req, res) => {
       res.setHeader('Cache-Control', 'no-store');
