@@ -17,6 +17,27 @@ export type ClockJournalEvent = {
   confirmedAt?: string;
   lastError?: string;
 };
+/**
+ * An individual device/employee stream. It is forbidden to replay the whole
+ * browser journal through a transport assigned to one worker or one kiosk.
+ */
+export type ClockEventScope = Readonly<{employeeId:string;deviceId:string}>;
+
+export function selectClockEventsForSync(
+  events:readonly ClockJournalEvent[],
+  scope:ClockEventScope
+):ClockJournalEvent[] {
+  if (!scope || typeof scope.employeeId!=='string' || !scope.employeeId.trim() ||
+      typeof scope.deviceId!=='string' || !scope.deviceId.trim()) {
+    throw new Error('Clock synchronization requires an explicit employee and device scope.');
+  }
+  return events.filter(event=>
+    event.employeeId===scope.employeeId &&
+    event.deviceId===scope.deviceId &&
+    event.status!=='confirmed'
+  ).sort((a,b)=>a.createdAt.localeCompare(b.createdAt)||a.id.localeCompare(b.id));
+}
+
 const DB_NAME = 'tsj-clocking-journal-v1';
 const STORE = 'events';
 const VERSION = 1;
@@ -87,10 +108,13 @@ export async function exportClockJournal():Promise<void>{
  * included because the tablet may have crashed after sending it.
  * The server must deduplicate by event ID before acknowledging.
  */
-export async function getUnconfirmedClockEvents():Promise<ClockJournalEvent[]> {
+export async function getUnconfirmedClockEvents(
+  scope:ClockEventScope
+):Promise<ClockJournalEvent[]> {
+  // Validate scope before accessing IndexedDB, including when journal is empty.
+  selectClockEventsForSync([],scope);
   const events=await listClockEvents();
-  return events.filter(e=>e.status!=='confirmed')
-    .sort((a,b)=>a.createdAt.localeCompare(b.createdAt));
+  return selectClockEventsForSync(events,scope);
 }
 
 /**
