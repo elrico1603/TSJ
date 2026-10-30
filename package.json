@@ -16,7 +16,8 @@
     "release": "node scripts/release.js",
     "release:patch": "node scripts/release.js --patch",
     "release:minor": "node scripts/release.js --minor",
-    "release:major": "node scripts/release.js --major"
+    "release:major": "node scripts/release.js --major",
+    "test:clocking": "tsx scripts/test-clock-event-reducer.ts && tsx scripts/test-clock-sync.ts && tsx scripts/test-clock-server-validation.ts && tsx scripts/test-clock-server-processor.ts && tsx scripts/test-clock-kiosk-identity.ts"
   },
   "dependencies": {
     "@google-cloud/storage": "^8.0.0",
