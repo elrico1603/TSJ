@@ -7,7 +7,10 @@ import {
 } from '../services/clockJournal';
 import { syncClockJournal } from '../services/clockSync';
 import { createSandboxFirestoreClockTransport } from '../services/clockFirestoreTransport';
-import { isOwnerClockPilotProfile, isClockPilotSimulatedOffline, setClockPilotSimulatedOffline } from '../services/clockPilot';
+import {
+  CLOCK_PILOT_NAMESPACE, getClockPilotId, isOwnerClockPilotProfile,
+  isClockPilotSimulatedOffline, setClockPilotSimulatedOffline
+} from '../services/clockPilot';
 
 const TEST_NAMESPACE = 'timbersmith-clock-test-local';
 const TEST_EMPLOYEE_ID = 'fictional-clock-worker-001';
@@ -24,6 +27,10 @@ export function OfflineClockingSandbox({ employees, onLaunchOwnerPilot }: {
   onLaunchOwnerPilot: (employee: Employee) => Promise<void>;
 }) {
   const [events,setEvents] = useState<ClockJournalEvent[]>([]);
+  const [pilotEvents,setPilotEvents] = useState<ClockJournalEvent[]>([]);
+  const [pilotRemoteState,setPilotRemoteState] = useState('Not checked');
+  const [pilotRemoteReceipt,setPilotRemoteReceipt] = useState('Not checked');
+  const [pilotStatus,setPilotStatus] = useState('Open the owner pilot to test with your existing PIN.');
   const [busy,setBusy] = useState(false);
   const [simulateOffline,setSimulateOffline] = useState(isClockPilotSimulatedOffline);
   const previousOffline = useRef(isClockPilotSimulatedOffline());
@@ -33,8 +40,24 @@ export function OfflineClockingSandbox({ employees, onLaunchOwnerPilot }: {
   const refresh = useCallback(async () => {
     const records = await listClockEvents();
     setEvents(records.filter(e=>e.employeeId === TEST_EMPLOYEE_ID));
-  }, []);
-  useEffect(() => { if (isLocalhost()) void refresh().catch(e=>setStatus(String(e))); }, [refresh]);
+    if (ownerProfile) {
+      const pilotId=getClockPilotId(ownerProfile.id);
+      setPilotEvents(records.filter(e=>e.employeeId===pilotId)
+        .sort((a,b)=>a.createdAt.localeCompare(b.createdAt)));
+    } else {
+      setPilotEvents([]);
+    }
+  }, [ownerProfile?.id]);
+  useEffect(() => {
+    if (!isLocalhost()) return;
+    void refresh().catch(e=>setPilotStatus('Cannot read local journal: '+String(e)));
+    // Keep local status visible when the background worker confirms a receipt.
+    // Does NOT query Firestore in this polling loop.
+    const timer=window.setInterval(()=>{
+      void refresh().catch(e=>setPilotStatus('Cannot read local journal: '+String(e)));
+    },3000);
+    return ()=>window.clearInterval(timer);
+  }, [refresh]);
   useEffect(() => {
     setClockPilotSimulatedOffline(simulateOffline);
     if (previousOffline.current && !simulateOffline && isLocalhost()) {
@@ -169,6 +192,51 @@ export function OfflineClockingSandbox({ employees, onLaunchOwnerPilot }: {
     await inspectRemote();
     setStatus('PASS: Firestore committed, Wi-Fi response was lost, tablet retained pending event, retry returned already_committed, and hours remained unchanged.');
   }
+  async function verifyOwnerPilotFirestore() {
+    if (!ownerProfile) throw new Error('Owner profile is not available.');
+    if (simulateOffline) {
+      setPilotStatus('Simulated Wi-Fi is OFF. Your local records remain on this device.');
+      return;
+    }
+    const pilotId=getClockPilotId(ownerProfile.id);
+    const dataRoot=db.collection('artifacts').doc(CLOCK_PILOT_NAMESPACE)
+      .collection('public').doc('data');
+    const snap=await dataRoot.collection('employees').doc(pilotId).get({source:'server'});
+    if (!snap.exists) {
+      setPilotRemoteState('Test employee not initialized');
+      setPilotRemoteReceipt('No test employee found');
+      return;
+    }
+    const current=snap.data() as Employee;
+    setPilotRemoteState(`${current.status} / ${current.shifts?.length||0} completed test shifts`);
+    const local=(await listClockEvents()).filter(e=>e.employeeId===pilotId)
+      .sort((a,b)=>a.createdAt.localeCompare(b.createdAt));
+    const latest=local[local.length-1];
+    if (!latest) {
+      setPilotRemoteReceipt('No owner pilot event queued yet');
+      return;
+    }
+    const receipt=await dataRoot.collection('clockEventReceipts').doc(latest.id).get({source:'server'});
+    const matched=receipt.exists && receipt.data()?.eventId===latest.id &&
+      receipt.data()?.employeeId===pilotId;
+    setPilotRemoteReceipt(matched?'MATCHED — '+latest.id.slice(0,8):'NOT FOUND — '+latest.id.slice(0,8));
+    setPilotStatus(matched
+      ? 'PASS: Firestore receipt matches your latest test event ID. Production employee record was not touched.'
+      : 'Latest local event is not yet verified on Firestore. Check Pending or Review below.');
+  }
+  async function syncOwnerPilotNow() {
+    if (simulateOffline) {
+      setPilotStatus('Simulated Wi-Fi is OFF. Reconnect it before syncing.');
+      return;
+    }
+    const summary=await syncClockJournal(createSandboxFirestoreClockTransport(CLOCK_PILOT_NAMESPACE));
+    await refresh();
+    setPilotStatus(`Sync complete: ${summary.confirmed} events confirmed, ${summary.pending} pending, ${summary.needsReview} requiring review.`);
+  }
+  const pilotPending=pilotEvents.filter(e=>e.status==='pending'||e.status==='syncing').length;
+  const pilotConfirmed=pilotEvents.filter(e=>e.status==='confirmed').length;
+  const pilotReview=pilotEvents.filter(e=>e.status==='needs_review').length;
+  const pilotLatest=pilotEvents[pilotEvents.length-1];
   const pending=events.filter(e=>e.status==='pending'||e.status==='syncing').length;
   const confirmed=events.filter(e=>e.status==='confirmed').length;
   const review=events.filter(e=>e.status==='needs_review').length;
@@ -192,6 +260,47 @@ export function OfflineClockingSandbox({ employees, onLaunchOwnerPilot }: {
           className="rounded-xl bg-sky-700 px-4 py-3 font-bold text-sm text-white disabled:opacity-40">
           Start Clocking Pilot — {ownerProfile ? ownerProfile.name+' '+ownerProfile.surname : 'Owner profile not loaded'}
         </button>
+        <div className="mt-4 border-t border-sky-500/30 pt-3 space-y-3">
+          <p className="text-xs font-black uppercase text-sky-200">YOUR CLOCKING PILOT — LOCAL JOURNAL</p>
+          <div className="flex flex-wrap gap-2 text-xs">
+            <span className="bg-amber-800/30 rounded-lg px-3 py-2">Waiting: {pilotPending}</span>
+            <span className="bg-emerald-800/30 rounded-lg px-3 py-2">Firestore confirmed: {pilotConfirmed}</span>
+            <span className="bg-red-800/30 rounded-lg px-3 py-2">Needs review: {pilotReview}</span>
+          </div>
+          <p className="text-sm font-bold text-white">
+            {pilotLatest
+              ? `Latest: ${pilotLatest.action.toUpperCase()} — ${new Date(pilotLatest.occurredAt).toLocaleString('en-ZA')} — ${pilotLatest.status==='confirmed'?'VERIFIED IN FIRESTORE':pilotLatest.status==='needs_review'?'NEEDS REVIEW':'SAVED LOCALLY / AWAITING SYNC'}`
+              : 'No personal Clocking Pilot events recorded on this browser yet.'}
+          </p>
+          {pilotLatest?.lastError && <p className="text-xs text-red-300">Sync detail: {pilotLatest.lastError}</p>}
+          <div className="flex flex-wrap gap-2">
+            <button type="button" disabled={busy||simulateOffline}
+              onClick={()=>void run(syncOwnerPilotNow)}
+              className="bg-sky-700 rounded-lg px-3 py-2 font-bold text-xs disabled:opacity-40">
+              Sync pending test records
+            </button>
+            <button type="button" disabled={busy||simulateOffline||!pilotLatest}
+              onClick={()=>void run(verifyOwnerPilotFirestore)}
+              className="bg-emerald-800 rounded-lg px-3 py-2 font-bold text-xs disabled:opacity-40">
+              Verify my last event on Firestore
+            </button>
+          </div>
+          <p className="text-xs text-sky-200">Test Firestore employee: {pilotRemoteState}</p>
+          <p className="text-xs text-sky-200">Last event receipt: {pilotRemoteReceipt}</p>
+          <p className="text-xs text-gray-300" role="status">{pilotStatus}</p>
+          <div className="max-h-48 overflow-y-auto font-mono text-xs space-y-1">
+            {pilotEvents.slice(-8).reverse().map(e=>(
+              <div className="flex flex-wrap gap-x-3 gap-y-1 border-b border-white/10 py-2" key={e.id}>
+                <span>{new Date(e.occurredAt).toLocaleString('en-ZA')}</span>
+                <span className="font-bold">{e.action}</span>
+                <span>{e.status}</span>
+                <span>ID {e.id.slice(0,8)}</span>
+                <span>Retries: {e.attempts}</span>
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-sky-300">This section shows your test events, separate from the fictional-worker sandbox below.</p>
+        </div>
       </div>
       <div className="flex flex-wrap items-center gap-2 text-xs">
         <span className="rounded-lg bg-white/10 px-3 py-2">Pending: {pending}</span>
