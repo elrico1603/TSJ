@@ -42,7 +42,7 @@ async function performSync(transport: ClockSyncTransport): Promise<ClockSyncSumm
       if (receipt.result === 'rejected') {
         await markClockEventForReview(event.id, receipt.reason || 'Server rejected clocking event.');
         summary.needsReview++;
-        continue;
+        break;
       }
       if (receipt.result !== 'committed' && receipt.result !== 'already_committed') {
         throw new Error('Unexpected server acknowledgement.');
