@@ -8,9 +8,10 @@ import {
 import { syncClockJournal } from '../services/clockSync';
 import { createSandboxFirestoreClockTransport } from '../services/clockFirestoreTransport';
 import {
-  CLOCK_PILOT_NAMESPACE, getClockPilotId, isOwnerClockPilotProfile,
+  CLOCK_PILOT_NAMESPACE, getClockPilotId, getPilotDeviceId, isOwnerClockPilotProfile,
   isClockPilotSimulatedOffline, setClockPilotSimulatedOffline
 } from '../services/clockPilot';
+import { enrollRegisteredClockKiosk, getRegisteredClockKioskIdToken } from '../services/clockKioskAuth';
 
 const TEST_NAMESPACE = 'timbersmith-clock-test-local';
 const TEST_EMPLOYEE_ID = 'fictional-clock-worker-001';
@@ -32,6 +33,10 @@ export function OfflineClockingSandbox({ employees, onLaunchOwnerPilot }: {
   const [pilotRemoteReceipt,setPilotRemoteReceipt] = useState('Not checked');
   const [pilotStatus,setPilotStatus] = useState('Open the owner pilot to test with your existing PIN.');
   const [busy,setBusy] = useState(false);
+  const [showDeviceEnrollment,setShowDeviceEnrollment] = useState(false);
+  const [enrollmentStatus,setEnrollmentStatus] = useState('Not enrolled in protected test backend.');
+  const [pilotDeviceId] = useState(() => isLocalhost() ? getPilotDeviceId() : '');
+  const enrollmentTokenInput = useRef<HTMLInputElement | null>(null);
   const [simulateOffline,setSimulateOffline] = useState(isClockPilotSimulatedOffline);
   const previousOffline = useRef(isClockPilotSimulatedOffline());
   const ownerProfile = employees.find(isOwnerClockPilotProfile);
@@ -196,6 +201,22 @@ export function OfflineClockingSandbox({ employees, onLaunchOwnerPilot }: {
     await inspectRemote();
     setStatus('PASS: Firestore committed, Wi-Fi response was lost, tablet retained pending event, retry returned already_committed, and hours remained unchanged.');
   }
+  async function enrollTestDevice() {
+    const input=enrollmentTokenInput.current;
+    const token=input?.value.trim() || '';
+    // Clear the one-time token from the UI immediately. It is NEVER put in
+    // Firestore, localStorage, React state, logs, or the recovery journal.
+    if (input) input.value='';
+    if (!token) throw new Error('Paste the administrator-issued one-time test token first.');
+    if (!pilotDeviceId) throw new Error('Local device ID unavailable.');
+    await enrollRegisteredClockKiosk(token,pilotDeviceId);
+    await getRegisteredClockKioskIdToken(pilotDeviceId);
+    setEnrollmentStatus('Firebase test kiosk identity enrolled on this browser. Protected server test must still be verified separately.');
+  }
+  async function checkTestDeviceIdentity() {
+    await getRegisteredClockKioskIdToken(pilotDeviceId);
+    setEnrollmentStatus('PASS: This browser has a valid signed test-kiosk identity bound to its device ID. Server registry verification is a separate step.');
+  }
   async function verifyOwnerPilotFirestore() {
     if (!ownerProfile) throw new Error('Owner profile is not available.');
     if (simulateOffline) {
@@ -264,6 +285,59 @@ export function OfflineClockingSandbox({ employees, onLaunchOwnerPilot }: {
           className="rounded-xl bg-sky-700 px-4 py-3 font-bold text-sm text-white disabled:opacity-40">
           Start Clocking Pilot — {ownerProfile ? ownerProfile.name+' '+ownerProfile.surname : 'Owner profile not loaded'}
         </button>
+        <div className="mt-3">
+          <button type="button" onClick={()=>setShowDeviceEnrollment(value=>!value)}
+            className="rounded-xl border border-violet-400/70 bg-violet-800 px-4 py-3 text-white text-sm font-black hover:bg-violet-700"
+            style={{minHeight:44}}>
+            {showDeviceEnrollment ? 'Hide protected kiosk setup' : 'Protected test kiosk setup (administrator only)'}
+          </button>
+          {showDeviceEnrollment && (
+            <div className="mt-3 rounded-xl border border-violet-400/40 bg-violet-950/20 p-4 space-y-3">
+              <p className="font-bold text-violet-200">Protected kiosk enrollment — test only</p>
+              <p className="text-xs text-gray-300">
+                Requires a separate locked-down Firestore registry and a one-time administrator-issued token.
+                This does not change your existing Clocking login or 4-digit employee PIN.
+              </p>
+              <div className="text-xs font-mono break-all space-y-2">
+                <p>Test device ID: <span className="text-white">{pilotDeviceId}</span></p>
+                <p>Test employee ID: <span className="text-white">
+                  {ownerProfile ? getClockPilotId(ownerProfile.id) : 'Owner profile unavailable'}
+                </span></p>
+              </div>
+              <button type="button"
+                onClick={()=>void run(async()=>{
+                  await navigator.clipboard.writeText(pilotDeviceId);
+                  setEnrollmentStatus('Test device ID copied. Do not copy a private enrollment token into chat.');
+                },'pilot')}
+                className="rounded-lg border border-sky-300/60 px-4 py-3 text-sm font-bold text-white"
+                style={{backgroundColor:'#0369a1',minHeight:44}}>
+                Copy test device ID
+              </button>
+              <label htmlFor="clock-test-enrollment-token" className="block text-xs font-bold text-gray-200">
+                One-time Firebase enrollment token (keep private)
+              </label>
+              <input id="clock-test-enrollment-token" ref={enrollmentTokenInput}
+                type="password" autoComplete="off" spellCheck={false}
+                placeholder="Paste one-time token from the administrator console"
+                className="block w-full rounded-lg border border-violet-400/50 bg-black/50 px-4 py-3 text-white text-sm" />
+              <div className="flex flex-wrap gap-2">
+                <button type="button" disabled={busy||simulateOffline}
+                  onClick={()=>void run(enrollTestDevice,'pilot')}
+                  className="rounded-lg border border-emerald-300/60 px-4 py-3 font-black text-white disabled:opacity-40"
+                  style={{backgroundColor:'#047857',minHeight:44}}>
+                  Enroll this test kiosk
+                </button>
+                <button type="button" disabled={busy||simulateOffline}
+                  onClick={()=>void run(checkTestDeviceIdentity,'pilot')}
+                  className="rounded-lg border border-violet-300/60 px-4 py-3 font-black text-white disabled:opacity-40"
+                  style={{backgroundColor:'#6d28d9',minHeight:44}}>
+                  Verify kiosk Firebase identity
+                </button>
+              </div>
+              <p role="status" className="text-xs text-violet-200">{enrollmentStatus}</p>
+            </div>
+          )}
+        </div>
         <div className="mt-4 border-t border-sky-500/30 pt-3 space-y-3">
           <p className="text-xs font-black uppercase text-sky-200">YOUR CLOCKING PILOT — LOCAL JOURNAL</p>
           <div className="flex flex-wrap gap-2 text-xs">
