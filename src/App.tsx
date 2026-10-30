@@ -33,7 +33,7 @@ import { EmployeeDetailsModal } from './components/EmployeeDetailsModal';
 import { SupervisorShiftReview } from './components/SupervisorShiftReview';
 import { SupervisorReviewSandbox } from './components/SupervisorReviewSandbox';
 import { OfflineClockingSandbox } from './components/OfflineClockingSandbox';
-import { isClockPilotLocalhost, isOwnerClockPilotProfile, isClockPilotSimulatedOffline, CLOCK_PILOT_NAMESPACE, prepareOwnerClockPilot, recordOwnerClockPilotEvent } from './services/clockPilot';
+import { isClockPilotLocalhost, isOwnerClockPilotProfile, isClockPilotSimulatedOffline, CLOCK_PILOT_NAMESPACE, getClockPilotId, getPilotDeviceId, prepareOwnerClockPilot, recordOwnerClockPilotEvent } from './services/clockPilot';
 import { createSandboxFirestoreClockTransport } from './services/clockFirestoreTransport';
 import { startClockSync } from './services/clockSync';
 import { ReportPrintTemplate } from './components/ReportPrintTemplate';
@@ -141,16 +141,18 @@ export default function App() {
   const [pilotClockEmployeeId, setPilotClockEmployeeId] = useState<string | null>(null);
   const [pilotClockNotice, setPilotClockNotice] = useState<string | null>(null);
   const pilotClockBusyRef = useRef(false);
+  const pilotOwnerProfileId = employees.find(isOwnerClockPilotProfile)?.id;
   useEffect(() => {
-    if (!isClockPilotLocalhost()) return;
-    // Test-only retry service: runs while the PWA is open and online, including
-    // after navigating away from the testing dashboard. NEVER uses live paths.
+    if (!isClockPilotLocalhost() || !pilotOwnerProfileId) return;
+    // Never sweep unrelated or fictional employee events on this browser.
+    // Start only once the designated owner's actual profile is loaded.
     return startClockSync(
       createSandboxFirestoreClockTransport(CLOCK_PILOT_NAMESPACE),
+      {employeeId:getClockPilotId(pilotOwnerProfileId),deviceId:getPilotDeviceId()},
       15000,
       () => !isClockPilotSimulatedOffline()
     );
-  }, []);
+  }, [pilotOwnerProfileId]);
   const [actionSubMenu, setActionSubMenu] = useState<'menu' | 'clocking'>('menu');
   const [showUserProfileModal, setShowUserProfileModal] = useState<boolean>(false);
   const [headerSearchQuery, setHeaderSearchQuery] = useState<string>('');
