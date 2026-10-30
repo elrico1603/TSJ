@@ -48,6 +48,12 @@ async function main(){
   console.log('PASS reused ID with changed action refused');
   await assert.rejects(()=>processVerifiedClockEvent(db,'timbersmith-terminal-v1',first,identity,now));
   console.log('PASS real production namespace blocked');
-  console.log('All 6 server transaction tests passed.');
+  await assert.rejects(()=>processVerifiedClockEvent(db,namespace,first,
+    {...identity,namespace:'timbersmith-clock-test-somewhere-else'},now));
+  console.log('PASS kiosk bound to its assigned namespace');
+  const otherUID={...identity,firebaseUid:'different-verified-kiosk-uid'};
+  assert.equal((await processVerifiedClockEvent(db,namespace,first,otherUID,now)).result,'rejected');
+  console.log('PASS duplicate receipt rejected for different verified kiosk');
+  console.log('All 8 server transaction tests passed.');
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});
