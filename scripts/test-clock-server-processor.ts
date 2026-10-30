@@ -30,21 +30,21 @@ const workerPath=root+'employees/'+employeeId;
 records.set(workerPath,{id:employeeId,name:'Test',surname:'Worker',role:'Test',personalCode:'',
   status:'Out',isArchived:false,todayHours:0,yesterdayHours:0,
   weeklyHours:0,monthlyHours:0,history:[],shifts:[],breaks:[],dateStarted:'2026-10-01'});
-const process=(value:unknown)=>processVerifiedClockEvent(db,namespace,value,identity,now);
+const processEvent=(value:unknown)=>processVerifiedClockEvent(db,namespace,value,identity,now);
 async function main(){
-  assert.equal((await process(first)).result,'committed');
+  assert.equal((await processEvent(first)).result,'committed');
   assert.equal(records.get(workerPath)?.status,'In');
   assert.equal(records.get(root+'clockEventReceipts/'+first.id)?.eventId,first.id);
   console.log('PASS atomic clock IN and receipt');
-  assert.equal((await process(first)).result,'already_committed');
+  assert.equal((await processEvent(first)).result,'already_committed');
   console.log('PASS duplicate IN ignored');
-  assert.equal((await process(second)).result,'committed');
+  assert.equal((await processEvent(second)).result,'committed');
   assert.equal(records.get(workerPath)?.shifts[0].hours,3);
   console.log('PASS OUT calculated three hours');
-  assert.equal((await process(second)).result,'already_committed');
+  assert.equal((await processEvent(second)).result,'already_committed');
   assert.equal(records.get(workerPath)?.shifts.length,1);
   console.log('PASS duplicate OUT does not increase hours');
-  assert.equal((await process({...second,action:'In'})).result,'rejected');
+  assert.equal((await processEvent({...second,action:'In'})).result,'rejected');
   console.log('PASS reused ID with changed action refused');
   await assert.rejects(()=>processVerifiedClockEvent(db,'timbersmith-terminal-v1',first,identity,now));
   console.log('PASS real production namespace blocked');
