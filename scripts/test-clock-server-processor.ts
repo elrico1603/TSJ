@@ -4,7 +4,7 @@ import { processVerifiedClockEvent } from '../server/clocking/clockEventProcesso
 const namespace='timbersmith-clock-test-processor';
 const root='artifacts/'+namespace+'/public/data/';
 const employeeId='fake-worker-001',deviceId='fake-tablet-001';
-const identity={firebaseUid:'fake-verified-user',deviceId,permittedEmployeeIds:[employeeId]};
+const identity={firebaseUid:'fake-verified-user',deviceId,namespace,permittedEmployeeIds:[employeeId]};
 const now=new Date('2026-10-30T12:00:00.000Z');
 const event=(id:string,action:'In'|'Out',time:string)=>({id,employeeId,deviceId,action,occurredAt:time});
 const first=event('ad44f7a9-640b-466a-b8fb-ad67d743a001','In','2026-10-30T06:00:00.000Z');
