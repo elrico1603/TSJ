@@ -57,6 +57,12 @@ async function main(){
     } as unknown as DecodedIdToken);
     await assert.rejects(()=>verifyRegisteredClockKiosk('fictional-token',deviceId,e.firestore,e.auth));
   });
+  await check('ordinary email-login identity cannot impersonate kiosk',async()=>{
+    const e=makeEnvironment(baseRegistration,{...baseToken,
+      firebase:{sign_in_provider:'password'}
+    } as unknown as DecodedIdToken);
+    await assert.rejects(()=>verifyRegisteredClockKiosk('fictional-token',deviceId,e.firestore,e.auth));
+  });
   await check('missing kiosk custom claim refused',async()=>{
     const e=makeEnvironment(baseRegistration,{...baseToken,
       clocking_kiosk:false
@@ -87,6 +93,6 @@ async function main(){
     const e=makeEnvironment(null);
     await assert.rejects(()=>verifyRegisteredClockKiosk('fictional-token',deviceId,e.firestore,e.auth));
   });
-  console.log('All 11 kiosk identity tests passed.');
+  console.log('All 12 kiosk identity tests passed.');
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});
