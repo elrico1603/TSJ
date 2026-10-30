@@ -81,3 +81,29 @@ export async function exportClockJournal():Promise<void>{
   document.body.appendChild(anchor);anchor.click();anchor.remove();
   setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
+
+/**
+ * Returns only events requiring server reconciliation. A 'syncing' record is
+ * included because the tablet may have crashed after sending it.
+ * The server must deduplicate by event ID before acknowledging.
+ */
+export async function getUnconfirmedClockEvents():Promise<ClockJournalEvent[]> {
+  const events=await listClockEvents();
+  return events.filter(e=>e.status!=='confirmed')
+    .sort((a,b)=>a.createdAt.localeCompare(b.createdAt));
+}
+
+/**
+ * Confirm an event only after a server acknowledgement for the exact ID.
+ * Never infer confirmation from network connectivity alone.
+ */
+export async function confirmClockEvent(id:string, acknowledgedEventId:string):Promise<void> {
+  if(!id || id!==acknowledgedEventId)throw new Error('Server acknowledgement does not match journal event.');
+  await updateClockEvent(id,{status:'confirmed',confirmedAt:new Date().toISOString(),lastError:undefined});
+}
+
+/** Keep failed events recoverable, including after an ambiguous timeout. */
+export async function markClockEventForReview(id:string, reason:string):Promise<void> {
+  if(!reason.trim())throw new Error('A failure reason is required.');
+  await updateClockEvent(id,{status:'needs_review',lastError:reason.trim()});
+}
