@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { db } from '../firebase';
 import type { Employee } from '../types';
 import {
@@ -20,6 +20,7 @@ export function OfflineClockingSandbox() {
   const [events,setEvents] = useState<ClockJournalEvent[]>([]);
   const [busy,setBusy] = useState(false);
   const [simulateOffline,setSimulateOffline] = useState(false);
+  const previousOffline = useRef(false);
   const [status,setStatus] = useState('Fictional test only. No production employee records are modified.');
   const [remoteState,setRemoteState] = useState('Not checked');
   const refresh = useCallback(async () => {
@@ -27,6 +28,13 @@ export function OfflineClockingSandbox() {
     setEvents(records.filter(e=>e.employeeId === TEST_EMPLOYEE_ID));
   }, []);
   useEffect(() => { if (isLocalhost()) void refresh().catch(e=>setStatus(String(e))); }, [refresh]);
+  useEffect(() => {
+    if (previousOffline.current && !simulateOffline && isLocalhost()) {
+      // Once the simulated Wi-Fi connection returns, replay the local queue.
+      void run(syncNow);
+    }
+    previousOffline.current = simulateOffline;
+  }, [simulateOffline]);
   if (!isLocalhost()) return null;
 
   async function run(task:()=>Promise<void>) {
