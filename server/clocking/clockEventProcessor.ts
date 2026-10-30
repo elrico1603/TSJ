@@ -30,6 +30,9 @@ export async function processVerifiedClockEvent(
     throw new Error('Clock event processor is restricted to test namespaces.');
   }
   const event=validateAuthorizedClockEvent(rawEvent,verifiedIdentity,now);
+  if (verifiedIdentity!.namespace !== namespace) {
+    throw new Error('Authenticated kiosk is not assigned to this clocking namespace.');
+  }
   const root=firestore.collection('artifacts').doc(namespace)
     .collection('public').doc('data');
   const receiptRef=root.collection('clockEventReceipts').doc(event.id);
@@ -40,7 +43,8 @@ export async function processVerifiedClockEvent(
     // All reads before writes. Firestore may rerun this callback on contention.
     const previous=await tx.get(receiptRef);
     if(previous.exists) {
-      if(!sameClockEvent(previous.data() || {},event)) {
+      if(!sameClockEvent(previous.data() || {},event) ||
+          previous.data()?.verifiedFirebaseUid !== actorUid) {
         return {result:'rejected',eventId:event.id,reason:'Event ID collision: mismatched immutable fields.'};
       }
       return {result:'already_committed',eventId:event.id};
