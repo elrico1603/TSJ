@@ -107,3 +107,64 @@ export async function markClockEventForReview(id:string, reason:string):Promise<
   if(!reason.trim())throw new Error('A failure reason is required.');
   await updateClockEvent(id,{status:'needs_review',lastError:reason.trim()});
 }
+
+/**
+ * Imports a recovery file into quarantine. Imported records NEVER auto-sync:
+ * a supervisor must verify the original device, employee, and timestamp first.
+ * Existing local records are never overwritten, and event IDs are preserved.
+ */
+export async function importClockJournal(file: File):Promise<{imported:number;skipped:number}> {
+  if(file.size>5*1024*1024)throw new Error('Clock recovery file is larger than 5 MB.');
+  const raw:unknown=JSON.parse(await file.text());
+  if(!raw || typeof raw!=='object')throw new Error('Invalid clock recovery file.');
+  const data=raw as Record<string,unknown>;
+  if(data.format!=='TSJ-CLOCK-JOURNAL' || data.version!==1 || !Array.isArray(data.events) || data.events.length>10000){
+    throw new Error('Unsupported clock recovery file format.');
+  }
+  const safeEvents:ClockJournalEvent[]=[];
+  const incomingIds=new Set<string>();
+  for(const candidate of data.events){
+    if(!candidate || typeof candidate!=='object')throw new Error('Invalid recovery event.');
+    const e=candidate as Record<string,unknown>;
+    if(typeof e.id!=='string' || !/^[a-zA-Z0-9_-]{8,128}$/.test(e.id) ||
+       typeof e.employeeId!=='string' || !e.employeeId ||
+       typeof e.deviceId!=='string' || !e.deviceId ||
+       (e.action!=='In' && e.action!=='Out' && e.action!=='Break') ||
+       typeof e.occurredAt!=='string' || !Number.isFinite(Date.parse(e.occurredAt)) ||
+       incomingIds.has(e.id)){
+      throw new Error('Invalid or duplicate event in recovery file.');
+    }
+    incomingIds.add(e.id);
+    safeEvents.push({
+      id:e.id,employeeId:e.employeeId,deviceId:e.deviceId,
+      action:e.action,occurredAt:e.occurredAt,
+      createdAt:typeof e.createdAt==='string' && Number.isFinite(Date.parse(e.createdAt))?e.createdAt:new Date().toISOString(),
+      status:'needs_review',attempts:0,
+      lastError:'Imported recovery event: supervisor verification required before replay.'
+    });
+  }
+  return withStore('readwrite',(store,resolve,reject)=>{
+    let imported=0;
+    let skipped=0;
+    let settled=0;
+    if(safeEvents.length===0){resolve({imported,skipped});return;}
+    for(const e of safeEvents){
+      const get=store.get(e.id);
+      get.onsuccess=()=>{
+        if(get.result){skipped++;}
+        else{
+          const put=store.add(e);
+          put.onsuccess=()=>{imported++;};
+          put.onerror=()=>{reject(put.error);};
+        }
+        settled++;
+        if(settled===safeEvents.length) {
+          // The transaction's oncomplete ensures all pending add requests
+          // actually commit before the import is reported successful.
+          resolve({imported,skipped});
+        }
+      };
+      get.onerror=()=>reject(get.error);
+    }
+  });
+}
