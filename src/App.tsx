@@ -32,6 +32,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { EmployeeDetailsModal } from './components/EmployeeDetailsModal';
 import { SupervisorShiftReview } from './components/SupervisorShiftReview';
 import { SupervisorReviewSandbox } from './components/SupervisorReviewSandbox';
+import { OfflineClockingSandbox } from './components/OfflineClockingSandbox';
 import { ReportPrintTemplate } from './components/ReportPrintTemplate';
 import { PrintLayout } from './components/PrintLayout';
 import { KanbanTemplateManagerPage, DEFAULT_SAMPLE_TEMPLATE } from './components/KanbanTemplateManagerPage';
@@ -2934,7 +2935,10 @@ TS Joinery Kanban System`
                 )}
 
                 {appMode === 'admin' && view === 'dashboard' && !isLocked && typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') && (
-                  <SupervisorReviewSandbox />
+                  <>
+                    <OfflineClockingSandbox />
+                    <SupervisorReviewSandbox />
+                  </>
                 )}
 
                 {appMode === 'admin' && view === 'dashboard' && !isLocked && (
