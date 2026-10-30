@@ -7,6 +7,7 @@ import {
 } from '../services/clockJournal';
 import { syncClockJournal } from '../services/clockSync';
 import { createSandboxFirestoreClockTransport } from '../services/clockFirestoreTransport';
+import { isOwnerClockPilotProfile, isClockPilotSimulatedOffline, setClockPilotSimulatedOffline } from '../services/clockPilot';
 
 const TEST_NAMESPACE = 'timbersmith-clock-test-local';
 const TEST_EMPLOYEE_ID = 'fictional-clock-worker-001';
@@ -18,11 +19,15 @@ const testDataRoot = () => db.collection('artifacts').doc(TEST_NAMESPACE)
 const testEmployeeRef = () => testDataRoot().collection('employees').doc(TEST_EMPLOYEE_ID);
 const testReceiptRef = (eventId: string) => testDataRoot().collection('clockEventReceipts').doc(eventId);
 
-export function OfflineClockingSandbox() {
+export function OfflineClockingSandbox({ employees, onLaunchOwnerPilot }: {
+  employees: Employee[];
+  onLaunchOwnerPilot: (employee: Employee) => Promise<void>;
+}) {
   const [events,setEvents] = useState<ClockJournalEvent[]>([]);
   const [busy,setBusy] = useState(false);
-  const [simulateOffline,setSimulateOffline] = useState(false);
-  const previousOffline = useRef(false);
+  const [simulateOffline,setSimulateOffline] = useState(isClockPilotSimulatedOffline);
+  const previousOffline = useRef(isClockPilotSimulatedOffline());
+  const ownerProfile = employees.find(isOwnerClockPilotProfile);
   const [status,setStatus] = useState('Fictional test only. No production employee records are modified.');
   const [remoteState,setRemoteState] = useState('Not checked');
   const refresh = useCallback(async () => {
@@ -31,6 +36,7 @@ export function OfflineClockingSandbox() {
   }, []);
   useEffect(() => { if (isLocalhost()) void refresh().catch(e=>setStatus(String(e))); }, [refresh]);
   useEffect(() => {
+    setClockPilotSimulatedOffline(simulateOffline);
     if (previousOffline.current && !simulateOffline && isLocalhost()) {
       // Once the simulated Wi-Fi connection returns, replay the local queue.
       void run(syncNow);
@@ -173,6 +179,19 @@ export function OfflineClockingSandbox() {
         <p className="text-xs text-amber-300 mt-1">
           Localhost only. Fictional employee and separate Firestore test namespace. Existing Clocking/PIN flow untouched.
         </p>
+      </div>
+      <div className="rounded-xl border border-sky-500/40 bg-sky-950/20 p-4 space-y-2">
+        <p className="text-sm font-black text-sky-300">EXISTING OWNER PROFILE — REAL PIN FLOW PILOT</p>
+        <p className="text-xs text-gray-300">
+          Opens your existing photo and personal PIN screen. All pilot clock-ins and clock-outs are saved ONLY in
+          the tablet journal and isolated test Firestore. Production employee hours remain untouched.
+        </p>
+        <button type="button"
+          disabled={busy || !ownerProfile}
+          onClick={()=>{ if(ownerProfile) void run(()=>onLaunchOwnerPilot(ownerProfile)); }}
+          className="rounded-xl bg-sky-700 px-4 py-3 font-bold text-sm text-white disabled:opacity-40">
+          Start Clocking Pilot — {ownerProfile ? ownerProfile.name+' '+ownerProfile.surname : 'Owner profile not loaded'}
+        </button>
       </div>
       <div className="flex flex-wrap items-center gap-2 text-xs">
         <span className="rounded-lg bg-white/10 px-3 py-2">Pending: {pending}</span>
