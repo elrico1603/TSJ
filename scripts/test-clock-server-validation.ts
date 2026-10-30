@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { validateAuthorizedClockEvent, sameClockEvent } from '../server/clocking/clockEventValidation';
 const person='fictional-worker-001',device='fictional-device-001';
-const identity={firebaseUid:'verified-fake-user',deviceId:device,permittedEmployeeIds:[person]};
+const identity={firebaseUid:'verified-fake-user',deviceId:device,namespace:'timbersmith-clock-test-server',permittedEmployeeIds:[person]};
 const event={id:'7b0db063-99de-4a09-8f9a-11e79d782acb',employeeId:person,deviceId:device,action:'In',occurredAt:'2026-10-30T06:00:00.000Z'};
 const now=new Date('2026-10-30T12:00:00.000Z');
 assert.equal(validateAuthorizedClockEvent(event,identity,now).id,event.id);
