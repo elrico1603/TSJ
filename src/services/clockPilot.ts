@@ -101,7 +101,7 @@ export async function prepareOwnerClockPilot(original: Employee): Promise<Employ
   };
 }
 
-function getPilotDeviceId(): string {
+export function getPilotDeviceId(): string {
   const existing=window.localStorage.getItem(CLOCK_PILOT_DEVICE_KEY);
   if(existing)return existing;
   const id=crypto.randomUUID();
