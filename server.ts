@@ -10,6 +10,10 @@ import { serverStorage, ALLOWED_IMAGE_MIME_TYPES, MAX_PHOTO_FILE_SIZE_BYTES } fr
 import { serverGemini } from './server/geminiService';
 import { gmailOAuthService, SendPOPayload } from './server/gmailOAuthService';
 import { sessionStore } from './server/sessionStore';
+import { getServerFirestore } from './server/firebaseAdmin';
+import { verifyRegisteredClockKiosk, KioskAuthorizationError } from './server/clocking/clockKioskIdentity';
+import { processVerifiedClockEvent } from './server/clocking/clockEventProcessor';
+import { ClockValidationError } from './server/clocking/clockEventValidation';
 import { StorageUploadRequest } from './src/types/storage';
 import { ChatGenerateRequest } from './src/types/chat';
 
@@ -56,7 +60,7 @@ async function startServer() {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Access-Control-Allow-Credentials', 'true');
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Clock-Device-ID');
     }
     if (req.method === 'OPTIONS') {
       return res.sendStatus(204);
@@ -71,6 +75,41 @@ async function startServer() {
   // ==========================================
   // API ROUTES (FIRST)
   // ==========================================
+
+  // CLOSED BY DEFAULT: test-only API, never active when NODE_ENV=production.
+  // No browser user PIN or anonymous Firebase session can authorize this route.
+  if (process.env.NODE_ENV !== 'production' &&
+      process.env.TSJ_ENABLE_CLOCK_TEST_API === 'true') {
+    app.post('/api/clocking/test-replay', async (req, res) => {
+      res.setHeader('Cache-Control', 'no-store');
+      try {
+        const bearer = req.header('Authorization') || '';
+        const match = /^Bearer (\S+)$/.exec(bearer);
+        const deviceId = req.header('X-Clock-Device-ID') || '';
+        if (!match || !deviceId) {
+          return res.status(401).json({error:'Verified kiosk token and device enrollment required.'});
+        }
+        const firestore = getServerFirestore();
+        const verified = await verifyRegisteredClockKiosk(match[1], deviceId, firestore);
+        const receipt = await processVerifiedClockEvent(
+          firestore, verified.namespace, req.body?.event, verified
+        );
+        return res.status(receipt.result==='rejected'?409:200).json(receipt);
+      } catch(error) {
+        if (error instanceof KioskAuthorizationError) {
+          return res.status(403).json({error:'Unapproved or invalid kiosk identity.'});
+        }
+        if (error instanceof ClockValidationError) {
+          return res.status(error.code==='unauthorized'?403:422).json({
+            error:error.message, code:error.code
+          });
+        }
+        console.error('[CLOCK TEST API] Processing failure:',
+          error instanceof Error ? error.name : 'Unknown error');
+        return res.status(503).json({error:'Clock test service unavailable. Event remains pending.'});
+      }
+    });
+  }
 
   // 1. Backend Health & Service Status
   app.get('/api/health', (req, res) => {
