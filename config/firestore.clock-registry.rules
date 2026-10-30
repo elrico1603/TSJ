@@ -1,0 +1,17 @@
+// TIMBERSMITH CLOCKING — DEDICATED NAMED FIRESTORE DATABASE ONLY
+// Database ID: tsj-clock-registry
+//
+// DO NOT DEPLOY THESE RULES TO THE LEGACY (default) FIRESTORE DATABASE.
+// This dedicated registry is controlled exclusively through Firebase Admin
+// service credentials. The browser must not access kiosk identity records.
+//
+// Deploy only after verifying the target database ID in the Firebase CLI
+// configuration or Cloud Console. Admin SDK bypasses client rules.
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
