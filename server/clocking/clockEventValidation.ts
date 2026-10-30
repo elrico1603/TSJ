@@ -14,7 +14,8 @@ export type ClockEventPayload = Pick<
 export type VerifiedKioskContext = Readonly<{
   firebaseUid: string; // Verified server-side with Firebase Admin Auth.
   deviceId: string;    // Resolved from an approved device registration, NOT request JSON.
-  permittedEmployeeIds?: readonly string[];
+  namespace: string;   // Firestore test namespace from device registration.
+  permittedEmployeeIds: readonly string[];
 }>;
 
 const ID_PATTERN=/^[A-Za-z0-9_-]{8,128}$/;
@@ -34,7 +35,8 @@ export function validateAuthorizedClockEvent(
   incoming: unknown, identity: VerifiedKioskContext | null,
   now: Date = new Date()
 ): ClockEventPayload {
-  if (!identity || !identity.firebaseUid || !identity.deviceId) {
+  if (!identity || !identity.firebaseUid || !identity.deviceId ||
+      !identity.namespace || !Array.isArray(identity.permittedEmployeeIds)) {
     throw new ClockValidationError('unauthorized','No verified, registered kiosk identity.');
   }
   if (!incoming || typeof incoming!=='object' || Array.isArray(incoming)) {
@@ -48,8 +50,7 @@ export function validateAuthorizedClockEvent(
     throw new ClockValidationError('invalid_event','Clock event fields are missing or malformed.');
   }
   if (item.deviceId!==identity.deviceId ||
-      (identity.permittedEmployeeIds &&
-       !identity.permittedEmployeeIds.includes(item.employeeId))) {
+      !identity.permittedEmployeeIds.includes(item.employeeId)) {
     throw new ClockValidationError('unauthorized','Device is not permitted to clock this employee.');
   }
   if (item.action!=='In' && item.action!=='Out') {
