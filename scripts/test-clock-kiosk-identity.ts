@@ -12,7 +12,7 @@ const baseRegistration={
   permittedEmployeeIds:['fictional-employee-01']
 };
 const baseToken={
-  uid:'test-firebase-uid',clocking_kiosk:true,
+  uid:'test-firebase-uid',clocking_kiosk:true,clocking_device_id:deviceId,
   firebase:{sign_in_provider:'custom'}
 } as unknown as DecodedIdToken;
 function makeEnvironment(
@@ -51,6 +51,12 @@ async function main(){
     } as unknown as DecodedIdToken);
     await assert.rejects(()=>verifyRegisteredClockKiosk('fictional-token',deviceId,e.firestore,e.auth));
   });
+  await check('signed token bound to a different device is refused',async()=>{
+    const e=makeEnvironment(baseRegistration,{...baseToken,
+      clocking_device_id:'other-approved-device'
+    } as unknown as DecodedIdToken);
+    await assert.rejects(()=>verifyRegisteredClockKiosk('fictional-token',deviceId,e.firestore,e.auth));
+  });
   await check('missing kiosk custom claim refused',async()=>{
     const e=makeEnvironment(baseRegistration,{...baseToken,
       clocking_kiosk:false
@@ -81,6 +87,6 @@ async function main(){
     const e=makeEnvironment(null);
     await assert.rejects(()=>verifyRegisteredClockKiosk('fictional-token',deviceId,e.firestore,e.auth));
   });
-  console.log('All 10 kiosk identity tests passed.');
+  console.log('All 11 kiosk identity tests passed.');
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});
