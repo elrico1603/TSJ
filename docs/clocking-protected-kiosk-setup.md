@@ -23,8 +23,29 @@ NEVER deploy this deny-all rule file to the existing `(default)` database; doing
 so would break the running TimberSmith application.
 
 The named database has not been created, configured or deployed by GitHub
-commits. It is an explicit future administrator setup step. Check Firebase
-project billing before creating additional databases.
+commits. It is an explicit future administrator setup step.
+
+**Billing:** Firebase currently requires the pay-as-you-go Blaze plan to create
+a second/named Firestore database. The new database has no free quota;
+document reads, writes and storage are charged by usage. Do NOT create a
+named database or upgrade billing without explicit owner approval.
+
+After approval, create the named database in **Production mode** (deny-all
+client access), then verify its exact ID and published rules. The dedicated
+`firebase.clock-registry.json` includes ONLY the named registry; do not merge
+its rule mapping into the existing application's default configuration.
+After verifying the correct project and registry database in the CLI, the
+targeted deployment command is:
+
+```powershell
+firebase deploy --config firebase.clock-registry.json --project timbersmithapp --only firestore:tsj-clock-registry
+```
+
+NEVER run this deployment before billing approval and the database exists.
+NEVER run a generic `firebase deploy --only firestore:rules` using an
+unreviewed configuration file. The production `(default)` database rules must
+not be changed during the pilot.
+
 
 ## Enrollment: future administrator procedure
 
