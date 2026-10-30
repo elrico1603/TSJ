@@ -5,7 +5,7 @@
  */
 import assert from 'node:assert/strict';
 import { replayClockEvents } from '../src/services/clockSync';
-import type { ClockSyncStorage, ClockSyncReceipt } from '../src/services/clockSync';
+import type { ClockSyncStorage } from '../src/services/clockSync';
 import type { ClockJournalEvent } from '../src/services/clockJournal';
 
 const events = (specs: Array<[string,'In'|'Out',string]>): ClockJournalEvent[] =>
