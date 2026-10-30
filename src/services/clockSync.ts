@@ -27,8 +27,9 @@ async function performSync(transport: ClockSyncTransport): Promise<ClockSyncSumm
   for (const event of events) {
     if (event.status === 'needs_review') {
       summary.needsReview++;
-      // Never automatically replay events rejected by the server.
-      continue;
+      // A rejected event can change how later In/Out events are interpreted.
+      // Stop until a supervisor resolves the earlier event.
+      break;
     }
     try {
       await updateClockEvent(event.id, { status: 'syncing', attempts: event.attempts + 1 });
@@ -36,7 +37,7 @@ async function performSync(transport: ClockSyncTransport): Promise<ClockSyncSumm
       if (receipt.eventId !== event.id) {
         await markClockEventForReview(event.id, 'Server acknowledgement event ID mismatch.');
         summary.needsReview++;
-        continue;
+        break;
       }
       if (receipt.result === 'rejected') {
         await markClockEventForReview(event.id, receipt.reason || 'Server rejected clocking event.');
