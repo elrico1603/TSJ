@@ -1,5 +1,5 @@
 import { getUnconfirmedClockEvents, confirmClockEvent, markClockEventForReview, updateClockEvent } from './clockJournal';
-import type { ClockJournalEvent } from './clockJournal';
+import type { ClockJournalEvent, ClockEventScope } from './clockJournal';
 
 /**
  * The transport must atomically commit the clock event and a unique receipt
@@ -83,25 +83,41 @@ export async function replayClockEvents(
   return summary;
 }
 
-let activeSync: Promise<ClockSyncSummary> | null = null;
-export function syncClockJournal(transport: ClockSyncTransport): Promise<ClockSyncSummary> {
-  if (activeSync) return activeSync;
-  activeSync = getUnconfirmedClockEvents()
-    .then(events => replayClockEvents(events, transport, browserClockSyncStorage))
-    .finally(() => { activeSync = null; });
-  return activeSync;
+// A single global promise can accidentally reuse the wrong employee's
+// transport. Lock only the exact device/employee stream being replayed.
+const activeSyncByScope = new Map<string,Promise<ClockSyncSummary>>();
+export function syncClockJournal(
+  transport: ClockSyncTransport,
+  scope: ClockEventScope
+): Promise<ClockSyncSummary> {
+  // Scope validation must reject missing identities even with zero records.
+  if (!scope || typeof scope.employeeId!=='string' || !scope.employeeId.trim() ||
+      typeof scope.deviceId!=='string' || !scope.deviceId.trim()) {
+    return Promise.reject(new Error('Clock sync requires employee and device scope.'));
+  }
+  const key=JSON.stringify([scope.employeeId,scope.deviceId]);
+  const active=activeSyncByScope.get(key);
+  if (active) return active;
+  const run=getUnconfirmedClockEvents(scope)
+    .then(events=>replayClockEvents(events,transport,browserClockSyncStorage));
+  const tracked=run.finally(()=>{
+    if (activeSyncByScope.get(key)===tracked) activeSyncByScope.delete(key);
+  });
+  activeSyncByScope.set(key,tracked);
+  return tracked;
 }
 
 /** Sync only after a properly authenticated transport has been supplied. */
 export function startClockSync(
   transport: ClockSyncTransport,
+  scope: ClockEventScope,
   intervalMs = 30000,
   canSync: () => boolean = () => true
 ): () => void {
   if (typeof window === 'undefined') return () => {};
   let disposed = false;
   const attempt = () => {
-    if (!disposed && navigator.onLine && canSync()) void syncClockJournal(transport).catch(console.error);
+    if (!disposed && navigator.onLine && canSync()) void syncClockJournal(transport,scope).catch(console.error);
   };
   const timer = window.setInterval(attempt, Math.max(5000, intervalMs));
   window.addEventListener('online', attempt);
