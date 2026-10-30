@@ -28,7 +28,7 @@ export function createSandboxFirestoreClockTransport(testNamespace: string): Clo
     const receiptRef = root.collection('clockEventReceipts').doc(event.id);
     const employeeRef = root.collection('employees').doc(event.employeeId);
     try {
-      return await db.runTransaction(async transaction => {
+      return await db.runTransaction<ClockSyncReceipt>(async transaction => {
         // Read all documents before any writes. Firestore may rerun this callback.
         const receiptSnap = await transaction.get(receiptRef);
         if (receiptSnap.exists) {
