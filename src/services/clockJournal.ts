@@ -148,20 +148,15 @@ export async function importClockJournal(file: File):Promise<{imported:number;sk
     let skipped=0;
     let settled=0;
     if(safeEvents.length===0){resolve({imported,skipped});return;}
+    const finishOne=()=>{ settled++; if(settled===safeEvents.length) resolve({imported,skipped}); };
     for(const e of safeEvents){
       const get=store.get(e.id);
       get.onsuccess=()=>{
-        if(get.result){skipped++;}
+        if(get.result){skipped++;finishOne();}
         else{
           const put=store.add(e);
-          put.onsuccess=()=>{imported++;};
-          put.onerror=()=>{reject(put.error);};
-        }
-        settled++;
-        if(settled===safeEvents.length) {
-          // The transaction's oncomplete ensures all pending add requests
-          // actually commit before the import is reported successful.
-          resolve({imported,skipped});
+          put.onsuccess=()=>{imported++;finishOne();};
+          put.onerror=()=>reject(put.error);
         }
       };
       get.onerror=()=>reject(get.error);
