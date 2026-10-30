@@ -33,7 +33,9 @@ import { EmployeeDetailsModal } from './components/EmployeeDetailsModal';
 import { SupervisorShiftReview } from './components/SupervisorShiftReview';
 import { SupervisorReviewSandbox } from './components/SupervisorReviewSandbox';
 import { OfflineClockingSandbox } from './components/OfflineClockingSandbox';
-import { isClockPilotLocalhost, isOwnerClockPilotProfile, prepareOwnerClockPilot, recordOwnerClockPilotEvent } from './services/clockPilot';
+import { isClockPilotLocalhost, isOwnerClockPilotProfile, isClockPilotSimulatedOffline, CLOCK_PILOT_NAMESPACE, prepareOwnerClockPilot, recordOwnerClockPilotEvent } from './services/clockPilot';
+import { createSandboxFirestoreClockTransport } from './services/clockFirestoreTransport';
+import { startClockSync } from './services/clockSync';
 import { ReportPrintTemplate } from './components/ReportPrintTemplate';
 import { PrintLayout } from './components/PrintLayout';
 import { KanbanTemplateManagerPage, DEFAULT_SAMPLE_TEMPLATE } from './components/KanbanTemplateManagerPage';
@@ -139,6 +141,16 @@ export default function App() {
   const [pilotClockEmployeeId, setPilotClockEmployeeId] = useState<string | null>(null);
   const [pilotClockNotice, setPilotClockNotice] = useState<string | null>(null);
   const pilotClockBusyRef = useRef(false);
+  useEffect(() => {
+    if (!isClockPilotLocalhost()) return;
+    // Test-only retry service: runs while the PWA is open and online, including
+    // after navigating away from the testing dashboard. NEVER uses live paths.
+    return startClockSync(
+      createSandboxFirestoreClockTransport(CLOCK_PILOT_NAMESPACE),
+      15000,
+      () => !isClockPilotSimulatedOffline()
+    );
+  }, []);
   const [actionSubMenu, setActionSubMenu] = useState<'menu' | 'clocking'>('menu');
   const [showUserProfileModal, setShowUserProfileModal] = useState<boolean>(false);
   const [headerSearchQuery, setHeaderSearchQuery] = useState<string>('');
@@ -1957,7 +1969,7 @@ TS Joinery Kanban System`
           : 'TEST CLOCKING — SAVED ON THIS DEVICE. PENDING FIRESTORE SYNC. Real employee hours were not changed.';
         setPilotClockNotice(notice);
         setSelectedEmployee(prev => prev?.id === emp.id
-          ? { ...prev, status: intent, shiftStartTime: intent === 'In' ? new Date().toISOString() : null }
+          ? { ...prev, status: intent, isClockedIn: intent === 'In', shiftStartTime: intent === 'In' ? new Date().toISOString() : null }
           : prev);
         setLastClockResult(intent);
         setView('success_screen');
