@@ -58,6 +58,10 @@ export async function verifyRegisteredClockKiosk(
   }
   if (!verified.uid || verified.clocking_kiosk !== true ||
       verified.clocking_device_id !== claimedDeviceId ||
+      typeof verified.clocking_namespace !== 'string' ||
+      !SAFE_TEST_NAMESPACE.test(verified.clocking_namespace) ||
+      !Array.isArray(verified.clocking_employee_ids) ||
+      verified.clocking_employee_ids.length === 0 ||
       verified.firebase?.sign_in_provider !== 'custom') {
     throw new KioskAuthorizationError();
   }
@@ -71,10 +75,15 @@ export async function verifyRegisteredClockKiosk(
       registration.approved!==true || registration.revoked===true ||
       registration.firebaseUid!==verified.uid ||
       !SAFE_TEST_NAMESPACE.test(registration.enabledNamespace) ||
+      registration.enabledNamespace!==verified.clocking_namespace ||
       !Array.isArray(registration.permittedEmployeeIds) ||
       registration.permittedEmployeeIds.length===0 ||
       registration.permittedEmployeeIds.some(
         id=>typeof id!=='string'||!SAFE_DEVICE_ID.test(id)
+      ) ||
+      verified.clocking_employee_ids.length!==registration.permittedEmployeeIds.length ||
+      !registration.permittedEmployeeIds.every(
+        id=>verified.clocking_employee_ids.includes(id)
       )) {
     throw new KioskAuthorizationError();
   }
