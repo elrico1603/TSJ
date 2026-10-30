@@ -1976,16 +1976,8 @@ TS Joinery Kanban System`
         setView('success_screen');
         setPersonalPinInput('');
         setSupervisorApprovalPinInput('');
-        setTimeout(() => {
-          setView('dashboard');
-          setSelectedEmployee(null);
-          setScanComplete(false);
-          setPendingAction('normal');
-          setActionSubMenu('menu');
-          setLastClockResult(null);
-          setPilotClockEmployeeId(null);
-          setPilotClockNotice(null);
-        }, 3500);
+        // Pilot confirmation remains visible until the tester deliberately
+        // returns to the dashboard. Do not silently hide a pending sync status.
       } catch(error) {
         const msg=error instanceof Error ? error.message : 'Local clocking could not be saved.';
         console.error('[CLOCKING PILOT SAVE FAILED]',error);
@@ -3637,7 +3629,10 @@ TS Joinery Kanban System`
             <PhotoAvatar emp={selectedEmployee} size={256} className="border-0 rounded-full shadow-none w-full h-full" />
           </div>
           <h2 className="text-5xl md:text-7xl font-black italic uppercase tracking-tighter text-white mb-4 leading-none">
-            {lastClockResult === 'HR_Request' ? 'REQUEST SUBMITTED' : lastClockResult === 'Archive' ? 'PROFILE ARCHIVED' : 'IDENTITY VERIFIED'}
+            {pilotClockNotice
+              ? (lastClockResult === 'In' ? 'TEST IN SAVED' : 'TEST OUT SAVED')
+              : lastClockResult === 'HR_Request' ? 'REQUEST SUBMITTED'
+              : lastClockResult === 'Archive' ? 'PROFILE ARCHIVED' : 'IDENTITY VERIFIED'}
           </h2>
           {pilotClockNotice && (
             <p role="status" className="text-amber-300 font-black uppercase tracking-wider text-sm md:text-base mb-6 max-w-xl">
@@ -3657,7 +3652,11 @@ TS Joinery Kanban System`
               setScanComplete(false); 
               setPendingAction('normal'); 
               setTimeOffReason('');
-              setLastClockResult(null); 
+              setLastClockResult(null);
+              // Clear the opt-in localhost pilot after the tester sees the result.
+              setPilotClockEmployeeId(null);
+              setPilotClockNotice(null);
+              setActionSubMenu('menu');
             }}
             className={`bg-[#151515] w-full max-w-md p-14 rounded-[5rem] text-center border-b-[16px] shadow-2xl active:scale-95 transition-all ${
               lastClockResult === 'In' || lastClockResult === 'HR_Request' ? 'border-emerald-500 hover:bg-emerald-900/20' : 
@@ -3672,6 +3671,7 @@ TS Joinery Kanban System`
             }`}>
               {lastClockResult === 'In' ? 'IN' : lastClockResult === 'Break' ? 'TIME OFF' : lastClockResult === 'HR_Request' ? 'OK' : lastClockResult === 'Archive' ? 'ARCHIVED' : 'OUT'}
             </p>
+            {pilotClockNotice && <p className="text-sm uppercase font-black text-white mt-5">Tap to return to test dashboard and verify Firestore</p>}
           </button>
         </div>
       )}
