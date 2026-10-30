@@ -280,12 +280,14 @@ export function OfflineClockingSandbox({ employees, onLaunchOwnerPilot }: {
           <div className="flex flex-wrap gap-2">
             <button type="button" disabled={busy||simulateOffline}
               onClick={()=>void run(syncOwnerPilotNow,'pilot')}
-              className="bg-sky-700 rounded-lg px-3 py-2 font-bold text-xs disabled:opacity-40">
+              className="rounded-xl border border-sky-300/60 px-4 py-3 text-sm font-black text-white shadow-lg hover:brightness-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white disabled:opacity-40"
+              style={{ backgroundColor: '#0369a1', minHeight: 44 }}> 
               Sync pending test records
             </button>
             <button type="button" disabled={busy||simulateOffline||!pilotLatest}
               onClick={()=>void run(verifyOwnerPilotFirestore,'pilot')}
-              className="bg-emerald-800 rounded-lg px-3 py-2 font-bold text-xs disabled:opacity-40">
+              className="rounded-xl border border-emerald-300/70 px-4 py-3 text-sm font-black text-white shadow-lg hover:brightness-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white disabled:opacity-40"
+              style={{ backgroundColor: '#047857', minHeight: 44 }}> 
               Verify my last event on Firestore
             </button>
           </div>
@@ -344,10 +346,12 @@ export function OfflineClockingSandbox({ employees, onLaunchOwnerPilot }: {
           className="rounded-lg bg-gray-700 px-3 py-2 font-bold text-sm disabled:opacity-40">Verify Firestore state</button>
         <button type="button" disabled={busy||simulateOffline}
           onClick={()=>void run(verifyIdempotentReplay)}
-          className="rounded-lg bg-emerald-800 px-3 py-2 font-bold text-sm disabled:opacity-40">5. Verify duplicate replay (no extra hours)</button>
+          className="rounded-xl border border-emerald-300/60 px-4 py-3 font-black text-sm text-white shadow-lg hover:brightness-110 disabled:opacity-40"
+          style={{ backgroundColor: '#047857', minHeight: 44 }}>5. Verify duplicate replay (no extra hours)</button>
         <button type="button" disabled={busy||simulateOffline}
           onClick={()=>void run(verifyLostAcknowledgementRecovery)}
-          className="rounded-lg bg-violet-800 px-3 py-2 font-bold text-sm disabled:opacity-40">6. Test lost server response + safe retry</button>
+          className="rounded-xl border border-violet-300/60 px-4 py-3 font-black text-sm text-white shadow-lg hover:brightness-110 disabled:opacity-40"
+          style={{ backgroundColor: '#6d28d9', minHeight: 44 }}>6. Test lost server response + safe retry</button>
       </div>
       <p className="text-xs text-gray-400">
         The Wi-Fi switch simulates a failed connection without disabling your real network.
