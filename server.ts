@@ -82,6 +82,33 @@ async function startServer() {
   if (process.env.NODE_ENV !== 'production' &&
       !process.env.K_SERVICE && !process.env.NETLIFY &&
       process.env.TSJ_ENABLE_CLOCK_TEST_API === 'true') {
+    // Read-only identity probe. No PINs, employee details or access tokens
+    // are returned. Requires the SAME server-verified enrolled kiosk as replay.
+    app.get('/api/clocking/test-device-status', async (req, res) => {
+      res.setHeader('Cache-Control','no-store');
+      try {
+        const match=/^Bearer (\S+)$/.exec(req.header('Authorization') || '');
+        const deviceId=req.header('X-Clock-Device-ID') || '';
+        if (!match || !deviceId) {
+          return res.status(401).json({registered:false,error:'Kiosk credentials required.'});
+        }
+        const verified=await verifyRegisteredClockKiosk(
+          match[1],deviceId,getClockKioskRegistryFirestore()
+        );
+        return res.status(200).json({
+          registered:true,
+          deviceId:verified.deviceId,
+          namespace:verified.namespace,
+          permittedEmployeeCount:verified.permittedEmployeeIds.length
+        });
+      } catch(error) {
+        if (error instanceof KioskAuthorizationError) {
+          return res.status(403).json({registered:false,error:'Kiosk registration not approved.'});
+        }
+        return res.status(503).json({registered:false,error:'Registry unavailable.'});
+      }
+    });
+
     app.post('/api/clocking/test-replay', async (req, res) => {
       res.setHeader('Cache-Control', 'no-store');
       try {
