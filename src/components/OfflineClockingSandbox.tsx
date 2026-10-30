@@ -17,6 +17,7 @@ import { verifyProtectedTestKioskWithServer } from '../services/clockRegisteredK
 const TEST_NAMESPACE = 'timbersmith-clock-test-local';
 const TEST_EMPLOYEE_ID = 'fictional-clock-worker-001';
 const TEST_DEVICE = 'fictional-local-test-tablet';
+const FICTIONAL_SCOPE = {employeeId:TEST_EMPLOYEE_ID,deviceId:TEST_DEVICE} as const;
 const isLocalhost = () => typeof window !== 'undefined' &&
   (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
 const testDataRoot = () => db.collection('artifacts').doc(TEST_NAMESPACE)
@@ -112,7 +113,7 @@ export function OfflineClockingSandbox({ employees, onLaunchOwnerPilot }: {
   }
   async function syncNow() {
     if (simulateOffline) {setStatus('Simulated Wi-Fi outage: records remain on this tablet.');return;}
-    const result=await syncClockJournal(createSandboxFirestoreClockTransport(TEST_NAMESPACE));
+    const result=await syncClockJournal(createSandboxFirestoreClockTransport(TEST_NAMESPACE),FICTIONAL_SCOPE);
     await inspectRemote();
     setStatus(`Sync: ${result.confirmed} confirmed, ${result.pending} pending, ${result.needsReview} review. Only fictional test namespace used.`);
   }
@@ -153,7 +154,7 @@ export function OfflineClockingSandbox({ employees, onLaunchOwnerPilot }: {
   async function verifyLostAcknowledgementRecovery() {
     if (simulateOffline) throw new Error('Reconnect simulated Wi-Fi before this test.');
     // Do not mix this scenario with unfinished or quarantined events.
-    const unfinished = await getUnconfirmedClockEvents();
+    const unfinished = await getUnconfirmedClockEvents(FICTIONAL_SCOPE);
     if (unfinished.length) throw new Error('Resolve existing pending or review events before the lost-response test.');
     const beforeSnap = await testEmployeeRef().get({ source:'server' });
     if (!beforeSnap.exists) throw new Error('Initialize fictional Firestore employee first.');
@@ -174,7 +175,7 @@ export function OfflineClockingSandbox({ employees, onLaunchOwnerPilot }: {
         throw new Error('SIMULATED: Wi-Fi dropped after Firestore commit, before receipt reached tablet.');
       }
       return receipt;
-    });
+    },FICTIONAL_SCOPE);
     if (!dropped || failedSync.pending!==1)
       throw new Error('FAIL: simulated lost response was not preserved as pending.');
     const savedReceipt = await testReceiptRef(event.id).get({ source:'server' });
@@ -189,7 +190,7 @@ export function OfflineClockingSandbox({ employees, onLaunchOwnerPilot }: {
     const replay = await transport(event);
     if (replay.result!=='already_committed' || replay.eventId!==event.id)
       throw new Error('FAIL: backend could not identify the retry as already committed.');
-    const retrySync = await syncClockJournal(transport);
+    const retrySync = await syncClockJournal(transport,FICTIONAL_SCOPE);
     if (retrySync.confirmed!==1) throw new Error('FAIL: tablet did not confirm the original pending event.');
     const afterSnap=await testEmployeeRef().get({ source:'server' });
     const after=afterSnap.data() as Employee;
@@ -263,7 +264,10 @@ export function OfflineClockingSandbox({ employees, onLaunchOwnerPilot }: {
       setPilotStatus('Simulated Wi-Fi is OFF. Reconnect it before syncing.');
       return;
     }
-    const summary=await syncClockJournal(createSandboxFirestoreClockTransport(CLOCK_PILOT_NAMESPACE));
+    const summary=await syncClockJournal(
+      createSandboxFirestoreClockTransport(CLOCK_PILOT_NAMESPACE),
+      {employeeId:getClockPilotId(ownerProfile.id),deviceId:pilotDeviceId}
+    );
     await refresh();
     setPilotStatus(`Sync complete: ${summary.confirmed} events confirmed, ${summary.pending} pending, ${summary.needsReview} requiring review.`);
   }
