@@ -1481,7 +1481,8 @@ TS Joinery Kanban System`
         pinStr === '1001'
       );
 
-    console.log('[CLOCKING FLOW] Selected employee:', selectedEmployee);
+    // Never log the full Employee object: it contains the existing secret PIN and personal data.
+    console.log('[CLOCKING FLOW] Selected employee ID:', selectedEmployee.id);
     console.log('[CLOCKING FLOW] Employer verification started');
     console.log('[CLOCKING FLOW] Password verification result:', isValid ? 'SUCCESS' : 'FAILED');
 
