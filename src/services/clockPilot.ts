@@ -79,7 +79,9 @@ export async function prepareOwnerClockPilot(original: Employee): Promise<Employ
     .filter(e=>e.employeeId===pilotId && (e.action==='In'||e.action==='Out'))
     .sort((a,b)=>a.createdAt.localeCompare(b.createdAt));
   const latest=events[events.length-1];
-  const status: 'In'|'Out' = latest ? latest.action : remote?.status==='In'?'In':'Out';
+  const status: 'In'|'Out' = latest?.action==='In' ? 'In'
+    : latest?.action==='Out' ? 'Out'
+    : remote?.status==='In' ? 'In' : 'Out';
   const start = status==='In'
     ? (latest?.action==='In' ? latest.occurredAt : remote?.shiftStartTime)
     : null;
