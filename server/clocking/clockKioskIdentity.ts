@@ -58,7 +58,7 @@ export async function verifyRegisteredClockKiosk(
   }
   if (!verified.uid || verified.clocking_kiosk !== true ||
       verified.clocking_device_id !== claimedDeviceId ||
-      verified.firebase?.sign_in_provider === 'anonymous') {
+      verified.firebase?.sign_in_provider !== 'custom') {
     throw new KioskAuthorizationError();
   }
 
