@@ -42,23 +42,34 @@ export async function prepareOwnerClockPilot(original: Employee): Promise<Employ
   const pilotId = getClockPilotId(original.id);
   const ref = pilotRef(pilotId);
   let remote: Employee | undefined;
-  try {
-    const snap = await ref.get({ source: 'server' });
-    if (!snap.exists) {
-      const fixture: Employee = {
-        id: pilotId, name:'Clocking', surname:'Pilot', role:'Test only',
-        personalCode:'', status:'Out', isArchived:false,
-        todayHours:0,yesterdayHours:0,weeklyHours:0,monthlyHours:0,
-        history:[],shifts:[],breaks:[], dateStarted:'2026-10-30'
-      };
-      await ref.set(fixture);
-      remote = fixture;
-    } else remote = snap.data() as Employee;
-    window.localStorage.setItem(CLOCK_PILOT_READY_KEY,pilotId);
-  } catch(error) {
-    // After an initial online setup, launch must remain possible during Wi-Fi
-    // loss. Never invent that a first-time online fixture was created.
-    if (window.localStorage.getItem(CLOCK_PILOT_READY_KEY)!==pilotId) throw error;
+  const initialized = window.localStorage.getItem(CLOCK_PILOT_READY_KEY) === pilotId;
+  if (isClockPilotSimulatedOffline() || !navigator.onLine) {
+    // On a known kiosk, do not even start a network request while offline.
+    if (!initialized) throw new Error('Open the owner pilot once online before testing offline Clocking.');
+  } else {
+    try {
+      // A disconnected Wi-Fi router can report navigator.onLine=true. Never
+      // leave the factory operator waiting indefinitely for Firebase.
+      const timeout = new Promise<never>((_,reject) => {
+        setTimeout(()=>reject(new Error('Test Firestore check timed out. Use locally initialized pilot.')),3500);
+      });
+      const snap = await Promise.race([ref.get({ source:'server' }), timeout]);
+      if (!snap.exists) {
+        const fixture: Employee = {
+          id: pilotId, name:'Clocking', surname:'Pilot', role:'Test only',
+          personalCode:'', status:'Out', isArchived:false,
+          todayHours:0,yesterdayHours:0,weeklyHours:0,monthlyHours:0,
+          history:[],shifts:[],breaks:[], dateStarted:'2026-10-30'
+        };
+        await ref.set(fixture);
+        remote = fixture;
+      } else remote = snap.data() as Employee;
+      window.localStorage.setItem(CLOCK_PILOT_READY_KEY,pilotId);
+    } catch(error) {
+      // Only fall back to the existing local journal AFTER a verified online
+      // initialization, never on a first-time uninitialized profile.
+      if (!initialized) throw error;
+    }
   }
 
   // The journal is authoritative for this single-device fictional pilot when
