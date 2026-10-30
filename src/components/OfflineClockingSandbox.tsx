@@ -260,6 +260,7 @@ export function OfflineClockingSandbox({ employees, onLaunchOwnerPilot }: {
       : 'Latest local event is not yet verified on Firestore. Check Pending or Review below.');
   }
   async function syncOwnerPilotNow() {
+    if (!ownerProfile) throw new Error('Owner pilot profile is not loaded.');
     if (simulateOffline) {
       setPilotStatus('Simulated Wi-Fi is OFF. Reconnect it before syncing.');
       return;
