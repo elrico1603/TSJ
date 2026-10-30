@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { verifyProtectedTestKioskWithServer } from '../src/services/clockRegisteredKioskSync';
+import { probeProtectedTestKiosk } from '../src/services/clockKioskServerStatus';
 
 const deviceId='test-tablet-001';
 const good={registered:true,deviceId,namespace:'timbersmith-clock-test-local',
@@ -10,7 +10,7 @@ const asResponse=(body:unknown,status=200)=>new Response(JSON.stringify(body),{
 const test=async(label:string,run:()=>Promise<void>)=>{await run();console.log('PASS '+label);};
 async function main(){
   await test('server verifies signed kiosk registration and bound namespace',async()=>{
-    const result=await verifyProtectedTestKioskWithServer(deviceId,
+    const result=await probeProtectedTestKiosk(deviceId,
       async()=> 'fictional-id-token',
       async(url,init)=>{
         assert.equal(url,'/api/clocking/test-device-status');
@@ -26,38 +26,38 @@ async function main(){
     assert.equal(result.permittedEmployeeCount,1);
   });
   await test('different server device ID must never count as verified',async()=>{
-    await assert.rejects(()=>verifyProtectedTestKioskWithServer(deviceId,
+    await assert.rejects(()=>probeProtectedTestKiosk(deviceId,
       async()=> 'fictional-id-token',
       async()=>asResponse({...good,deviceId:'someone-else-001'})),
     /did not confirm/);
   });
   await test('production namespace cannot pass the test probe',async()=>{
-    await assert.rejects(()=>verifyProtectedTestKioskWithServer(deviceId,
+    await assert.rejects(()=>probeProtectedTestKiosk(deviceId,
       async()=> 'fictional-id-token',
       async()=>asResponse({...good,namespace:'timbersmith-terminal-v1'})),
     /did not confirm/);
   });
   await test('zero assigned employees must fail',async()=>{
-    await assert.rejects(()=>verifyProtectedTestKioskWithServer(deviceId,
+    await assert.rejects(()=>probeProtectedTestKiosk(deviceId,
       async()=> 'fictional-id-token',
       async()=>asResponse({...good,permittedEmployeeCount:0})),
     /did not confirm/);
   });
   await test('invalid kiosk token cannot become registered',async()=>{
-    await assert.rejects(()=>verifyProtectedTestKioskWithServer(deviceId,
+    await assert.rejects(()=>probeProtectedTestKiosk(deviceId,
       async()=> 'fictional-id-token',
       async()=>asResponse({registered:false,error:'Unauthorized'},403)),
     /refused/);
   });
   await test('missing server endpoint cannot become registered',async()=>{
-    await assert.rejects(()=>verifyProtectedTestKioskWithServer(deviceId,
+    await assert.rejects(()=>probeProtectedTestKiosk(deviceId,
       async()=> 'fictional-id-token',
       async()=>asResponse({error:'Not Found'},404)),
     /unavailable/);
   });
   await test('missing credentials never trigger request',async()=>{
     let called=false;
-    await assert.rejects(()=>verifyProtectedTestKioskWithServer(deviceId,
+    await assert.rejects(()=>probeProtectedTestKiosk(deviceId,
       async()=> '',async()=>{called=true;return asResponse(good)}),
     /not enrolled/);
     assert.equal(called,false);
