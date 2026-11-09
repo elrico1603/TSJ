@@ -1,0 +1,8 @@
+{
+  "firestore": [
+    {
+      "database": "tsj-clock-registry",
+      "rules": "config/firestore.clock-registry.rules"
+    }
+  ]
+}

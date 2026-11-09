@@ -2,6 +2,21 @@
   command = "npm run build"
   publish = "dist"
 
+# Registered APIs must reach the backend before the SPA fallback. New server
+# and browser feature flags remain OFF until the reviewed production cutover.
+# Keep this host aligned with the independently verified Cloud Run service URL.
+[[redirects]]
+  from = "/api/clocking/production/*"
+  to = "https://ts-hub-backend-htxmiwhm7q-bq.a.run.app/api/clocking/production/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/management/*"
+  to = "https://ts-hub-backend-htxmiwhm7q-bq.a.run.app/api/management/:splat"
+  status = 200
+  force = true
+
 [[redirects]]
   from = "/*"
   to = "/index.html"

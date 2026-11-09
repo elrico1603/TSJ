@@ -19,6 +19,10 @@ export interface ShiftRecord {
 }
 
 export interface BreakRecord {
+  kind?: 'personal-time-off';
+  shiftStartedAt?: string;
+  leftAtIso?: string;
+  returnedAtIso?: string;
   id: string;
   date: string;
   leftAt: string;
@@ -49,6 +53,7 @@ export interface HistoryRecord {
 }
 
 export interface Employee {
+  clockRevision?: number;
   id: string;
   name: string;
   surname: string;

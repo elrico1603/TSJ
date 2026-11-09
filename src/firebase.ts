@@ -36,6 +36,8 @@ if (typeof window !== 'undefined') {
     }
 }
 
-export const APP_ID_PATH = 'timbersmith-terminal-v1';
+const configuredNamespace=env.VITE_APP_ID_PATH||'timbersmith-terminal-v1';
+if(configuredNamespace!=='timbersmith-terminal-v1'&&!/^timbersmith-management-test-[a-z0-9-]{3,30}$/.test(configuredNamespace))throw new Error('Invalid app namespace.');
+export const APP_ID_PATH = configuredNamespace;
 export const PRODUCTION_TS_HUB_URL = 'https://timbersmith-terminal.netlify.app/';
 export const APP_MOBILE_LINK = (env.VITE_PRODUCTION_APP_URL as string) || PRODUCTION_TS_HUB_URL;

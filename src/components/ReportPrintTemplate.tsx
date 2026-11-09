@@ -143,6 +143,7 @@ export const ReportPrintTemplate: React.FC<ReportPrintTemplateProps> = ({
                             -30min lunch break
                           </span>
                           <span className="text-emerald-700 font-mono font-black text-sm">Paid: {formatTime(item.paidHours)}</span>
+                          {item.timeOffRequiresReview && <span className="text-amber-800 text-xs">Time Off requires review</span>}
                         </div>
                       </td>
                     </tr>

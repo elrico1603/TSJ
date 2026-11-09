@@ -5,6 +5,8 @@ import { canMutateAuthOrRBAC } from './services/previewSafety';
 import { auditLogger } from './audit';
 import { permissionService } from './services/permissionService';
 import { UserDeviceAccess, PermissionAction } from './types';
+import { secureManagementEnabled,createManagementUser,registerManagementUser,updateManagementUser,signOutManagement } from './services/secureManagementClient';
+import { cleanManagementProfile } from './services/managementContract';
 
 // Pluggable test adapter for isolated unit testing
 let customDbAdapter: any = null;
@@ -29,9 +31,6 @@ export function normalizeUserEmail(email: unknown): string {
 export const USER_ROLES = ['Administrator', 'Manager', 'HR', 'Purchasing', 'Clocking Terminal', 'Stock Manager', 'Supervisor', 'Employee'] as const;
 export type UserRole = typeof USER_ROLES[number];
 
-export const SECURITY = {
-  SUPER_USER_PIN: 'Elrico1603!!'
-};
 
 // Legacy helper - In pure user-centric model, Role has ZERO authorization power.
 // These methods default to false unless evaluated against an authenticated AppUser object with user permissions.
@@ -46,6 +45,7 @@ export const rolePermissions = {
 };
 
 export interface AppUser {
+  managementOwner?: boolean;
   id: string;
   firstName?: string;
   lastName?: string;
@@ -68,19 +68,18 @@ export interface AppUser {
   userPermissions?: Record<string, Partial<Record<PermissionAction, boolean>>>;
 }
 
-export const DEFAULT_ACCOUNTS: AppUser[] = [
-  { id: 'usr-admin-elrico', firstName: 'Elrico', lastName: 'Greyvenstein', name: 'Elrico Greyvenstein', email: 'elrico@tsjoinery.co.za', role: 'Administrator', department: 'Management', physicalLocation: 'Bloemfontein', branchName: 'Bloemfontein Central', branchId: 'BFN-01', active: true, pin: SECURITY.SUPER_USER_PIN, isApproved: true, status: 'active', createdAt: '2026-01-01T00:00:00.000Z' },
-  { id: 'usr-hr-franz', firstName: 'Franz', lastName: 'Posthumus', name: 'Franz Posthumus', email: 'franz@tsjoinery.co.za', role: 'HR', department: 'Human Resources', physicalLocation: 'Bloemfontein', branchName: 'Bloemfontein Central', branchId: 'BFN-01', active: true, pin: '1234', isApproved: true, status: 'active', createdAt: '2026-01-01T00:00:00.000Z' },
-  { id: 'usr-manager-janah', firstName: 'Janah', lastName: 'Posthumus', name: 'Janah Posthumus', email: 'janah@tsjoinery.co.za', role: 'Manager', department: 'Management', physicalLocation: 'Bloemfontein', branchName: 'Bloemfontein Central', branchId: 'BFN-01', active: true, pin: '1234', isApproved: true, status: 'active', createdAt: '2026-01-01T00:00:00.000Z' },
-  { id: 'usr-admin-marietjie', firstName: 'Marietjie', lastName: 'Barkhuizen', name: 'Marietjie Barkhuizen', email: 'marietjie@tsjoinery.co.za', role: 'Administrator', department: 'Management', physicalLocation: 'Bloemfontein', branchName: 'Bloemfontein Central', branchId: 'BFN-01', active: true, pin: '1234', isApproved: true, status: 'active', createdAt: '2026-01-01T00:00:00.000Z' },
-  { id: 'usr-depot-juan', firstName: 'Juan', lastName: 'de Lange', name: 'Juan de Lange', email: 'juan@tsjoinery.co.za', role: 'Supervisor', department: 'Dispatch & Receiving', physicalLocation: 'Cape Town', branchName: 'Bloemfontein Central', branchId: 'BFN-01', active: true, pin: '1234', isApproved: true, status: 'active', createdAt: '2026-01-01T00:00:00.000Z' },
-  { id: 'usr-clocking-kiosk', firstName: 'Clocking', lastName: 'Terminal', name: 'Clocking Terminal', email: 'clocking@tsjoinery.co.za', role: 'Clocking Terminal', department: 'Clocking', physicalLocation: 'Bloemfontein', branchName: 'Bloemfontein Central', branchId: 'BFN-01', active: true, pin: '0000', isApproved: true, status: 'active', createdAt: '2026-01-01T00:00:00.000Z' }
-];
+const DEFAULT_ACCOUNTS: AppUser[] = [];
 
 const STORAGE_SESSION_KEY = 'ts_hub_active_session_v1';
 const STORAGE_CACHED_USERS_KEY = 'ts_hub_cached_users_v1';
+let verifiedManagementSession:AppUser|null=null;
+const sanitizedManagementUser=(user:AppUser):AppUser=>({...cleanManagementProfile(user,user.id),managementOwner:user.managementOwner===true});
 
 const getInitialUsersPool = (): AppUser[] => {
+  if(secureManagementEnabled){
+    if(typeof localStorage!=='undefined'){localStorage.removeItem(STORAGE_SESSION_KEY);localStorage.removeItem(STORAGE_CACHED_USERS_KEY);}
+    return [];
+  }
   try {
     if (typeof localStorage !== 'undefined') {
       const cached = localStorage.getItem(STORAGE_CACHED_USERS_KEY);
@@ -110,6 +109,7 @@ let internalUsersPool: AppUser[] = getInitialUsersPool();
 
 export const authManager = {
   getStoredSession(): AppUser | null {
+    if(secureManagementEnabled)return verifiedManagementSession;
     try {
       const raw = localStorage.getItem(STORAGE_SESSION_KEY);
       if (raw) {
@@ -142,6 +142,7 @@ export const authManager = {
   },
 
   saveSession(user: AppUser): void {
+    if(secureManagementEnabled){verifiedManagementSession=sanitizedManagementUser(user);return;}
     try {
       if (!user || !user.email) return;
       const override = permissionService.getUserOverride(user);
@@ -157,6 +158,7 @@ export const authManager = {
   },
 
   clearSession(): void {
+    if(secureManagementEnabled){verifiedManagementSession=null;internalUsersPool=[];void signOutManagement().catch(()=>{});}
     try {
       localStorage.removeItem(STORAGE_SESSION_KEY);
     } catch (e) {
@@ -181,6 +183,7 @@ export const authManager = {
   },
 
   addUserToLocalPool(newUser: AppUser): void {
+    if(secureManagementEnabled){internalUsersPool=[...internalUsersPool.filter(u=>u.id!==newUser.id),sanitizedManagementUser(newUser)];return;}
     const normalizedEmail = (newUser.email || '').toLowerCase().trim();
     const updated = internalUsersPool.filter(u => (u.email || '').toLowerCase().trim() !== normalizedEmail);
     updated.push(newUser);
@@ -193,6 +196,7 @@ export const authManager = {
   },
 
   updateUser(userId: string, updates: Partial<AppUser>): void {
+    if(secureManagementEnabled){internalUsersPool=internalUsersPool.map(u=>u.id===userId?sanitizedManagementUser({...u,...updates}):u);this.notifyUsersChanged();return;}
     try {
       let updated = false;
       internalUsersPool = internalUsersPool.map(u => {
@@ -212,6 +216,7 @@ export const authManager = {
   },
 
   setUsers(users: AppUser[]): AppUser[] {
+    if(secureManagementEnabled){internalUsersPool=(users||[]).map(sanitizedManagementUser);return internalUsersPool;}
     const canonicalMap = new Map<string, AppUser>();
 
     // Seed defaults first into the map
@@ -290,10 +295,12 @@ export const authManager = {
   },
 
   getUsers(): AppUser[] {
+    if(secureManagementEnabled)return internalUsersPool;
     return internalUsersPool.length > 0 ? internalUsersPool : DEFAULT_ACCOUNTS;
   },
 
   authenticateUser(activeUsers: AppUser[], emailOrUsername: string, pin: string): AppUser | null {
+    if(secureManagementEnabled)throw new Error('Local authentication is disabled. Server verification is required.');
     const emailStateLength = (emailOrUsername || '').length;
     const emailStateNormalizedLength = (emailOrUsername || '').trim().length;
     const pinStateLength = (pin || '').length;
@@ -521,6 +528,7 @@ export const authManager = {
   },
 
   async registerUserRequest(request: Omit<AppUser, 'status' | 'isApproved' | 'createdAt'>): Promise<AppUser> {
+    if(secureManagementEnabled)return registerManagementUser(request);
     const name = (request.name || '').trim();
     if (!name) {
       throw new Error("Full Name is required.");
@@ -580,6 +588,7 @@ export const authManager = {
   },
 
   async approvePendingUser(user: AppUser): Promise<AppUser> {
+    if(secureManagementEnabled){const approved=await updateManagementUser(user.id,{},'approve');authManager.addUserToLocalPool(approved);authManager.notifyUsersChanged();return approved;}
     const normalizedEmail = normalizeUserEmail(user.email);
     if (!normalizedEmail || !normalizedEmail.includes('@')) {
       throw new Error("A valid user email is required for approval.");
@@ -661,6 +670,7 @@ export const authManager = {
   },
 
   async createActiveUser(userData: Omit<AppUser, 'id' | 'status' | 'isApproved' | 'createdAt'>): Promise<AppUser> {
+    if(secureManagementEnabled){const created=await createManagementUser(userData);authManager.addUserToLocalPool(created);authManager.notifyUsersChanged();return created;}
     // 1. Form Validation
     const name = (userData.name || '').trim();
     const pin = (userData.pin || '').trim();
@@ -837,6 +847,7 @@ export const authManager = {
   },
 
   async deleteActiveUser(user: AppUser): Promise<void> {
+    if(secureManagementEnabled){await updateManagementUser(user.id,{},'delete');internalUsersPool=internalUsersPool.filter(u=>u.id!==user.id);authManager.notifyUsersChanged();return;}
     if (!user || !user.id) return;
 
     await auditLogger.log('USER_DELETED', user.email || 'N/A', `Deleted active user ${user.name}`);
@@ -858,6 +869,7 @@ export const authManager = {
   },
 
   async rejectPendingUser(user: AppUser): Promise<null> {
+    if(secureManagementEnabled){await updateManagementUser(user.id,{},'reject');return null;}
     await auditLogger.log('USER_REJECTED', user.email, `Rejected role ${user.role}`);
 
     const database = getAuthFirestore();
@@ -882,7 +894,6 @@ export const authManager = {
 if (typeof window !== 'undefined') {
   const globalWindow = window as any;
   globalWindow.USER_ROLES = USER_ROLES;
-  globalWindow.SECURITY = SECURITY;
   globalWindow.rolePermissions = rolePermissions;
   globalWindow.authManager = authManager;
 }

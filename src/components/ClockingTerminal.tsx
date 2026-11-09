@@ -3,6 +3,7 @@ import { Employee } from '../types';
 import { CheckCircle2, LogIn, LogOut, Coffee, ArrowRight, Camera, Clock } from 'lucide-react';
 
 interface ClockingTerminalProps {
+  clockingOnly?: boolean;
   employees: Employee[];
   setSelectedEmployee: (emp: Employee | null) => void;
   setPendingAction: (action: string) => void;
@@ -40,6 +41,7 @@ export const PhotoAvatar: React.FC<{ emp: { name?: string; photo?: string | null
 };
 
 export const ClockingTerminal: React.FC<ClockingTerminalProps> = ({
+  clockingOnly = false,
   employees,
   setSelectedEmployee,
   setPendingAction,
@@ -101,11 +103,11 @@ export const ClockingTerminal: React.FC<ClockingTerminalProps> = ({
           </div>
           <div>
             <h3 className="font-black text-base uppercase tracking-tight text-white">Artisan Attendance Terminal</h3>
-            <p className="text-xs text-gray-400 font-medium mt-0.5">Select artisan card to perform verified clocking & leave operations</p>
+            <p className="text-xs text-gray-400 font-medium mt-0.5">{clockingOnly ? 'Select artisan card to clock in or out with your existing PIN' : 'Select artisan card to perform verified clocking & leave operations'}</p>
           </div>
         </div>
 
-        <button
+        {!clockingOnly && <button
           onClick={() => {
             if (activeWorkers.length > 0) {
               setSelectedEmployee(activeWorkers[0]);
@@ -116,7 +118,7 @@ export const ClockingTerminal: React.FC<ClockingTerminalProps> = ({
         >
           <Camera size={18} />
           <span>Facial Scan</span>
-        </button>
+        </button>}
       </div>
 
       {/* Clock event confirmation alert banner */}
@@ -172,7 +174,7 @@ export const ClockingTerminal: React.FC<ClockingTerminalProps> = ({
                     : 'bg-red-500/15 text-red-400 border-red-500/20'
                 }`}>
                   {isIn ? <LogIn size={12} /> : isBreak ? <Coffee size={12} /> : <LogOut size={12} />}
-                  {isIn ? 'CLOCKED IN' : isBreak ? 'ON BREAK' : 'CLOCKED OUT'}
+                  {isBreak ? 'ON TIME OFF' : isIn ? 'CLOCKED IN' : 'CLOCKED OUT'}
                 </span>
                 <span className="text-[10px] text-gray-500 font-mono font-bold uppercase">
                   #{emp.employeeNumber || 'TSJ'}

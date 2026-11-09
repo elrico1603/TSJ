@@ -16,7 +16,13 @@
     "release": "node scripts/release.js",
     "release:patch": "node scripts/release.js --patch",
     "release:minor": "node scripts/release.js --minor",
-    "release:major": "node scripts/release.js --major"
+    "release:major": "node scripts/release.js --major",
+    "test:clocking": "tsx scripts/test-clock-event-reducer.ts && tsx scripts/test-clock-sync.ts && tsx scripts/test-clock-server-validation.ts && tsx scripts/test-clock-server-processor.ts && tsx scripts/test-clock-kiosk-identity.ts && tsx scripts/test-clock-api-transport.ts && tsx scripts/test-clock-kiosk-enrollment.ts && tsx scripts/test-clock-kiosk-server-status.ts && tsx scripts/test-clock-kiosk-revocation.ts && tsx scripts/test-clock-journal-isolation.ts",
+    "test:clocking:production": "tsx scripts/test-production-clocking.ts",
+    "test:management": "tsx scripts/test-secure-management.ts",
+    "test:management:migration": "tsx scripts/test-management-migration.ts",
+    "test:clocking:browser": "tsx scripts/test-clock-browser.ts",
+    "test:clocking:emulators": "node scripts/run-clock-emulators.mjs"
   },
   "dependencies": {
     "@google-cloud/storage": "^8.0.0",
@@ -27,6 +33,7 @@
     "express": "^4.21.2",
     "firebase": "^12.15.0",
     "firebase-admin": "^14.5.0",
+    "google-auth-library": "^10.7.0",
     "html5-qrcode": "^2.3.8",
     "jspdf": "^4.2.1",
     "lucide-react": "^0.546.0",

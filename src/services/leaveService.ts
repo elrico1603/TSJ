@@ -1,98 +1,14 @@
 import { db, APP_ID_PATH } from '../firebase';
 import { LeaveRequest, LeaveType, LeaveStatus, LeaveBalance, Employee } from '../types';
 import { notificationService } from './notificationService';
+import { countWorkingDays } from './clockWorkerRequest';
 
 const LEAVE_STORAGE_KEY = 'tsj_leave_requests_v1';
 const LEAVE_BALANCES_KEY = 'tsj_leave_balances_v1';
 
-// Pre-populate realistic initial leave records so managers and employees immediately see active leave states
-const DEFAULT_LEAVE_REQUESTS: LeaveRequest[] = [
-  {
-    id: 'LV-2026-0001',
-    employeeId: '1',
-    employeeName: 'Sipho',
-    employeeSurname: 'Mabena',
-    employeeRole: 'Artisan',
-    personalCode: '1001',
-    leaveType: 'Annual Leave',
-    startDate: '2026-08-01',
-    endDate: '2026-08-03',
-    totalDays: 3,
-    reason: 'Family gathering in Limpopo and personal travel.',
-    attachmentUrl: null,
-    attachmentName: null,
-    status: 'Pending',
-    submittedAt: '2026-07-23T08:30:00.000Z',
-    annualLeaveBalanceBefore: 15,
-    annualLeaveBalanceAfter: 12,
-    fiscalYear: 2026
-  },
-  {
-    id: 'LV-2026-0002',
-    employeeId: '2',
-    employeeName: 'Jabu',
-    employeeSurname: 'Khumalo',
-    employeeRole: 'Supervisor',
-    personalCode: '1002',
-    leaveType: 'Sick Leave',
-    startDate: '2026-07-20',
-    endDate: '2026-07-21',
-    totalDays: 2,
-    reason: 'Severe flu and fever. Doctor certificate attached.',
-    attachmentUrl: 'data:application/pdf;base64,JVBERi0xLjQKJ...',
-    attachmentName: 'Medical_Certificate_Dr_Nkosi.pdf',
-    status: 'Approved',
-    comments: 'Medical certificate verified. Rest well.',
-    submittedAt: '2026-07-19T14:10:00.000Z',
-    reviewedBy: 'Frans',
-    reviewedAt: '2026-07-19T15:30:00.000Z',
-    annualLeaveBalanceBefore: 12,
-    annualLeaveBalanceAfter: 12,
-    fiscalYear: 2026
-  },
-  {
-    id: 'LV-2026-0003',
-    employeeId: '3',
-    employeeName: 'Pieter',
-    employeeSurname: 'van der Merwe',
-    employeeRole: 'Artisan',
-    personalCode: '1003',
-    leaveType: 'Family Responsibility',
-    startDate: '2026-07-24',
-    endDate: '2026-07-24',
-    totalDays: 1,
-    reason: 'Attending to urgent family medical appointment.',
-    attachmentUrl: null,
-    attachmentName: null,
-    status: 'Approved',
-    comments: 'Approved by management.',
-    submittedAt: '2026-07-22T09:15:00.000Z',
-    reviewedBy: 'Janah',
-    reviewedAt: '2026-07-22T10:00:00.000Z',
-    annualLeaveBalanceBefore: 10,
-    annualLeaveBalanceAfter: 10,
-    fiscalYear: 2026
-  }
-];
-
 export const leaveService = {
   calculateWorkingDays(startDateStr: string, endDateStr: string): number {
-    if (!startDateStr || !endDateStr) return 0;
-    const start = new Date(startDateStr);
-    const end = new Date(endDateStr);
-    if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end) return 0;
-
-    let count = 0;
-    const cur = new Date(start);
-    while (cur <= end) {
-      const dayOfWeek = cur.getDay();
-      // 0 = Sunday, 6 = Saturday
-      if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-        count++;
-      }
-      cur.setDate(cur.getDate() + 1);
-    }
-    return count;
+    return countWorkingDays(startDateStr,endDateStr);
   },
 
   getLocalLeaveRequests(): LeaveRequest[] {
@@ -104,8 +20,7 @@ export const leaveService = {
     } catch (e) {
       console.warn('Failed to parse local leave requests:', e);
     }
-    localStorage.setItem(LEAVE_STORAGE_KEY, JSON.stringify(DEFAULT_LEAVE_REQUESTS));
-    return DEFAULT_LEAVE_REQUESTS;
+    return [];
   },
 
   saveLocalLeaveRequests(list: LeaveRequest[]) {
@@ -132,8 +47,7 @@ export const leaveService = {
     attachmentUrl?: string | null;
     attachmentName?: string | null;
   }): Promise<{ request: LeaveRequest; mailtoLink: string }> {
-    const currentList = this.getLocalLeaveRequests();
-    const uniqueId = this.generateUniqueLeaveId(currentList);
+    const uniqueId = `LV-${new Date().getFullYear()}-${crypto.randomUUID()}`;
     const workingDays = this.calculateWorkingDays(data.startDate, data.endDate);
 
     const newRequest: LeaveRequest = {
@@ -142,7 +56,6 @@ export const leaveService = {
       employeeName: data.employee.name,
       employeeSurname: data.employee.surname,
       employeeRole: data.employee.role,
-      personalCode: data.employee.personalCode,
       leaveType: data.leaveType,
       startDate: data.startDate,
       endDate: data.endDate,
@@ -157,25 +70,10 @@ export const leaveService = {
       fiscalYear: new Date().getFullYear()
     };
 
-    // 1. Local storage
-    const updated = [newRequest, ...currentList];
-    this.saveLocalLeaveRequests(updated);
-
-    // 2. Firebase persistence
-    if (db && APP_ID_PATH) {
-      try {
-        await db
-          .collection('artifacts')
-          .doc(APP_ID_PATH)
-          .collection('public')
-          .doc('leave_requests')
-          .collection('items')
-          .doc(uniqueId)
-          .set(newRequest);
-      } catch (err) {
-        console.warn('Unable to persist leave request in Firebase:', err);
-      }
-    }
+    if (!db || !APP_ID_PATH) throw new Error('Leave storage is unavailable.');
+    await db.collection('artifacts').doc(APP_ID_PATH).collection('public')
+      .doc('leave_requests').collection('items').doc(uniqueId).set(newRequest);
+    this.saveLocalLeaveRequests([newRequest, ...this.getLocalLeaveRequests().filter(item => item.id !== uniqueId)]);
 
     // 3. Global Notification Centre alert
     await notificationService.addNotification({
@@ -201,7 +99,6 @@ export const leaveService = {
       `Request ID: ${uniqueId}\n` +
       `Employee Name: ${newRequest.employeeName} ${newRequest.employeeSurname}\n` +
       `Role: ${newRequest.employeeRole}\n` +
-      `Personal Code: ${newRequest.personalCode || 'N/A'}\n` +
       `Leave Type: ${newRequest.leaveType}\n` +
       `Start Date: ${newRequest.startDate}\n` +
       `End Date: ${newRequest.endDate}\n` +

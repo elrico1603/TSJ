@@ -1,4 +1,5 @@
 import { db, APP_ID_PATH } from './firebase';
+import { secureManagementEnabled,writeManagementAudit } from './services/secureManagementClient';
 
 export interface AuditLogEntry {
   event: string;
@@ -16,6 +17,7 @@ export const auditLogger = {
   async log(event: string, actor: string, details: string = ''): Promise<AuditLogEntry> {
     const timestamp = new Date().toISOString();
     const entry: AuditLogEntry = { event, actor, details, timestamp };
+    if(secureManagementEnabled){await writeManagementAudit(event,details).catch(()=>console.warn('Client activity audit was not confirmed.'));return entry;}
 
     if (typeof window !== 'undefined') {
       const globalWindow = window as any;

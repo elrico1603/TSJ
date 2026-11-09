@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ts-hub-v3-formdata';
+const CACHE_NAME = 'ts-hub-v4-offline-clock-shell';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -19,15 +19,29 @@ const STATIC_ASSETS = [
   '/apple-touch-icon.png'
 ];
 
-// Install Event - Pre-cache essential static shell
+// Cache hashed JS/CSS BEFORE advancing the offline HTML. First-visit scripts load
+// before this worker takes control; merely caching index.html leaves a broken cold start.
+async function cacheShell(response) {
+  if (!response.ok) throw new Error('App shell unavailable');
+  const html = await response.clone().text();
+  const assets = [...html.matchAll(/(?:src|href)=["']([^"']+\.(?:js|css)(?:\?[^"']*)?)["']/g)]
+    .map(match => new URL(match[1], self.location.origin))
+    .filter(url => url.origin === self.location.origin)
+    .map(url => url.pathname + url.search);
+  const cache = await caches.open(CACHE_NAME);
+  await cache.addAll([...new Set(assets)]);
+  await cache.put('/index.html', response.clone());
+  await cache.put('/', response.clone());
+}
+
+// A failed critical asset keeps the prior worker/shell intact. Optional icons
+// must not make the entire critical pre-cache fail.
 self.addEventListener('install', (event) => {
   console.log('[Service Worker] Installing Timbersmith Terminal SW...', CACHE_NAME);
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
+    fetch('/index.html', {cache: 'no-store'}).then(cacheShell).then(() => caches.open(CACHE_NAME)).then((cache) => {
       console.log('[Service Worker] Pre-caching app shell');
-      return cache.addAll(STATIC_ASSETS).catch((err) => {
-        console.warn('[Service Worker] Pre-cache warning:', err);
-      });
+      return Promise.allSettled(STATIC_ASSETS.filter(url => url !== '/' && url !== '/index.html').map(url => cache.add(url)));
     }).then(() => {
       return self.skipWaiting();
     })
@@ -41,7 +55,7 @@ self.addEventListener('activate', (event) => {
     caches.keys().then((cacheNames) => {
       return Promise.all(
         cacheNames.map((cache) => {
-          if (cache !== CACHE_NAME) {
+          if (cache.startsWith('ts-hub-') && cache !== CACHE_NAME) {
             console.log('[Service Worker] Removing old cache:', cache);
             return caches.delete(cache);
           }
@@ -71,7 +85,7 @@ self.addEventListener('fetch', (event) => {
     url.hostname.includes('firebase.googleapis.com') ||
     url.hostname.includes('firebaseinstallations.googleapis.com') ||
     url.hostname.includes('firebaseapp.com') ||
-    url.pathname.startsWith('/api/')
+    url.pathname.startsWith('/api/') || req.headers.has('authorization') || req.cache === 'no-store'
   ) {
     return;
   }
@@ -88,9 +102,9 @@ self.addEventListener('fetch', (event) => {
         .then((networkResponse) => {
           if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
             const responseToCache = networkResponse.clone();
-            caches.open(CACHE_NAME).then((cache) => {
-              cache.put(req, responseToCache);
-            });
+            const isHtml = req.mode === 'navigate' || req.headers.get('accept')?.includes('text/html');
+            event.waitUntil((isHtml ? cacheShell(responseToCache) : caches.open(CACHE_NAME).then(cache => cache.put(req, responseToCache)))
+              .catch(err => console.warn('[Service Worker] Keeping prior offline shell:', err)));
           }
           return networkResponse;
         })
@@ -116,9 +130,7 @@ self.addEventListener('fetch', (event) => {
       return fetch(req).then((networkResponse) => {
         if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
           const responseToCache = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(req, responseToCache);
-          });
+          event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.put(req, responseToCache)));
         }
         return networkResponse;
       });

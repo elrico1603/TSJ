@@ -1,5 +1,8 @@
 import { getServerFirestore } from './firebaseAdmin';
 import { AuthoritativeUser, DOCUMENTED_EMAIL_ALIASES } from './userLookupService';
+import { getClockKioskRegistryFirestore } from './clocking/clockKioskRegistry';
+import { ManagementStore } from './management/managementStore';
+import { managementNamespace } from '../src/services/managementContract';
 
 /**
  * Server-Side RBAC & Permission Enforcement Service
@@ -327,6 +330,16 @@ export class ServerPermissionService {
    * Fails closed if conflicting or ambiguous records exist.
    */
   public async getUserPermissionOverride(user: AuthoritativeUser): Promise<OverrideLookupResult> {
+    if(process.env.TSJ_ENABLE_SECURE_MANAGEMENT==='true'){
+      try{
+        const store=new ManagementStore(getServerFirestore(),getClockKioskRegistryFirestore(),managementNamespace(process.env.TSJ_MANAGEMENT_NAMESPACE||'timbersmith-terminal-v1'));
+        const record=user?.id?await store.read(user.id):null;
+        if(!record||record.profile.email!==String(user.email||'').trim().toLowerCase()||!record.profile.active||!record.profile.isApproved)throw new Error('Identity or access changed.');
+        await store.assertProjection(record);
+        const permissions=record.owner?{...record.permissions,'Purchase Orders':{...record.permissions['Purchase Orders'],Edit:true,Approve:true}}:record.permissions;
+        return {success:true,override:{userId:record.id,userEmail:record.profile.email,permissions}};
+      }catch{return {success:false,error:'Verified management permission lookup failed.',code:'LOOKUP_FAILED'};}
+    }
     if (!user) {
       return {
         success: false,

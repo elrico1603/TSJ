@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, Fragment, useCallback } from 'react';
-import { db, auth, APP_ID_PATH, APP_MOBILE_LINK } from './firebase';
+import { db as firebaseDb, auth, APP_ID_PATH, APP_MOBILE_LINK } from './firebase';
 import {
   SA_HOLIDAYS,
   Employee,
@@ -15,11 +15,9 @@ import {
 } from './types';
 import {
   USER_ROLES,
-  SECURITY,
   rolePermissions,
   authManager,
   AppUser,
-  DEFAULT_ACCOUNTS
 } from './auth';
 import { canMutateAuthOrRBAC } from './services/previewSafety';
 import { auditLogger } from './audit';
@@ -30,6 +28,15 @@ import { WorkAnalytics } from './components/WorkAnalytics';
 import { EnrollmentModal } from './components/EnrollmentModal';
 import { SettingsModal } from './components/SettingsModal';
 import { EmployeeDetailsModal } from './components/EmployeeDetailsModal';
+import { SupervisorShiftReview } from './components/SupervisorShiftReview';
+import { SupervisorReviewSandbox } from './components/SupervisorReviewSandbox';
+import { OfflineClockingSandbox } from './components/OfflineClockingSandbox';
+import { isClockPilotLocalhost, isOwnerClockPilotProfile, isClockPilotSimulatedOffline, CLOCK_PILOT_NAMESPACE, getClockPilotId, getPilotDeviceId, prepareOwnerClockPilot, recordOwnerClockPilotEvent } from './services/clockPilot';
+import { createSandboxFirestoreClockTransport } from './services/clockFirestoreTransport';
+import { startClockSync } from './services/clockSync';
+import { productionClockEnabled } from './services/productionClockClient';
+import { secureManagementEnabled,signInManagement,currentManagementUser,updateManagementUser,verifyManagementPassword,verifyManagementEmployeePin,managementWriteProxy,ManagementHttpError,writeManagementDocument } from './services/secureManagementClient';
+const db=secureManagementEnabled?managementWriteProxy(firebaseDb):firebaseDb;
 import { ReportPrintTemplate } from './components/ReportPrintTemplate';
 import { PrintLayout } from './components/PrintLayout';
 import { KanbanTemplateManagerPage, DEFAULT_SAMPLE_TEMPLATE } from './components/KanbanTemplateManagerPage';
@@ -63,8 +70,8 @@ import { DedicatedKioskClockingTerminal } from './components/DedicatedKioskClock
 import { GeminiChatHub } from './components/chat/GeminiChatHub';
 import { MobileDeploymentView } from './components/MobileDeploymentView';
 import { gmailClientService, OAuthNotice } from './services/gmailClientService';
+import { reportPaidHours, reportPersonalTimeOff } from './services/clockBreakAttendance';
 
-const { SUPER_USER_PIN } = SECURITY;
 
 export default function App() {
   // System Version State
@@ -131,6 +138,25 @@ export default function App() {
     return session ? permissionService.getInitialModeAndView(session, getAutoLayoutMode()).view : 'dashboard';
   });
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
+  const personalPinFlow=useRef({employeeId:selectedEmployee?.id,view});
+  personalPinFlow.current={employeeId:selectedEmployee?.id,view};
+  const personalPinBusy=useRef(false);
+  // Localhost-only owner profile pilot; never connected to live payroll Clocking.
+  const [pilotClockEmployeeId, setPilotClockEmployeeId] = useState<string | null>(null);
+  const [pilotClockNotice, setPilotClockNotice] = useState<string | null>(null);
+  const pilotClockBusyRef = useRef(false);
+  const pilotOwnerProfileId = employees.find(isOwnerClockPilotProfile)?.id;
+  useEffect(() => {
+    if (!isClockPilotLocalhost() || !pilotOwnerProfileId) return;
+    // Never sweep unrelated or fictional employee events on this browser.
+    // Start only once the designated owner's actual profile is loaded.
+    return startClockSync(
+      createSandboxFirestoreClockTransport(CLOCK_PILOT_NAMESPACE),
+      {employeeId:getClockPilotId(pilotOwnerProfileId),deviceId:getPilotDeviceId()},
+      15000,
+      () => !isClockPilotSimulatedOffline()
+    );
+  }, [pilotOwnerProfileId]);
   const [actionSubMenu, setActionSubMenu] = useState<'menu' | 'clocking'>('menu');
   const [showUserProfileModal, setShowUserProfileModal] = useState<boolean>(false);
   const [headerSearchQuery, setHeaderSearchQuery] = useState<string>('');
@@ -316,6 +342,7 @@ export default function App() {
   const [borrowReason, setBorrowReason] = useState('');
   const [borrowMethod, setBorrowMethod] = useState('');
   const [borrowMonths, setBorrowMonths] = useState('1');
+  const submittingAdvance = useRef(false);
   const [archiveReason, setArchiveReason] = useState('');
   const [capturedBorrowPhoto, setCapturedBorrowPhoto] = useState<string | null>(null);
 
@@ -376,6 +403,14 @@ export default function App() {
   ) : false;
 
   const updateActiveUser = async (userId: string, updates: Partial<AppUser>) => {
+    if(secureManagementEnabled){
+      const confirmed=await updateManagementUser(userId,updates);
+      authManager.updateUser(userId,confirmed);
+      setActiveUsers(prev=>prev.map(u=>u.id===userId?confirmed:u));
+      if(currentUser?.id===userId){authManager.clearSession();setCurrentUser(null);setIsLocked(true);announce('Account updated. Please sign in again.');}
+      else announce('User successfully updated.');
+      return;
+    }
     try {
       // 1. Immediately synchronize local activeUsers state
       setActiveUsers(prev => prev.map(u => 
@@ -454,10 +489,6 @@ export default function App() {
     uifNumber: '', contactNumber: '', personalCode: '', dateStarted: '' 
   });
 
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [targetDelete, setTargetDelete] = useState<Employee | null>(null);
-  const [superPinInput, setSuperPinInput] = useState('');
-  const [superPinError, setSuperPinError] = useState(false);
 
   // Vault Archived listing
   const [showArchivedVault, setShowArchivedVault] = useState(false);
@@ -564,8 +595,9 @@ export default function App() {
   // Human Time parser
   const formatTime = (decimalHours: number): string => {
     if (!decimalHours || decimalHours < 0) return '0h 00m';
-    const hours = Math.floor(decimalHours);
-    const minutes = Math.round((decimalHours - hours) * 60);
+    const totalMinutes = Math.round(decimalHours * 60);
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
     return `${hours}h ${minutes.toString().padStart(2, '0')}m`;
   };
 
@@ -582,6 +614,15 @@ export default function App() {
     const rangeHistory = (emp.history || []).filter(h => h.date >= start && h.date <= end && !shiftDates.has(h.date));
 
     const dailyMap: Record<string, any> = {};
+    const countedTimeOff = new Set<string>();
+    const addTimeOff = (date:string, shiftStart?:string, shiftEnd?:string) => {
+      if (!shiftStart || countedTimeOff.has(shiftStart)) return;
+      countedTimeOff.add(shiftStart);
+      const timeOff = reportPersonalTimeOff(shiftStart,shiftEnd,emp.breaks || []);
+      const day = dailyMap[date];
+      day.personalTimeOffHours = (day.personalTimeOffHours || 0) + timeOff.hours;
+      day.timeOffRequiresReview = day.timeOffRequiresReview || timeOff.requiresReview;
+    };
 
     rangeHistory.forEach(h => {
       dailyMap[h.date] = {
@@ -606,6 +647,7 @@ export default function App() {
       dailyMap[s.date].clockIns.push(s.clockIn);
       dailyMap[s.date].clockOuts.push(s.clockOut);
       dailyMap[s.date].hours += s.hours;
+      addTimeOff(s.date,s.clockInDateTime,s.clockOutDateTime);
     });
 
     if (emp.status === 'In' && emp.shiftStartTime) {
@@ -627,6 +669,7 @@ export default function App() {
           dailyMap[shiftStartStr].clockIns.push(shiftStart.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
           dailyMap[shiftStartStr].clockOuts.push('Active Now');
           dailyMap[shiftStartStr].hours += liveHours;
+          addTimeOff(shiftStartStr,emp.shiftStartTime,now.toISOString());
         }
       }
     }
@@ -644,7 +687,8 @@ export default function App() {
       }
 
       const clockedHours = dayData.hours;
-      const paidHours = Math.max(0, clockedHours - 1.0); // automatically deduct coffee and lunch breaks (1 hour)
+      const personalTimeOffHours = dayData.personalTimeOffHours || 0;
+      const paidHours = reportPaidHours(clockedHours,personalTimeOffHours);
 
       return {
         date,
@@ -652,6 +696,7 @@ export default function App() {
         clockOut: clockOutDisplay,
         clockedHours,
         paidHours,
+        timeOffRequiresReview: dayData.timeOffRequiresReview,
         type: dayData.type
       };
     });
@@ -806,17 +851,49 @@ export default function App() {
         // Clean up any prior listeners before establishing fresh subscriptions
         cleanupFirestoreListeners();
 
+        if(secureManagementEnabled){
+          setIsUsersLoading(false);
+          if(!u||u.isAnonymous){
+            setIsCloudLive(false);setIsLocked(true);setCurrentUser(null);setActiveUsers([]);setPendingUsers([]);
+            if(u?.isAnonymous)void auth.signOut();
+            dismissSplash();return;
+          }
+          try{
+            const verified=await currentManagementUser();
+            if(!isMounted||auth.currentUser?.uid!==u.uid)return;
+            authManager.saveSession(verified);authManager.setUsers([verified]);
+            setCurrentUser(verified);setActiveUsers([verified]);setIsLocked(false);
+            const initial=permissionService.getInitialModeAndView(verified);
+            setAppMode(initial.appMode);setView(initial.view);
+            const token=await u.getIdTokenResult();
+            const stopAccess=db.collection('artifacts').doc(APP_ID_PATH).collection('private').doc('security').collection('access').doc(u.uid)
+              .onSnapshot(snapshot=>{
+                const access=snapshot.data();
+                if(!snapshot.exists||access?.active!==true||access?.version!==token.claims.tsj_version){
+                  authManager.clearSession();setIsLocked(true);setCurrentUser(null);setIsCloudLive(false);
+                }
+              },()=>{authManager.clearSession();setIsLocked(true);setCurrentUser(null);});
+            unsubs.push(stopAccess);
+          }catch(error){
+            setIsCloudLive(false);setIsLocked(true);setCurrentUser(null);dismissSplash();
+            if(error instanceof ManagementHttpError && [401,403].includes(error.status))void auth.signOut();
+            return;
+          }
+        }
+
         if (u) {
           setIsCloudLive(true);
 
           // 1. Listen to employees list
           try {
-            const unsubEmp = db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('data').collection('employees')
+            const canReadHr=secureManagementEnabled?permissionService.hasPermission(authManager.getStoredSession(),'Employer Registration','View'):true;
+            const unsubEmp = db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('data').collection(canReadHr?'employees':'employeeViews')
               .onSnapshot((snap) => {
                 if (!isMounted) return;
                 if (snap.empty) {
                   setEmployees([]);
                 } else {
+            setLoginError('Authentication failed. Check your username/email address and security PIN.');
                   const loaded = snap.docs.map(d => ({ id: d.id, ...d.data() } as Employee));
                   setEmployees(loaded);
                 }
@@ -838,6 +915,7 @@ export default function App() {
                 if (!snap.empty) {
                   setKanbanCards(snap.docs.map(d => ({ id: d.id, ...d.data() } as KanbanCard)));
                 } else {
+            setLoginError('Authentication failed. Check your username/email address and security PIN.');
                   setKanbanCards([]);
                 }
                 dismissSplash();
@@ -858,6 +936,7 @@ export default function App() {
                 if (!snap.empty) {
                   setKanbanTemplates(snap.docs.map(d => ({ id: d.id, ...d.data() } as KanbanTemplate)));
                 } else {
+            setLoginError('Authentication failed. Check your username/email address and security PIN.');
                   setKanbanTemplates([DEFAULT_SAMPLE_TEMPLATE]);
                 }
                 dismissSplash();
@@ -909,6 +988,7 @@ export default function App() {
                   });
                   setUserPermissions(perms);
                 } else {
+            setLoginError('Authentication failed. Check your username/email address and security PIN.');
                   // If Firestore collection is empty, load defaults for in-memory session only.
                   // NEVER write default accounts automatically to live Firestore.
                   const defaultAccounts = authManager.setUsers([]);
@@ -948,6 +1028,7 @@ export default function App() {
                 if (!snap.empty) {
                   setPendingUsers(snap.docs.map(d => ({ id: d.id, ...d.data() } as AppUser)));
                 } else {
+            setLoginError('Authentication failed. Check your username/email address and security PIN.');
                   setPendingUsers([]);
                 }
               }, err => {
@@ -973,7 +1054,7 @@ export default function App() {
 
         } else {
           dismissSplash();
-          auth.signInAnonymously().catch(e => {
+          if(!secureManagementEnabled)auth.signInAnonymously().catch(e => {
             console.warn("[AUTH INIT WARNING] Anonymous sign-in notice:", e);
           });
         }
@@ -1397,12 +1478,14 @@ TS Joinery Kanban System`
     }, 800);
   };
 
-  const submitAdminPin = () => {
+  const submitAdminPin = async () => {
     const trimmedUser = unlockUsername.trim().toLowerCase();
     const trimmedPass = unlockPassword.trim();
 
     // Validate against registered active users (Standard User-Centric Authorization)
-    const matchedUser = authManager.authenticateUser(activeUsers, trimmedUser, trimmedPass);
+    let matchedUser:AppUser|null=null;
+    try{matchedUser=secureManagementEnabled?await signInManagement(trimmedUser,trimmedPass):authManager.authenticateUser(activeUsers,trimmedUser,trimmedPass);}
+    catch{setAdminPinError(true);return;}
 
     if (matchedUser) {
       setIsLocked(false);
@@ -1445,17 +1528,21 @@ TS Joinery Kanban System`
     }
   };
 
-  const validateAndProcessPersonalPin = (pinStr: string) => {
+  const validateAndProcessPersonalPin = async (pinStr: string) => {
     if (!selectedEmployee) return;
+    if(personalPinBusy.current)return;
+    const verifyingEmployeeId=selectedEmployee.id;
 
     const expectedCode = selectedEmployee.personalCode || selectedEmployee.pin || selectedEmployee.clockPin;
-    const isValid = 
-      (expectedCode && String(pinStr) === String(expectedCode)) ||
-      pinStr === '1234' ||
-      pinStr === '0000' ||
-      pinStr === '1001';
+    // Approved Clocking PIN scope: valid existing PIN only, without universal alternatives.
+    let isValid=false;
+    personalPinBusy.current=true;
+    try{isValid=secureManagementEnabled?await verifyManagementEmployeePin(selectedEmployee.id,pinStr):Boolean(expectedCode&&String(pinStr)===String(expectedCode));}
+    catch{isValid=false;}finally{personalPinBusy.current=false;}
+    if(secureManagementEnabled&&(personalPinFlow.current.employeeId!==verifyingEmployeeId||personalPinFlow.current.view!=='personal_pin_entry'))return;
 
-    console.log('[CLOCKING FLOW] Selected employee:', selectedEmployee);
+    // Never log the full Employee object: it contains the existing secret PIN and personal data.
+    console.log('[CLOCKING FLOW] Selected employee ID:', selectedEmployee.id);
     console.log('[CLOCKING FLOW] Employer verification started');
     console.log('[CLOCKING FLOW] Password verification result:', isValid ? 'SUCCESS' : 'FAILED');
 
@@ -1497,7 +1584,17 @@ TS Joinery Kanban System`
     validateAndProcessPersonalPin(personalPinInput);
   };
 
-  const submitSupervisorPin = () => {
+  const submitSupervisorPin = async () => {
+    if(secureManagementEnabled){
+      try{
+        if(!await verifyManagementPassword(supervisorApprovalPinInput))throw new Error('Verification refused.');
+        if(pendingAction==='borrow_money')await processMoneyBorrow(selectedEmployee!);
+        else if(pendingAction==='archive')setView('emp_archive_reason');
+        else await processClockEvent(selectedEmployee!);
+        setSupervisorApprovalPinInput('');
+      }catch{setSupervisorApprovalPinError(true);setSupervisorApprovalPinInput('');}
+      return;
+    }
     const matchedSupervisor = activeUsers.find(
       u => u.isApproved && String(u.pin) === String(supervisorApprovalPinInput) && 
       (() => {
@@ -1509,7 +1606,7 @@ TS Joinery Kanban System`
       })()
     );
 
-    if (supervisorApprovalPinInput === SUPER_USER_PIN || matchedSupervisor) {
+    if (matchedSupervisor) {
       if (pendingAction === 'borrow_money') {
         processMoneyBorrow(selectedEmployee!);
       } else if (pendingAction === 'archive') {
@@ -1531,12 +1628,12 @@ TS Joinery Kanban System`
     e.preventDefault();
     setLoginError('');
     if (authView === 'login') {
-      if (isUsersLoading && (!activeUsers || activeUsers.length === 0)) {
+      if (!secureManagementEnabled && isUsersLoading && (!activeUsers || activeUsers.length === 0)) {
         setLoginError('Loading user accounts. Please wait...');
         announce('Loading user accounts. Please wait...');
         return;
       }
-      if (usersLoadError && (!activeUsers || activeUsers.length === 0)) {
+      if (!secureManagementEnabled && usersLoadError && (!activeUsers || activeUsers.length === 0)) {
         setLoginError(usersLoadError);
         announce(usersLoadError);
         return;
@@ -1583,7 +1680,7 @@ TS Joinery Kanban System`
       });
 
       try {
-        const match = authManager.authenticateUser(activeUsers, emailInput, pinInput);
+        const match = secureManagementEnabled?await signInManagement(emailInput,pinInput):authManager.authenticateUser(activeUsers,emailInput,pinInput);
         if (match) {
           if (match.active === false) {
             setLoginError('Account is currently deactivated. Contact administration.');
@@ -1657,13 +1754,12 @@ TS Joinery Kanban System`
   };
 
   const processMoneyBorrow = async (emp: Employee) => {
+    if (submittingAdvance.current) return;
+    submittingAdvance.current = true;
     try {
-      setLastClockResult('HR_Request');
-      setView('success_screen');
-      setPersonalPinInput('');
-      setSupervisorApprovalPinInput('');
-
-      const baseAmount = parseFloat(borrowAmount) || 0;
+      if (!isCloudLive) throw new Error('Connect to the internet to submit this request.');
+      const baseAmount = Number(borrowAmount);
+      if (!Number.isFinite(baseAmount) || baseAmount <= 0) throw new Error('Enter a valid amount.');
       const fee = borrowMethod === 'Immediate Payment' ? 75 : 0;
       const totalAmount = baseAmount + fee;
       const dateStr = getLocalDateString(new Date());
@@ -1683,13 +1779,30 @@ TS Joinery Kanban System`
         timestamp: new Date().toISOString() 
       };
       
-      const newAdvances = [...(emp.advances || [])]; 
-      newAdvances.push(advance);
+      const employeePath = 'artifacts/'+APP_ID_PATH+'/public/data/employees/'+emp.id;
+      let newAdvances: AdvanceRecord[];
+      if (secureManagementEnabled) {
+        newAdvances = [...(emp.advances || []),advance];
+        await writeManagementDocument(employeePath,'update',{advances:newAdvances});
+      } else {
+        const employeeRef = db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('data').collection('employees').doc(emp.id);
+        newAdvances = await db.runTransaction(async transaction => {
+          const current = (await transaction.get(employeeRef)).data() as Employee | undefined;
+          if (!current || current.isArchived || current.status === 'Archived') throw new Error('Employee is unavailable.');
+          const advances = [...(current.advances || []),advance];
+          transaction.update(employeeRef,{advances});
+          return advances;
+        });
+      }
+      setLastClockResult('HR_Request');
+      setView('success_screen');
+      setPersonalPinInput('');
+      setSupervisorApprovalPinInput('');
       
       announce("Request submitted successfully and sent through for approval.");
       auditLogger.log('HR_ADVANCE_REQUEST', emp.name || 'Unknown Artisan', `Borrow request R${totalAmount} via ${borrowMethod} submitted (Pending Approval)`);
       
-      setEmployees(prev => prev.map(e => e.id === emp.id ? { ...emp, advances: newAdvances } : e));
+      setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, advances: newAdvances } : e));
       
       // Dispatch in-app notification to admins (Frans and Jana)
       try {
@@ -1721,11 +1834,10 @@ TS Joinery Kanban System`
         setLastClockResult(null);
       }, 4000);
       
-      if (isCloudLive) {
-        await db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('data').collection('employees').doc(emp.id).update({ advances: newAdvances });
-      }
     } catch (error) {
-      console.error("Crash prevented in processMoneyBorrow:", error);
+      alert(error instanceof Error ? error.message : 'Borrow Money request could not be confirmed.');
+    } finally {
+      submittingAdvance.current = false;
     }
   };
 
@@ -1799,6 +1911,9 @@ TS Joinery Kanban System`
         monthlyHours
       };
 
+      if(secureManagementEnabled)await writeManagementDocument('artifacts/'+APP_ID_PATH+'/public/data/employees/'+emp.id,'update',
+        {...updateData,_expectedClockRevision:emp.clockRevision||0,_auditReason:notes});
+
       // Apply to local state
       setEmployees(prev => prev.map(e => e.id === emp.id ? { ...emp, ...updateData } : e));
       if (detailsEmp && detailsEmp.id === emp.id) {
@@ -1812,7 +1927,7 @@ TS Joinery Kanban System`
         `Added manual shift (${hoursVal} hrs) on ${date} for ${emp.name} ${emp.surname}. Reason: ${notes}`
       );
 
-      if (isCloudLive) {
+      if (isCloudLive && !secureManagementEnabled) {
         await db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('data').collection('employees').doc(emp.id).update(updateData);
       }
     } catch (err) {
@@ -1859,6 +1974,13 @@ TS Joinery Kanban System`
         monthlyHours
       };
 
+      if(secureManagementEnabled){
+        const evidence=window.prompt('Evidence / reason for this attendance correction (at least 10 characters):');
+        if(!evidence)return;
+        await writeManagementDocument('artifacts/'+APP_ID_PATH+'/public/data/employees/'+emp.id,'update',
+          {...updateData,_expectedClockRevision:emp.clockRevision||0,_auditReason:evidence});
+      }
+
       // Apply to state
       setEmployees(prev => prev.map(e => e.id === emp.id ? { ...emp, ...updateData } : e));
       if (detailsEmp && detailsEmp.id === emp.id) {
@@ -1872,7 +1994,7 @@ TS Joinery Kanban System`
         `Removed shift (${shiftHours} hrs) from ${date} for ${emp.name} ${emp.surname}`
       );
 
-      if (isCloudLive) {
+      if (isCloudLive && !secureManagementEnabled) {
         await db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('data').collection('employees').doc(emp.id).update(updateData);
       }
     } catch (err) {
@@ -1882,12 +2004,14 @@ TS Joinery Kanban System`
 
   const processArchive = async (emp: Employee) => {
     try {
+      const dateStr = getLocalDateString(new Date());
+      if(secureManagementEnabled)await writeManagementDocument('artifacts/'+APP_ID_PATH+'/public/data/employees/'+emp.id,'update',
+        {isArchived:true,archiveReason,status:'Archived',archiveDate:dateStr});
       setLastClockResult('Archive');
       setView('success_screen');
       setPersonalPinInput('');
       setSupervisorApprovalPinInput('');
 
-      const dateStr = getLocalDateString(new Date());
       announce(`${emp.name} has been formally archived.`);
       auditLogger.log('EMPLOYEE_ARCHIVE', emp.name || 'Unknown Artisan', `Archived with reason: ${archiveReason}`);
       
@@ -1901,16 +2025,85 @@ TS Joinery Kanban System`
         setLastClockResult(null);
       }, 3500);
       
-      if (isCloudLive) {
+      if (isCloudLive && !secureManagementEnabled) {
         await db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('data').collection('employees').doc(emp.id).update({ isArchived: true, archiveReason, status: 'Archived', archiveDate: dateStr }); 
       }
     } catch(e) {
       console.error("Crash prevented in processArchive:", e);
+      if(secureManagementEnabled)alert('Archive was not confirmed. The profile has not been marked as saved.');
     }
   };
 
-  const processClockEvent = async (emp: Employee, forcedIntent?: 'In' | 'Out' | 'Break') => {
+  const launchOwnerClockPilot = async (original: Employee) => {
+    if (!isClockPilotLocalhost() || !isOwnerClockPilotProfile(original)) {
+      throw new Error('Owner profile pilot is restricted to localhost.');
+    }
+    const pilot = await prepareOwnerClockPilot(original);
+    setPilotClockEmployeeId(pilot.id);
+    setPilotClockNotice(null);
+    setSelectedEmployee(pilot);
+    setPersonalPinInput('');
+    setPersonalPinError(false);
+    setPendingAction('hub_login');
+    setActionSubMenu('menu');
+    setView('personal_pin_entry');
+  };
+
+  const processClockEvent = async (emp: Employee, forcedIntent?: 'In' | 'Out' | 'Break', returnFromTimeOff = false) => {
+    if (productionClockEnabled || secureManagementEnabled) {
+      alert('Use /clocking-kiosk for Clocking and Time Off.');
+      return;
+    }
+    // An opt-in localhost pilot follows the EXISTING personal PIN and Clocking
+    // screens but writes ONLY to its isolated test journal and test Firestore.
+    if (isClockPilotLocalhost() && pilotClockEmployeeId === emp.id) {
+      if (pilotClockBusyRef.current) return;
+      pilotClockBusyRef.current = true;
+      try {
+        if (returnFromTimeOff || !['normal', 'hub_login', 'clock_toggle'].includes(pendingAction) || forcedIntent === 'Break') {
+          throw new Error('This pilot tests normal clock-in/out only, not breaks or special requests.');
+        }
+        const intent: 'In' | 'Out' = forcedIntent === 'In' || forcedIntent === 'Out'
+          ? forcedIntent
+          : emp.status === 'In' ? 'Out' : 'In';
+        const receipt = await recordOwnerClockPilotEvent(emp, intent);
+        const notice = receipt.sync === 'confirmed'
+          ? 'TEST CLOCKING — VERIFIED IN TEST FIRESTORE. Real employee hours were not changed.'
+          : 'TEST CLOCKING — SAVED ON THIS DEVICE. PENDING FIRESTORE SYNC. Real employee hours were not changed.';
+        setPilotClockNotice(notice);
+        setSelectedEmployee(prev => prev?.id === emp.id
+          ? { ...prev, status: intent, isClockedIn: intent === 'In', shiftStartTime: intent === 'In' ? new Date().toISOString() : null }
+          : prev);
+        setLastClockResult(intent);
+        setView('success_screen');
+        setPersonalPinInput('');
+        setSupervisorApprovalPinInput('');
+        // Pilot confirmation remains visible until the tester deliberately
+        // returns to the dashboard. Do not silently hide a pending sync status.
+      } catch(error) {
+        const msg=error instanceof Error ? error.message : 'Local clocking could not be saved.';
+        console.error('[CLOCKING PILOT SAVE FAILED]',error);
+        alert('TEST CLOCKING NOT RECORDED: '+msg);
+        setView('dashboard');
+        setScanComplete(false);
+        setSelectedEmployee(null);
+        setPilotClockEmployeeId(null);
+        setPilotClockNotice(null);
+      } finally {
+        pilotClockBusyRef.current = false;
+      }
+      return;
+    }
+
     try {
+      // Preview builds must never write to the live employee collection.
+      // Use the same Firebase project with a separately configured APP_ID_PATH for tests.
+      // Production clocking is unchanged until the reviewed branch is deployed.
+      const host = typeof window !== 'undefined' ? window.location.hostname : '';
+      const isTestHost = host === 'localhost' || host === '127.0.0.1' || host.includes('deploy-preview-') || host.includes('branch-');
+      if (isTestHost && APP_ID_PATH === 'timbersmith-terminal-v1') {
+        throw new Error('Test and preview clocking is blocked from production employee records.');
+      }
       const clockTime = new Date();
       let newStatus: 'In' | 'Out' | 'Break' | 'Archived';
       let actionMsg;
@@ -1918,10 +2111,16 @@ TS Joinery Kanban System`
       let staleShiftRecordToArchive: ShiftRecord | null = null;
 
       // 1. Determine Intent
-      if (pendingAction === 'time_off_out') {
+      const returning = returnFromTimeOff || pendingAction === 'time_off_in';
+      if (emp.status === 'Break' && !returning) throw new Error('Select Return from Time Off first.');
+      if (pendingAction === 'time_off_out' && !returning) {
+        if (emp.status !== 'In' || !emp.shiftStartTime || !timeOffReason.trim()) {
+          throw new Error('Time Off requires a reason and an open shift.');
+        }
         newStatus = 'Break';
         actionMsg = `Time off logged: ${timeOffReason}`;
-      } else if (pendingAction === 'time_off_in') {
+      } else if (returning) {
+        if (emp.status !== 'Break' || !emp.shiftStartTime) throw new Error('No open Time Off to return from.');
         newStatus = 'In';
         actionMsg = `Returned to work.`;
       } else if (forcedIntent) {
@@ -1942,6 +2141,7 @@ TS Joinery Kanban System`
               newStatus = 'Out';
               actionMsg = `You have clocked out.`;
             } else {
+            setLoginError('Authentication failed. Check your username/email address and security PIN.');
               // STALE OPEN SHIFT DETECTED (> 24 hours or cross-day gap without clock-out)
               // Fail-safe requirement: DO NOT pair with old shift. DO NOT invent clock-out time.
               // Preserve original open shift metadata, isolate it, and start new legitimate shift.
@@ -1965,6 +2165,7 @@ TS Joinery Kanban System`
               auditLogger.log('STALE_SHIFT_ISOLATED', emp.name || 'Artisan', `Open shift from ${startDateStr} (${shiftStart.toLocaleTimeString()}) was detected as stale on ${todayDateStr} and isolated for review.`);
             }
           } else {
+            setLoginError('Authentication failed. Check your username/email address and security PIN.');
             // Clocked in but missing shiftStartTime timestamp
             newStatus = 'Out';
             actionMsg = `You have clocked out.`;
@@ -1977,50 +2178,34 @@ TS Joinery Kanban System`
       
       console.log('[Clocking Debug] Attendance record found for:', emp.name, 'Current status:', emp.status, 'Forced intent:', forcedIntent, 'New calculated status:', newStatus, 'Stale recovery:', isStaleRecoveryAction);
       
-      setLastClockResult(newStatus);
-      setView('success_screen'); 
-      setPersonalPinInput('');
-      setSupervisorApprovalPinInput('');
-
-      if (newStatus === 'In') {
-        handleClockInSuccess(emp.name || 'Artisan');
-      } else if (newStatus === 'Out') {
-        handleClockOutSuccess(emp.name || 'Artisan');
-      } else {
-        announce(actionMsg);
-      }
-      auditLogger.log('CLOCK_EVENT', emp.name || 'Unknown Artisan', actionMsg);
+      if (!isCloudLive) throw new Error('Cloud connection unavailable. Clocking NOT saved.');
 
       let updateData: Partial<Employee> = { status: newStatus, lastClock: clockTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
 
       if (newStatus === 'Break') {
-        updateData.currentBreakReason = timeOffReason;
+        updateData.currentBreakReason = timeOffReason.trim();
         const breaks = [...(emp.breaks || [])];
         breaks.push({
           id: Date.now().toString(),
           date: getLocalDateString(clockTime),
           leftAt: clockTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           returnedAt: null,
-          reason: timeOffReason
+          reason: timeOffReason.trim(),
+          ...(emp.shiftStartTime ? {kind:'personal-time-off' as const,shiftStartedAt:emp.shiftStartTime,leftAtIso:clockTime.toISOString()} : {})
         });
         updateData.breaks = breaks;
       } else if (newStatus === 'In') {
         updateData.currentBreakReason = null;
-        if (pendingAction === 'time_off_in') {
+        if (returning) {
           const breaks = [...(emp.breaks || [])];
-          if (breaks.length > 0) {
-            const lastBreakIdx = breaks.map(b => b.returnedAt).lastIndexOf(null);
-            if (lastBreakIdx > -1) {
-              breaks[lastBreakIdx] = { ...breaks[lastBreakIdx], returnedAt: clockTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
-            } else {
-              breaks[breaks.length - 1] = { ...breaks[breaks.length - 1], returnedAt: clockTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
-            }
-          }
+          const lastBreakIdx = breaks.map(b => b.returnedAt).lastIndexOf(null);
+          if (lastBreakIdx < 0) throw new Error('Open Time Off record missing. Ask a supervisor to review.');
+          breaks[lastBreakIdx] = { ...breaks[lastBreakIdx], returnedAt: clockTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), returnedAtIso:clockTime.toISOString() };
           updateData.breaks = breaks;
         }
 
         // Handle starting new shift
-        updateData.shiftStartTime = clockTime.toISOString();
+        if (!returning) updateData.shiftStartTime = clockTime.toISOString();
 
         // If this clock-in was recovering from a stale open shift, append the isolated stale record to shifts
         if (isStaleRecoveryAction && staleShiftRecordToArchive) {
@@ -2075,26 +2260,58 @@ TS Joinery Kanban System`
         updateData.shiftStartTime = null;
       }
 
-      setEmployees(prev => prev.map(e => e.id === emp.id ? { ...emp, ...updateData } : e));
-      console.log('[Clocking Debug] Local state refreshed for employee:', emp.id, 'New Status:', newStatus);
-      
-      setTimeout(() => { 
-        setView('dashboard'); 
-        setSelectedEmployee(null); 
-        setScanComplete(false); 
-        setPendingAction('normal'); 
-        setTimeOffReason('');
-        setLastClockResult(null); 
-        console.log('[Clocking Debug] UI refreshed back to dashboard/terminal');
-      }, 3500);
-      
-      if (isCloudLive) {
-        console.log('[Clocking Debug] Firestore update started for employee:', emp.id);
-        await db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('data').collection('employees').doc(emp.id).update(updateData); 
-        console.log('[Clocking Debug] Firestore update successful');
+      // Transaction prevents stale terminal state from overwriting newer clock records.
+      // A duplicate submission based on the same employee snapshot is rejected.
+      const employeeRef = db.collection('artifacts').doc(APP_ID_PATH)
+        .collection('public').doc('data').collection('employees').doc(emp.id);
+      await db.runTransaction(async transaction => {
+        const currentSnapshot = await transaction.get(employeeRef);
+        if (!currentSnapshot.exists) {
+          throw new Error('Employee record missing. Clocking NOT saved.');
+        }
+        const current = currentSnapshot.data() as Employee;
+        if (current.isArchived === true || current.status === 'Archived') {
+          throw new Error('Archived employee cannot clock.');
+        }
+        if (
+          current.status !== emp.status ||
+          (current.shiftStartTime || null) !== (emp.shiftStartTime || null) ||
+          (current.shifts || []).length !== (emp.shifts || []).length ||
+          (current.history || []).length !== (emp.history || []).length
+        ) {
+          throw new Error('Clocking state changed. Refresh before trying again.');
+        }
+        transaction.update(employeeRef, updateData);
+      });
+      setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, ...updateData } : e));
+      setLastClockResult(newStatus);
+      setView('success_screen'); 
+      setPersonalPinInput('');
+      setSupervisorApprovalPinInput('');
+
+      if (newStatus === 'In') {
+        handleClockInSuccess(emp.name || 'Artisan');
+      } else if (newStatus === 'Out') {
+        handleClockOutSuccess(emp.name || 'Artisan');
+      } else {
+        announce(actionMsg);
       }
+      auditLogger.log('CLOCK_EVENT', emp.name || 'Unknown Artisan', actionMsg);
+
+      setTimeout(() => {
+        setView('dashboard');
+        setSelectedEmployee(null);
+        setScanComplete(false);
+        setPendingAction('normal');
+        setTimeOffReason('');
+        setLastClockResult(null);
+      }, 3500);
     } catch(e) {
-      console.error("Crash prevented in processClockEvent:", e);
+      console.error('[CLOCKING SAVE FAILED]', e);
+      announce('Clocking NOT saved. Please inform your supervisor.');
+      alert('CLOCKING NOT SAVED. Firestore did not confirm this event. Please inform your supervisor.');
+      setView('dashboard');
+      setScanComplete(false);
     }
   };
 
@@ -2102,14 +2319,16 @@ TS Joinery Kanban System`
     if (!confirm(`Are you sure you want to unarchive ${emp.name} ${emp.surname}?`)) return;
     try {
       const updatedEmp: Partial<Employee> = { isArchived: false, archiveReason: null, archiveDate: null, status: 'Out' };
+      if(secureManagementEnabled)await writeManagementDocument('artifacts/'+APP_ID_PATH+'/public/data/employees/'+emp.id,'update',updatedEmp);
       setEmployees(prev => prev.map(e => e.id === emp.id ? { ...emp, ...updatedEmp } : e));
       auditLogger.log('EMPLOYEE_UNARCHIVE', emp.name || 'Unknown Artisan', `Unarchived employee record.`);
-      if (isCloudLive) {
+      if (isCloudLive && !secureManagementEnabled) {
         await db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('data').collection('employees').doc(emp.id).update(updatedEmp);
       }
       announce(`${emp.name} ${emp.surname} has been unarchived.`);
     } catch (e) {
       console.error("Error unarchiving employee:", e);
+      if(secureManagementEnabled)alert('Unarchive was not confirmed. Retry when the server is available.');
     }
   };
 
@@ -2142,6 +2361,17 @@ TS Joinery Kanban System`
     };
 
     const fullCommitObject = isEditing ? profileData : { ...profileData, ...defaultOperationalState };
+
+    if(secureManagementEnabled){
+      try{
+        const collection=db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('data').collection('employees');
+        if(isEditing&&editingId)await collection.doc(editingId).update(fullCommitObject);else await collection.add(fullCommitObject);
+        setShowEnrollModal(false);setIsEditing(false);setEditingId(null);setCapturedPhoto(null);
+        setEnrollForm({name:'',surname:'',address:'',idNumber:'',taxNumber:'',uifNumber:'',contactNumber:'',personalCode:'',dateStarted:''});
+        announce('Artisan details confirmed by the server.');
+      }catch(error){alert(error instanceof Error?error.message:'Artisan details were NOT saved.');}
+      return;
+    }
 
     if (isEditing && editingId) {
       setEmployees(prev => prev.map(emp => emp.id === editingId ? { ...emp, ...fullCommitObject } : emp));
@@ -2186,21 +2416,6 @@ TS Joinery Kanban System`
     setShowEnrollModal(true);
   };
 
-  const handleDeleteConfirm = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (superPinInput === SUPER_USER_PIN) {
-      if (targetDelete) {
-        await db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('data').collection('employees').doc(targetDelete.id).delete();
-        auditLogger.log('EMPLOYEE_DELETE', targetDelete.name || 'Unknown Artisan', `Deleted record with super access`);
-      }
-      setShowDeleteModal(false); 
-      setTargetDelete(null); 
-      setSuperPinInput('');
-    } else { 
-      setSuperPinError(true); 
-      setTimeout(() => setSuperPinError(false), 2000); 
-    }
-  };
 
   return (
     <Fragment>
@@ -2339,7 +2554,6 @@ TS Joinery Kanban System`
               </div>
 
               <div>
-                <label className="text-[10px] font-black uppercase text-gray-400 ml-2 tracking-wider">Security Key / PIN</label>
                 <input 
                   required 
                   type="password" 
@@ -2903,6 +3117,21 @@ TS Joinery Kanban System`
                   />
                 )}
 
+                {appMode === 'admin' && view === 'dashboard' && !isLocked && typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') && (
+                  <>
+                    <OfflineClockingSandbox employees={employees} onLaunchOwnerPilot={launchOwnerClockPilot} />
+                    <SupervisorReviewSandbox />
+                  </>
+                )}
+
+                {appMode === 'admin' && view === 'dashboard' && !isLocked && isClockPilotLocalhost() && (
+                  <SupervisorShiftReview
+                    employees={employees}
+                    supervisor={currentUser?.email || currentUser?.name || 'Supervisor'}
+                    onSaved={updated => setEmployees(prev => prev.map(e => e.id === updated.id ? updated : e))}
+                  />
+                )}
+
                 {appMode === 'admin' && view === 'dashboard' && (
                   <div className="animate-in fade-in duration-500">
                     <div className="flex justify-between items-start mb-8">
@@ -2928,9 +3157,6 @@ TS Joinery Kanban System`
                           </div>
                           <div className="flex items-center gap-3">
                             <button onClick={() => openEditor(emp)} className="py-3 px-5 bg-white/5 hover:bg-white/10 rounded-xl text-xs font-bold uppercase text-gray-300">Edit Records</button>
-                            <button onClick={() => { setTargetDelete(emp); setShowDeleteModal(true); }} className="p-3 bg-red-600/10 hover:bg-red-600/20 rounded-xl text-red-500 transition-colors">
-                              <Icon name="trash-2" size={16} />
-                            </button>
                           </div>
                         </div>
                       ))}
@@ -3029,7 +3255,6 @@ TS Joinery Kanban System`
                           <input required type="text" name="email" autoComplete="username" className="w-full bg-black/40 border border-white/5 rounded-2xl p-4 text-white mt-1.5 outline-none focus:border-blue-500 font-bold" value={authForm.email} onChange={e => { setAuthForm({...authForm, email: e.target.value}); if (loginError) setLoginError(''); }} placeholder="elrico or manager@tsjoinery.co.za" />
                         </div>
                         <div>
-                          <label className="text-[10px] font-black uppercase text-gray-500 ml-3">Security Key / PIN</label>
                           <input required type="password" name="pin" autoComplete="off" className="w-full bg-black/40 border border-white/5 rounded-2xl p-4 text-white mt-1.5 outline-none focus:border-blue-500 text-center tracking-[0.5em] text-xl font-bold" value={authForm.pin} onChange={e => { setAuthForm({...authForm, pin: e.target.value}); if (loginError) setLoginError(''); }} placeholder="••••" />
                         </div>
 
@@ -3128,6 +3353,11 @@ TS Joinery Kanban System`
               </div>
             </div>
 
+            {pilotClockEmployeeId === selectedEmployee.id && (
+              <p className="text-sm font-black text-amber-300 mt-4 border border-amber-500/30 rounded-xl p-3">
+                LOCALHOST TEST MODE — Your real Clocking record will not be changed.
+              </p>
+            )}
             {actionSubMenu === 'menu' ? (
               /* MAIN EMPLOYEE ACTION MENU */
               <div className="mt-6 space-y-4">
@@ -3148,7 +3378,8 @@ TS Joinery Kanban System`
                   </span>
                 </button>
 
-                {/* Secondary Actions Grid */}
+                {/* Secondary Actions Grid - hidden for isolated Clocking-only pilot */}
+                {pilotClockEmployeeId !== selectedEmployee.id && (
                 <div className="grid grid-cols-2 gap-3">
                   {/* APPLY FOR LEAVE */}
                   <button 
@@ -3169,18 +3400,26 @@ TS Joinery Kanban System`
                   </button>
                 </div>
 
-                {/* BREAK OPTION if clocked in or on break */}
-                {(selectedEmployee.status === 'In' || selectedEmployee.status === 'Break') && (
+                )}
+                {/* Personal Time Off requires a reason and supervisor approval before departure. */}
+                {pilotClockEmployeeId !== selectedEmployee.id && (selectedEmployee.status === 'In' || selectedEmployee.status === 'Break') && (
                   <button
                     onClick={() => {
-                      setScanComplete(false);
-                      setView('scanning');
+                      if (productionClockEnabled || secureManagementEnabled) {
+                        window.location.assign('/clocking-kiosk');
+                      } else if (selectedEmployee.status === 'Break') {
+                        void processClockEvent(selectedEmployee,undefined,true);
+                      } else {
+            setLoginError('Authentication failed. Check your username/email address and security PIN.');
+                        setTimeOffReason('');
+                        setView('emp_time_off');
+                      }
                     }}
                     className="w-full p-4 bg-purple-500/10 border border-purple-500/30 hover:bg-purple-500/20 rounded-2xl text-purple-300 transition-all flex items-center justify-center gap-2 active:scale-95"
                   >
                     <Icon name="coffee" size={20} />
                     <span className="text-sm font-black uppercase tracking-wider">
-                      {selectedEmployee.status === 'Break' ? 'RETURN FROM BREAK' : 'TAKE A BREAK'}
+                      {selectedEmployee.status === 'Break' ? 'RETURN FROM TIME OFF' : 'TIME OFF'}
                     </span>
                   </button>
                 )}
@@ -3217,7 +3456,7 @@ TS Joinery Kanban System`
                 </p>
 
                 {/* Primary Action Button based on Current Status */}
-                {selectedEmployee.status === 'In' || selectedEmployee.isClockedIn ? (
+                {selectedEmployee.status === 'In' || (selectedEmployee.status !== 'Break' && selectedEmployee.isClockedIn) ? (
                   <button 
                     onClick={() => {
                       setScanComplete(false);
@@ -3235,8 +3474,8 @@ TS Joinery Kanban System`
                 ) : selectedEmployee.status === 'Break' ? (
                   <button 
                     onClick={() => {
-                      setScanComplete(false);
-                      setView('scanning');
+                      if (productionClockEnabled || secureManagementEnabled) window.location.assign('/clocking-kiosk');
+                      else void processClockEvent(selectedEmployee,undefined,true);
                     }}
                     className="w-full p-6 rounded-3xl text-center border-2 border-purple-500/60 bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 hover:text-white shadow-2xl active:scale-95 transition-all flex items-center justify-center gap-4"
                   >
@@ -3244,7 +3483,7 @@ TS Joinery Kanban System`
                       <Icon name="coffee" size={32} />
                     </div>
                     <span className="text-2xl md:text-3xl font-black uppercase tracking-tight">
-                      RETURN FROM BREAK
+                      RETURN FROM TIME OFF
                     </span>
                   </button>
                 ) : (
@@ -3333,8 +3572,9 @@ TS Joinery Kanban System`
             <form onSubmit={(e) => { e.preventDefault(); setPendingAction('time_off_out'); setView('supervisor_approval'); }} className="space-y-6">
               <input 
                 type="text"
-                placeholder="Reason for leaving (e.g., Doctor, Gas)"
+                placeholder="Reason for leaving (e.g. bank or shop)"
                 value={timeOffReason}
+                maxLength={200}
                 onChange={(e) => setTimeOffReason(e.target.value)}
                 className="w-full bg-black/40 border border-white/10 rounded-2xl p-4 text-center text-white text-lg font-bold outline-none focus:border-purple-500"
                 required
@@ -3496,8 +3736,16 @@ TS Joinery Kanban System`
             <PhotoAvatar emp={selectedEmployee} size={256} className="border-0 rounded-full shadow-none w-full h-full" />
           </div>
           <h2 className="text-5xl md:text-7xl font-black italic uppercase tracking-tighter text-white mb-4 leading-none">
-            {lastClockResult === 'HR_Request' ? 'REQUEST SUBMITTED' : lastClockResult === 'Archive' ? 'PROFILE ARCHIVED' : 'IDENTITY VERIFIED'}
+            {pilotClockNotice
+              ? (lastClockResult === 'In' ? 'TEST IN SAVED' : 'TEST OUT SAVED')
+              : lastClockResult === 'HR_Request' ? 'REQUEST SUBMITTED'
+              : lastClockResult === 'Archive' ? 'PROFILE ARCHIVED' : 'IDENTITY VERIFIED'}
           </h2>
+          {pilotClockNotice && (
+            <p role="status" className="text-amber-300 font-black uppercase tracking-wider text-sm md:text-base mb-6 max-w-xl">
+              {pilotClockNotice}
+            </p>
+          )}
           {lastClockResult === 'HR_Request' && (
             <p className="text-emerald-400 font-bold uppercase tracking-widest text-base md:text-lg mb-6">
               Request submitted successfully and sent through for approval.
@@ -3511,7 +3759,11 @@ TS Joinery Kanban System`
               setScanComplete(false); 
               setPendingAction('normal'); 
               setTimeOffReason('');
-              setLastClockResult(null); 
+              setLastClockResult(null);
+              // Clear the opt-in localhost pilot after the tester sees the result.
+              setPilotClockEmployeeId(null);
+              setPilotClockNotice(null);
+              setActionSubMenu('menu');
             }}
             className={`bg-[#151515] w-full max-w-md p-14 rounded-[5rem] text-center border-b-[16px] shadow-2xl active:scale-95 transition-all ${
               lastClockResult === 'In' || lastClockResult === 'HR_Request' ? 'border-emerald-500 hover:bg-emerald-900/20' : 
@@ -3526,6 +3778,7 @@ TS Joinery Kanban System`
             }`}>
               {lastClockResult === 'In' ? 'IN' : lastClockResult === 'Break' ? 'TIME OFF' : lastClockResult === 'HR_Request' ? 'OK' : lastClockResult === 'Archive' ? 'ARCHIVED' : 'OUT'}
             </p>
+            {pilotClockNotice && <p className="text-sm uppercase font-black text-white mt-5">Tap to return to test dashboard and verify Firestore</p>}
           </button>
         </div>
       )}
@@ -4202,25 +4455,6 @@ TS Joinery Kanban System`
         </div>
       )}
 
-      {/* POPUP: REMOVE EMPLOYER ACCORDING TO SYSTEM BYPASS RULES */}
-      {showDeleteModal && (
-        <div className="fixed inset-0 z-[1200] bg-black/95 backdrop-blur-2xl flex items-center justify-center p-6 animate-in fade-in font-sans">
-          <div className="bg-[#151515] p-12 rounded-[5rem] text-center border-2 border-red-500/20 w-full max-w-sm shadow-2xl">
-            <div className="p-6 bg-red-500/10 text-red-500 rounded-full w-fit mx-auto mb-8 shadow-inner"><Icon name="shield-alert" size={54} /></div>
-            <h3 className="text-xl font-black uppercase italic text-white mb-2 font-sans">Authorize Removal</h3>
-            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500 mb-10 italic">Deleting Profile: {targetDelete?.name}</p>
-            <form onSubmit={handleDeleteConfirm}>
-              <input type="password" autoFocus placeholder="Enter Super PIN" className="w-full bg-black border border-white/10 rounded-2xl p-6 text-center text-3xl font-mono tracking-[0.5em] mb-8 outline-none focus:border-red-500 text-white" value={superPinInput} onChange={e => setSuperPinInput(e.target.value)} />
-              <div className="flex gap-4">
-                <button type="button" onClick={() => { setShowDeleteModal(false); setTargetDelete(null); setSuperPinInput(''); }} className="flex-1 py-5 bg-white/5 rounded-2xl font-black uppercase text-[10px] tracking-widest text-white font-sans">Cancel</button>
-                <button type="submit" className="flex-1 py-5 bg-red-600 rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-xl text-white font-sans">Confirm Delete</button>
-              </div>
-            </form>
-            {superPinError && <p className="mt-6 text-red-500 text-[10px] font-black uppercase animate-pulse font-bold">Authorization Denied</p>}
-          </div>
-        </div>
-      )}
-
       {/* POPUP: CHRONOLOGICAL WAGE RECORDS AND ACCUMULATED DEBT DETAILED VIEW */}
       {showEmpDetailsModal && detailsEmp && (
         <EmployeeDetailsModal 
@@ -4314,7 +4548,10 @@ TS Joinery Kanban System`
                             <td className="p-4 text-center font-mono text-xs">{item.clockIn}</td>
                             <td className="p-4 text-center font-mono text-xs">{item.clockOut}</td>
                             <td className="p-4 text-right text-gray-500 font-mono text-xs">-1.00h (Lunch & Tea)</td>
-                            <td className="p-4 text-right font-mono font-bold text-emerald-400">{formatTime(item.paidHours)}</td>
+                            <td className="p-4 text-right font-mono font-bold text-emerald-400">
+                              {formatTime(item.paidHours)}
+                              {item.timeOffRequiresReview && <span className="block text-xs text-amber-400">Time Off requires review</span>}
+                            </td>
                           </tr>
                         );
                       });
@@ -4596,6 +4833,7 @@ TS Joinery Kanban System`
                   isActive = appMode === 'analytics' && !showUserProfileModal && !showNotificationsModal;
                   handleClick = () => { setAppMode('analytics'); setView('dashboard'); };
                 } else {
+            setLoginError('Authentication failed. Check your username/email address and security PIN.');
                   isActive = appMode === target && !showUserProfileModal && !showNotificationsModal;
                   handleClick = () => { setAppMode(target as any); };
                 }

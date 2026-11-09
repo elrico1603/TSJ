@@ -9,7 +9,7 @@ import {
   Branch,
   DeviceInterface
 } from '../types';
-import { AppUser, authManager, DEFAULT_ACCOUNTS } from '../auth';
+import { AppUser, authManager } from '../auth';
 import { Icon } from './Icon';
 import {
   permissionService,
@@ -18,7 +18,9 @@ import {
   DEFAULT_ROLES
 } from '../services/permissionService';
 import { companyService } from '../services/companyService';
-import { db, APP_ID_PATH } from '../firebase';
+import { db as firebaseDb, APP_ID_PATH } from '../firebase';
+import { secureManagementEnabled,managementWriteProxy } from '../services/secureManagementClient';
+const db=secureManagementEnabled?managementWriteProxy(firebaseDb):firebaseDb;
 import { canMutateAuthOrRBAC } from '../services/previewSafety';
 import {
   NotificationEventDefinition,

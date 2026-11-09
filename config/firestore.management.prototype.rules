@@ -1,0 +1,152 @@
+// REVIEW PROTOTYPE ONLY. No firebase.json targets this file. Do not deploy before the identity cutover.
+// Server-written model:
+// artifacts/{ns}/private/security/access/{firebaseUid}:
+//   userId:string, firebaseUid:string, version:int, active:bool, owner:bool, permissions:map
+// Claims are signed by the management backend: tsj_management, tsj_namespace, tsj_user_id, tsj_version.
+// Active/pending user projections contain sanitized profile fields, never passwords or hashes.
+// employees are canonical HR/payroll documents; employeeViews exclude PINs and identity/contact fields.
+// Existing business documents retain their module-specific schemas. This prototype adds identity/module
+// boundaries and common type/size checks; full business-schema validation remains a release review item.
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signed(ns) {
+      return request.auth != null && request.auth.token.get('tsj_management',false) == true
+        && request.auth.token.get('tsj_namespace','') == ns
+        && request.auth.token.firebase.sign_in_provider == 'custom';
+    }
+    function access(ns) {
+      return get(/databases/$(database)/documents/artifacts/$(ns)/private/security/access/$(request.auth.uid)).data;
+    }
+    function session(ns) {
+      return signed(ns) && access(ns).active == true
+        && access(ns).firebaseUid == request.auth.uid
+        && access(ns).userId == request.auth.token.tsj_user_id
+        && access(ns).version == request.auth.token.tsj_version;
+    }
+    function can(ns,module,action) {
+      return module != '' && session(ns) && (access(ns).owner == true
+        || access(ns).permissions.get(module,{}).get(action,false) == true);
+    }
+    function manageUsers(ns) {
+      return can(ns,'User Assignments','View') || can(ns,'User Assignments','Edit');
+    }
+    function validBusiness(data) {
+      return data is map && data.keys().size() <= 200
+        && !data.keys().hasAny(['password','passwordHash','pinHash','signingKey','clocking_kiosk','tsj_management'])
+        && (!('createdAt' in data) || data.createdAt is string || data.createdAt is timestamp)
+        && (!('updatedAt' in data) || data.updatedAt is string || data.updatedAt is timestamp);
+    }
+    function creationUnchanged() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['createdAt','userId','authorUid']);
+    }
+    function moduleFor(collection) {
+      return {
+        'kanbanCards':'Inventory', 'kanbanTemplates':'Kanban Designer',
+        'products':'Product Master', 'categories':'Product Master',
+        'inventory':'Inventory', 'inventory_history':'Inventory',
+        'orders':'Stock Requests', 'order_history':'Stock Requests', 'stockRequests':'Stock Requests',
+        'purchaseOrders':'Purchase Orders', 'suppliers':'Purchase Orders',
+        'dispatches':'Dispatch Creation', 'warehouseLocations':'Inventory',
+        'companySettings':'Company Information', 'company_settings':'Company Information',
+        'branches':'Branch Management', 'applicationVersions':'Version Management', 'application_versions':'Version Management',
+        'leaveRequests':'Leave Management', 'leave_requests':'Leave Management',
+        'notifications':'System Configuration', 'syncLogs':'System Audit Log', 'masterAuditLogs':'System Audit Log'
+      }.get(collection,'');
+    }
+    function tokenNamespace() {return request.auth.token.get('tsj_namespace','');}
+
+    match /artifacts/{ns}/private/security/access/{uid} {
+      allow read: if signed(ns) && request.auth.uid == uid;
+      allow write: if false;
+    }
+    match /artifacts/{ns}/private/users/{state}/{userId} {
+      allow read: if state in ['active','pending'] && session(ns)
+        && (access(ns).userId == userId || manageUsers(ns));
+      allow write: if false;
+    }
+    match /artifacts/{ns}/public/data/employees/{id} {
+      allow read: if can(ns,'Employer Registration','View');
+      allow write: if false;
+    }
+    match /artifacts/{ns}/public/data/employeeViews/{id} {
+      allow read: if can(ns,'Employer Registration','View') || can(ns,'Work Analytics','View')
+        || can(ns,'Clocking','View') || can(ns,'Archive Profiles','View');
+      allow write: if false;
+    }
+    match /artifacts/{ns}/public/data/clockEventReceipts/{id} {
+      allow read,write: if false;
+    }
+    match /artifacts/{ns}/private/audit/logs/{id} {
+      allow read: if can(ns,'System Audit Log','View');
+      allow write: if false;
+    }
+    match /artifacts/{ns}/private/role_audit_logs/items/{id} {
+      allow read: if manageUsers(ns);
+      allow write: if false;
+    }
+    match /artifacts/{ns}/private/permissions/items/{id} {
+      allow read: if session(ns) && (manageUsers(ns) || resource.data.userId == access(ns).userId);
+      allow write: if false;
+    }
+    match /artifacts/{ns}/public/{kind}/items/{id} {
+      allow read: if kind in ['roles','rolePermissions','userRoles'] && session(ns);
+      allow write: if false;
+    }
+    // Explicit known business collections only; protected account/payroll paths are absent from moduleFor.
+    match /artifacts/{ns}/public/{kind} {
+      allow read: if can(ns,moduleFor(kind),'View');
+      allow create: if can(ns,moduleFor(kind),'Create') && validBusiness(request.resource.data);
+      allow update: if can(ns,moduleFor(kind),'Edit') && validBusiness(request.resource.data) && creationUnchanged();
+      allow delete: if can(ns,moduleFor(kind),'Delete');
+    }
+    match /artifacts/{ns}/public/{container}/{collection}/{id} {
+      function module() {return container == 'data' ? moduleFor(collection) : (collection == 'items' ? moduleFor(container) : '');}
+      allow read: if can(ns,module(),'View');
+      allow create: if can(ns,module(),'Create') && validBusiness(request.resource.data);
+      allow update: if can(ns,module(),'Edit') && validBusiness(request.resource.data) && creationUnchanged();
+      allow delete: if can(ns,module(),'Delete');
+    }
+    match /{collection}/{id} {
+      allow read: if request.auth != null && tokenNamespace() == 'timbersmith-terminal-v1' && can(tokenNamespace(),moduleFor(collection),'View');
+      allow create: if request.auth != null && tokenNamespace() == 'timbersmith-terminal-v1' && can(tokenNamespace(),moduleFor(collection),'Create') && validBusiness(request.resource.data);
+      allow update: if request.auth != null && tokenNamespace() == 'timbersmith-terminal-v1' && can(tokenNamespace(),moduleFor(collection),'Edit') && validBusiness(request.resource.data) && creationUnchanged();
+      allow delete: if request.auth != null && tokenNamespace() == 'timbersmith-terminal-v1' && can(tokenNamespace(),moduleFor(collection),'Delete');
+    }
+    match /{kind}/{id} {
+      allow read: if false;
+      allow write: if false;
+    }
+    match /userPermissionOverrides/{id} {
+      allow read: if false;
+      allow write: if false;
+    }
+    match /role_audit_logs/{id} {
+      allow read: if false;
+      allow write: if false;
+    }
+    match /artifacts/{ns}/users/{userId}/notifications/{id} {
+      allow read: if session(ns) && access(ns).userId == userId;
+      allow create,delete: if false;
+      allow update: if session(ns) && access(ns).userId == userId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read','readAt','isRead']);
+    }
+    match /conversations/{id} {
+      function own() {return request.auth != null && tokenNamespace() == 'timbersmith-terminal-v1' && session(tokenNamespace()) && resource.data.userId == access(tokenNamespace()).userId;}
+      function valid(data) {return validBusiness(data) && data.keys().hasAll(['userId','title','createdAt','updatedAt','model','metadata'])
+        && data.keys().hasOnly(['userId','title','createdAt','updatedAt','model','metadata','systemInstruction'])
+        && data.userId is string && data.title is string && data.title.size() <= 500 && data.model is string && data.metadata is map;}
+      allow read,delete: if own();
+      allow create: if request.auth != null && tokenNamespace() == 'timbersmith-terminal-v1' && session(tokenNamespace()) && valid(request.resource.data)
+        && request.resource.data.userId == access(tokenNamespace()).userId;
+      allow update: if own() && valid(request.resource.data) && creationUnchanged();
+    }
+    match /conversations/{id}/messages/{messageId} {
+      function ownConversation() {return request.auth != null && tokenNamespace() == 'timbersmith-terminal-v1' && session(tokenNamespace())
+        && get(/databases/$(database)/documents/conversations/$(id)).data.userId == access(tokenNamespace()).userId;}
+      allow read,delete: if ownConversation();
+      allow create: if ownConversation() && validBusiness(request.resource.data);
+      allow update: if ownConversation() && validBusiness(request.resource.data) && creationUnchanged();
+    }
+  }
+}
