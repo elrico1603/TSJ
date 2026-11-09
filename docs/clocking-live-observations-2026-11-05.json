@@ -1,0 +1,74 @@
+{
+  "observedDate": "2026-11-05",
+  "subsequentAuthorizedRegistryChange": {
+    "authorization":"User approved proceeding with the paid registry after the cost explanation.",
+    "database":"tsj-clock-registry",
+    "createdAtUTC":"2026-11-05T11:22:14.735498Z",
+    "edition":"STANDARD",
+    "type":"FIRESTORE_NATIVE",
+    "location":"nam5",
+    "freeTier":false,
+    "deleteProtection":"ENABLED",
+    "namedRelease":"projects/timbersmithapp/releases/cloud.firestore/tsj-clock-registry",
+    "namedRuleset":"projects/timbersmithapp/rulesets/7d5f27e3-94da-4a23-9eb5-227e88bed42e",
+    "publishedRules":"Exact match to reviewed config/firestore.clock-registry.rules; all client reads and writes denied.",
+    "defaultReleaseUnchanged":"projects/timbersmithapp/rulesets/b2a6c0d4-53c8-4926-8773-168cf2bfd5ec",
+    "independentVerificationUTC":"2026-11-05T11:28:01.011Z",
+    "unauthenticatedGetProbe":"403 PERMISSION_DENIED",
+    "unauthenticatedPatchProbe":"403 PERMISSION_DENIED; exists=true precondition on random missing document prevents any creation.",
+    "verificationCaveat":"Generic Firebase get_security_rules returned the named rules despite documenting the default instance. Explicit Rules API release/ruleset reads resolved the ambiguity; no default rollback was necessary.",
+    "scope":"Empty registry plus named rules only; no device enrollment, payroll writes, default rules change, merge or app deployment. Earlier missing-registry observations below describe the initial audit."
+  },
+  "subsequentAuthorizedBackupChange": {
+    "authorization":"User explicitly approved daily backups with 7-day retention in chat.",
+    "database":"(default)",
+    "schedule":"projects/timbersmithapp/databases/(default)/backupSchedules/f8245075-0af0-4550-8dc3-61b872b8129e",
+    "createdAtUTC":"2026-11-05T11:12:52.461328Z",
+    "recurrence":"daily",
+    "retentionSeconds":604800,
+    "verifiedBySubsequentList":true,
+    "firstBackupListAfterCreation":[],
+    "restoreTest":"NOT_PERFORMED",
+    "scope":"Backup schedule only. No rules, registry database, app deployment or payroll data changed. Earlier empty backup observations below describe the pre-change audit."
+  },
+  "scope": "Read-only metadata and published default rules. No employee documents or secrets retrieved; no deployment or database changes.",
+  "project": {"projectId":"timbersmithapp","projectNumber":"859189362556","state":"ACTIVE"},
+  "defaultFirestoreRules": {
+    "source": "Firebase connector firebase_get_security_rules(type=firestore)",
+    "severity": "critical",
+    "content": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    match /{document=**} {\n      allow read, write: if true;\n    }\n  }\n}",
+    "impact": "Unauthenticated reads and writes are permitted for all document paths covered by these default-database rules. A protected Clocking API alone cannot prevent direct payroll changes."
+  },
+  "databaseInventory": {
+    "source": "Firebase CLI firestore:databases:list --project timbersmithapp --json",
+    "databases": [{
+      "id":"(default)","edition":"STANDARD","type":"FIRESTORE_NATIVE","location":"nam5",
+      "pointInTimeRecovery":"DISABLED","deleteProtection":"DISABLED","versionRetention":"3600s"
+    }],
+    "tsj-clock-registry":"NOT_PRESENT_IN_SUCCESSFUL_DATABASE_LIST"
+  },
+  "googleCloudVerification": {
+    "billingEnabled": true,
+    "cloudRun": {
+      "project":"timbersmithapp","service":"ts-hub-backend","region":"africa-south1",
+      "url":"https://ts-hub-backend-htxmiwhm7q-bq.a.run.app",
+      "readyRevision":"ts-hub-backend-00015-b5b","trafficPercent":100,
+      "commitLabel":"5223dbb0e98ae6ad479d8df1f3bbab135288df72",
+      "imageDigest":"africa-south1-docker.pkg.dev/timbersmithapp/cloud-run-source-deploy/elrico1603-tsj/ts-hub-backend@sha256:c774ecd25a163b22e424493ce58e1e1b1f57cdb96d91e8a8e7dda0e3e95c218d",
+      "serviceAccount":"firebase-adminsdk-fbsvc@timbersmithapp.iam.gserviceaccount.com",
+      "observedDirectProjectRoles":["roles/firebase.sdkAdminServiceAgent","roles/firebaseauth.admin","roles/firebasedatabase.admin","roles/iam.serviceAccountTokenCreator","roles/storage.admin"],
+      "iamScope":"Direct project bindings for this principal only; inherited/resource-specific permissions and role expansion are not exhaustively audited."
+    },
+    "defaultDatabaseBackupSchedules":[],
+    "firestoreBackupsInNam5":[],
+    "backupScope":"Successful schedule and backup list calls only; external exports and other backup mechanisms are not ruled out."
+  },
+  "remainingUnknowns": [
+    "Existing exports, scheduled backups, tested restore procedures and billing configuration",
+    "Inherited/resource-specific IAM permissions, actual backend environment values and retention of the rollback image",
+    "Netlify deployed commit and settings",
+    "Actual employee schema and all legitimate field writers",
+    "Real tablet offline, restart and recovery acceptance"
+  ],
+  "releaseDecision":"BLOCKED: published rules must be replaced through a reviewed compatible migration before Clocking activation. Do not deploy deny-all onto the default database."
+}

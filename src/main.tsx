@@ -1,6 +1,7 @@
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
+import { ProductionClockingTerminal } from './components/ProductionClockingTerminal';
 import './index.css';
 import { BUILD_ID, BUILD_TIMESTAMP, HAS_FORM_DATA_FIX, CURRENT_VERSION_STRING } from './version';
 
@@ -26,7 +27,8 @@ if ('serviceWorker' in navigator) {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    {window.location.pathname === '/clocking-kiosk'
+      ? <ProductionClockingTerminal /> : <App />}
   </StrictMode>,
 );
 

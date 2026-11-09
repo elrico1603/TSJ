@@ -1,0 +1,42 @@
+{
+  "score": 1,
+  "summary": "Default rules remain critically public: recursive allow read, write: if true. After explicit user approval, tsj-clock-registry was created in nam5 with delete protection and published deny-all client rules. Explicit Rules API release reads and denied GET/PATCH probes verified isolation; the default ruleset stayed unchanged. No payroll or app deployment occurred. Registered IN/OUT remains disabled pending default-database security migration and real tablet acceptance. See clocking-live-observations-2026-11-05.json.",
+  "findings": [
+    {
+      "check": "Authority Source",
+      "severity": "major",
+      "issue": "Universal personal Clocking PIN alternatives have been removed. Candidate events require a device/employee key encrypted under the existing PIN, but four-digit PINs remain vulnerable to offline guessing by an attacker who copies tablet storage. Client attempt controls cannot prevent that attack. Legacy supervisor authorization remains browser-based and is excluded from the registered kiosk.",
+      "recommendation": "Require a managed trusted tablet, protected OS/browser profile, explicit acceptance of offline PIN limitations and verified device revocation before activation. Do not claim that a four-digit PIN provides strong security against a compromised device."
+    },
+    {
+      "check": "Field-Level vs. Identity-Level Security",
+      "severity": "critical",
+      "issue": "Published default rules were verified to recursively allow all reads and writes without authentication. Direct requests can bypass the registered candidate backend, alter payroll or PIN/authorization data and forge or delete event receipts. Restricting a UI panel to localhost does not protect the database.",
+      "recommendation": "Read published rules and inventory all legitimate field writers before implementing targeted server-only payroll writes. Enforce clockRevision consistency across permitted writers. Do not activate the candidate while unauthorized direct writes remain possible."
+    },
+    {
+      "check": "The Update Bypass",
+      "severity": "critical",
+      "issue": "Verified default rules impose no create/update/delete restrictions, ownership checks, type checks or immutable receipt constraints. Every protected field can be bypassed directly.",
+      "recommendation": "Replace the public default rules through a reviewed identity and writer migration, then test unauthorized create/update/delete attempts against isolated fixtures. Named-registry deployment is now independently verified as deny-all; it does not protect the separate default database."
+    },
+    {
+      "check": "Business Logic vs. Rules",
+      "severity": "major",
+      "issue": "Test routes remain isolated. A separate production candidate route now exists with two default-off gates. Enabling its frontend flag stops legacy Clocking including break/return, while the new kiosk supports normal IN/OUT only. Copying registry deny-all rules onto the default database would break existing workflows.",
+      "recommendation": "Review the explicit IN/OUT-only activation scope and existing break requirements before rollout. Coordinate targeted default rules with real writers; never deploy registry deny-all rules onto the default database."
+    },
+    {
+      "check": "Storage Abuse",
+      "severity": "minor",
+      "issue": "The candidate production route uses an 8 KB parser, bounded per-instance ingress limits and shared per-device registry quotas. These do not substitute for deployment-level ingress control or least-privilege runtime IAM, which are unverified.",
+      "recommendation": "Verify deployed ingress limits, service-account permissions and monitoring. Retain original journal IDs on quota/network failures."
+    },
+    {
+      "check": "Type Safety",
+      "severity": "minor",
+      "issue": "Candidate ingress validates IDs, signature, action, timestamp and expected revision; the processor checks attendance arrays and numeric totals. Published default rules impose no field types or size constraints beyond platform limits. Real employee schema compatibility remains unverified. Existing unbounded historical arrays also affect employee/receipt document size.",
+      "recommendation": "Inspect real schema and document sizes read-only, then verify representative isolated fixtures. Keep malformed or oversized records pending for supervised review instead of resetting totals."
+    }
+  ]
+}

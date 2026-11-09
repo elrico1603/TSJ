@@ -1,4 +1,6 @@
-import { db, APP_ID_PATH } from '../firebase';
+import { db as firebaseDb, APP_ID_PATH } from '../firebase';
+import { secureManagementEnabled,managementWriteProxy } from './secureManagementClient';
+const db=secureManagementEnabled?managementWriteProxy(firebaseDb):firebaseDb;
 import { 
   DisciplinaryWarning, 
   PPEIssuanceRecord, 

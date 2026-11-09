@@ -6,3 +6,5 @@ coverage/
 *.log
 .env*
 !.env.example
+# Local operator reports can contain user identity details; never commit them.
+.local/

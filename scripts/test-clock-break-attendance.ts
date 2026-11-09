@@ -1,0 +1,32 @@
+import assert from 'node:assert/strict';
+import {applyClockBreak,clockBreakDuration,reportPaidHours,reportPersonalTimeOff} from '../src/services/clockBreakAttendance';
+import type {Employee} from '../src/types';
+
+const start='2026-11-09T06:00:00.000Z', end='2026-11-09T15:00:00.000Z';
+const worker={status:'In',isArchived:false,shiftStartTime:start,breaks:[]} as Employee;
+const leave={id:'test-break',action:'Break' as const,occurredAt:'2026-11-09T10:00:00.000Z',reason:'Lunch'};
+const back={id:'test-return',action:'Return' as const,occurredAt:'2026-11-09T10:30:00.000Z'};
+const onBreak={...worker,...applyClockBreak(worker,leave)};
+assert.equal(onBreak.status,'Break');
+assert.equal(onBreak.breaks[0].leftAt,'12:00');
+assert.throws(()=>applyClockBreak(onBreak,leave));
+assert.throws(()=>clockBreakDuration(start,end,onBreak.breaks));
+assert.throws(()=>applyClockBreak(onBreak,{...back,occurredAt:leave.occurredAt}));
+const returned={...onBreak,...applyClockBreak(onBreak,back)};
+assert.equal(returned.shiftStartTime,start);
+assert.equal(returned.breaks[0].returnedAt,'12:30');
+assert.equal(returned.status,'In');
+assert.equal(clockBreakDuration(start,end,returned.breaks),30*60*1000);
+assert.throws(()=>applyClockBreak(returned,back));
+assert.throws(()=>applyClockBreak({...onBreak,breaks:[{...onBreak.breaks[0],shiftStartedAt:undefined}]},back));
+console.log('Break attendance checks passed: original shift preserved, valid return linked, duplicate and ambiguous transitions rejected.');
+
+const twentyMinutes = applyClockBreak(onBreak,{...back,occurredAt:'2026-11-09T10:20:00.000Z'}).breaks!;
+const deduction = reportPersonalTimeOff(start,end,twentyMinutes);
+assert.equal(deduction.hours,1/3);
+assert.equal(Math.round(reportPaidHours(9,deduction.hours)*60),460);
+assert.equal(reportPaidHours(9,0),8);
+assert.equal(reportPaidHours(0.5,1/3),0);
+assert.deepEqual(reportPersonalTimeOff(start,end,[{...twentyMinutes[0],kind:undefined}]),{hours:0,requiresReview:false});
+assert.deepEqual(reportPersonalTimeOff(start,end,onBreak.breaks),{hours:0,requiresReview:true});
+console.log('Report checks passed: 9h gross, 1h standard breaks and 20m Time Off yield 7h 40m paid.');

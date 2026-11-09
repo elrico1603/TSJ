@@ -1,4 +1,6 @@
-import { db, APP_ID_PATH } from '../firebase';
+import { db as firebaseDb, APP_ID_PATH } from '../firebase';
+import { secureManagementEnabled, managementWriteProxy } from './secureManagementClient';
+const db=secureManagementEnabled?managementWriteProxy(firebaseDb):firebaseDb;
 import { canMutateAuthOrRBAC } from './previewSafety';
 import {
   PermissionAction,
@@ -632,6 +634,12 @@ export const permissionService = {
   // Universal User Override Resolver
   // Resolves against live userId, normalized email, document ID, or user object
   getUserOverride(userOrIdOrEmail: any): UserPermissionOverride | null {
+    if(secureManagementEnabled){
+      if(!userOrIdOrEmail||typeof userOrIdOrEmail!=='object')return null;
+      return {userId:userOrIdOrEmail.id||userOrIdOrEmail.userId,userEmail:userOrIdOrEmail.email||userOrIdOrEmail.userEmail,
+        deviceAccess:userOrIdOrEmail.deviceAccess,deviceViewAccess:userOrIdOrEmail.deviceViewAccess,
+        permissions:userOrIdOrEmail.userPermissions||userOrIdOrEmail.permissions||{}} as UserPermissionOverride;
+    }
     if (!userOrIdOrEmail) return null;
 
     // Ensure cache / store is initialized
@@ -766,7 +774,7 @@ export const permissionService = {
     const idKey = (override.userId || '').trim();
 
     // Determine canonical document ID: reuse existing document ID if one exists for this user
-    const existing = this.getUserOverride(override);
+    const existing = secureManagementEnabled?null:this.getUserOverride(override);
     let targetDocId = idKey || emailKey;
     if (existing) {
       for (const [dId, ov] of overridesByDocId.entries()) {
@@ -784,6 +792,8 @@ export const permissionService = {
       updatedAt: new Date().toISOString(),
       updatedBy: adminName || 'System Admin'
     };
+
+    if(secureManagementEnabled)await db.collection(CANONICAL_PERMISSIONS_COLLECTION).doc(targetDocId).set(updated);
 
     // Index into in-memory store immediately
     indexUserOverrideRecord(targetDocId, updated);
@@ -815,7 +825,7 @@ export const permissionService = {
     );
 
     // Persist to ONLY canonical Firestore collection (guarded against live mutation in Preview)
-    if (db && canMutateAuthOrRBAC('saveUserOverride', `${CANONICAL_PERMISSIONS_COLLECTION}/${targetDocId}`)) {
+    if (!secureManagementEnabled && db && canMutateAuthOrRBAC('saveUserOverride', `${CANONICAL_PERMISSIONS_COLLECTION}/${targetDocId}`)) {
       try {
         await db.collection(CANONICAL_PERMISSIONS_COLLECTION).doc(targetDocId).set(updated);
       } catch (e) {
@@ -937,6 +947,11 @@ export const permissionService = {
   ): boolean {
     if (!user) return false;
     if (user.active === false) return false;
+    // UI convenience only; all backend/rule authorization uses the protected server record/ACL.
+    if(secureManagementEnabled){
+      if(deviceContext&&!this.canAccessDevice(user,deviceContext))return false;
+      return user.managementOwner===true||user.userPermissions?.[moduleName]?.[action]===true;
+    }
 
     // Device access gate: If deviceContext is specified, verify device authorization
     if (deviceContext && !this.canAccessDevice(user, deviceContext)) {

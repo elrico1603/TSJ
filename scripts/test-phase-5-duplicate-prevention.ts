@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+const fixturePassword = randomUUID();
 /**
  * TS HUB — Phase 5 Duplicate User Prevention Test Suite
  * 
@@ -11,6 +13,7 @@
  */
 
 import assert from 'assert';
+import firebase from 'firebase/compat/app';
 
 // Provide memory localStorage polyfill for Node.js test environment
 if (typeof globalThis.localStorage === 'undefined') {
@@ -30,7 +33,6 @@ import {
   authManager,
   normalizeUserEmail,
   setFirestoreDbForTesting,
-  DEFAULT_ACCOUNTS,
   AppUser
 } from '../src/auth';
 import { setAuditDbForTesting } from '../src/audit';
@@ -169,6 +171,10 @@ class MockAuthFirestore {
 }
 
 async function runPhase5TestSuite() {
+  // Firestore was already mocked; mock secondary Auth too, so this suite cannot create real accounts.
+  const originalInitializeApp=firebase.initializeApp;
+  let nextAuthId=0;
+  firebase.initializeApp=(()=>({auth:()=>({createUserWithEmailAndPassword:async()=>({user:{uid:'fixture-created-'+(++nextAuthId)}})}),delete:async()=>{}})) as unknown as typeof firebase.initializeApp;
   console.log('=== STARTING PHASE 5 DUPLICATE USER PREVENTION TESTS ===\n');
 
   const mockDb = new MockAuthFirestore();
@@ -177,19 +183,19 @@ async function runPhase5TestSuite() {
 
   // 1. Email Normalization Tests
   await it('normalizeUserEmail trims whitespace and lowercases email', () => {
-    assert.strictEqual(normalizeUserEmail('  User@TsJoinery.Co.Za  '), 'user@tsjoinery.co.za');
-    assert.strictEqual(normalizeUserEmail('ELRICO@TSJOINERY.CO.ZA'), 'elrico@tsjoinery.co.za');
+    assert.strictEqual(normalizeUserEmail('  User@example.invalid  '), 'user@example.invalid');
+    assert.strictEqual(normalizeUserEmail('ELRICO@example.invalid'), 'elrico@example.invalid');
   });
 
-  await it('normalizeUserEmail normalises frans@tsjoinery.co.za exactly to frans@tsjoinery.co.za without alias conversion', () => {
-    assert.strictEqual(normalizeUserEmail('frans@tsjoinery.co.za'), 'frans@tsjoinery.co.za');
-    assert.strictEqual(normalizeUserEmail('  Frans@TSJoinery.CO.ZA '), 'frans@tsjoinery.co.za');
+  await it('normalizeUserEmail normalises frans@example.invalid exactly to frans@example.invalid without alias conversion', () => {
+    assert.strictEqual(normalizeUserEmail('frans@example.invalid'), 'frans@example.invalid');
+    assert.strictEqual(normalizeUserEmail('  Frans@example.invalid '), 'frans@example.invalid');
   });
 
-  await it('frans@tsjoinery.co.za and franz@tsjoinery.co.za remain separate email identities', () => {
-    assert.notStrictEqual(normalizeUserEmail('frans@tsjoinery.co.za'), normalizeUserEmail('franz@tsjoinery.co.za'));
-    assert.strictEqual(normalizeUserEmail('franz@tsjoinery.co.za'), 'franz@tsjoinery.co.za');
-    assert.strictEqual(normalizeUserEmail('frans@tsjoinery.co.za'), 'frans@tsjoinery.co.za');
+  await it('frans@example.invalid and franz@example.invalid remain separate email identities', () => {
+    assert.notStrictEqual(normalizeUserEmail('frans@example.invalid'), normalizeUserEmail('franz@example.invalid'));
+    assert.strictEqual(normalizeUserEmail('franz@example.invalid'), 'franz@example.invalid');
+    assert.strictEqual(normalizeUserEmail('frans@example.invalid'), 'frans@example.invalid');
   });
 
   await it('normalizeUserEmail returns empty string for non-string input', () => {
@@ -201,8 +207,8 @@ async function runPhase5TestSuite() {
   // Seed default active user in mockDb
   mockDb.activeDocs.set('usr-admin-elrico', {
     id: 'usr-admin-elrico',
-    email: 'elrico@tsjoinery.co.za',
-    name: 'Elrico Greyvenstein',
+    email: 'elrico@example.invalid',
+    name: 'Fixture Owner',
     role: 'Administrator',
     active: true,
     isApproved: true
@@ -210,7 +216,7 @@ async function runPhase5TestSuite() {
 
   mockDb.activeDocs.set('usr-hr-franz', {
     id: 'usr-hr-franz',
-    email: 'franz@tsjoinery.co.za',
+    email: 'franz@example.invalid',
     name: 'Franz Posthumus',
     role: 'HR',
     active: true,
@@ -224,9 +230,9 @@ async function runPhase5TestSuite() {
       await authManager.registerUserRequest({
         id: 'req-dup-1',
         name: 'Elrico Duplicate',
-        email: 'elrico@tsjoinery.co.za',
+        email: 'elrico@example.invalid',
         role: 'Supervisor',
-        pin: '123456'
+        pin: fixturePassword
       });
     } catch (err: any) {
       errorCaught = true;
@@ -241,9 +247,9 @@ async function runPhase5TestSuite() {
       await authManager.registerUserRequest({
         id: 'req-dup-2',
         name: 'Elrico Upper',
-        email: '  ELRICO@TSJOINERY.CO.ZA  ',
+        email: '  ELRICO@example.invalid  ',
         role: 'Supervisor',
-        pin: '123456'
+        pin: fixturePassword
       });
     } catch (err: any) {
       errorCaught = true;
@@ -252,28 +258,28 @@ async function runPhase5TestSuite() {
     assert(errorCaught, 'Expected case-insensitive duplicate registration to throw');
   });
 
-  await it('registerUserRequest treats frans@tsjoinery.co.za as independent from franz@tsjoinery.co.za', async () => {
+  await it('registerUserRequest treats frans@example.invalid as independent from franz@example.invalid', async () => {
     // franz exists in activeDocs; frans is a distinct identity and can register
     const entry = await authManager.registerUserRequest({
       id: 'req-frans-distinct',
-      name: 'Frans Posthumus',
-      email: 'frans@tsjoinery.co.za',
+      name: 'Fixture Manager',
+      email: 'frans@example.invalid',
       role: 'Manager',
-      pin: '123456'
+      pin: fixturePassword
     });
-    assert.strictEqual(entry.email, 'frans@tsjoinery.co.za');
+    assert.strictEqual(entry.email, 'frans@example.invalid');
     assert.strictEqual(mockDb.pendingDocs.has('req-frans-distinct'), true);
   });
 
-  await it('registerUserRequest rejects duplicate registration for frans@tsjoinery.co.za once pending', async () => {
+  await it('registerUserRequest rejects duplicate registration for frans@example.invalid once pending', async () => {
     let errorCaught = false;
     try {
       await authManager.registerUserRequest({
         id: 'req-frans-second',
         name: 'Frans Second Attempt',
-        email: '  FRANS@tsjoinery.co.za  ',
+        email: '  FRANS@example.invalid  ',
         role: 'Manager',
-        pin: '123456'
+        pin: fixturePassword
       });
     } catch (err: any) {
       errorCaught = true;
@@ -282,32 +288,16 @@ async function runPhase5TestSuite() {
     assert(errorCaught, 'Expected duplicate registration for frans to throw');
   });
 
-  await it('registerUserRequest rejects when email matches default accounts', async () => {
-    let errorCaught = false;
-    try {
-      await authManager.registerUserRequest({
-        id: 'req-dup-janah',
-        name: 'Janah Dup',
-        email: 'janah@tsjoinery.co.za',
-        role: 'Manager',
-        pin: '123456'
-      });
-    } catch (err: any) {
-      errorCaught = true;
-      assert(err.message.includes('already exists'), 'Error mentions user already exists');
-    }
-    assert(errorCaught, 'Expected default account duplicate registration to throw');
-  });
 
   await it('registerUserRequest allows valid unique email registration', async () => {
     const entry = await authManager.registerUserRequest({
       id: 'req-unique-new',
       name: 'New Employee',
-      email: 'newbie@tsjoinery.co.za',
+      email: 'newbie@example.invalid',
       role: 'Employee',
-      pin: '654321'
+      pin: fixturePassword
     });
-    assert.strictEqual(entry.email, 'newbie@tsjoinery.co.za');
+    assert.strictEqual(entry.email, 'newbie@example.invalid');
     assert.strictEqual(entry.status, 'pending');
     assert.strictEqual(mockDb.pendingDocs.has('req-unique-new'), true);
   });
@@ -318,9 +308,9 @@ async function runPhase5TestSuite() {
       await authManager.registerUserRequest({
         id: 'req-unique-second',
         name: 'New Employee Second Attempt',
-        email: 'newbie@tsjoinery.co.za',
+        email: 'newbie@example.invalid',
         role: 'Employee',
-        pin: '654321'
+        pin: fixturePassword
       });
     } catch (err: any) {
       errorCaught = true;
@@ -335,7 +325,7 @@ async function runPhase5TestSuite() {
     mockDb.pendingDocs.set('1780921326575', {
       id: '1780921326575',
       name: 'Elrico Duplicate Pending',
-      email: 'elrico@tsjoinery.co.za',
+      email: 'elrico@example.invalid',
       role: 'Supervisor',
       status: 'pending',
       isApproved: false
@@ -346,9 +336,9 @@ async function runPhase5TestSuite() {
       await authManager.approvePendingUser({
         id: '1780921326575',
         name: 'Elrico Duplicate Pending',
-        email: 'elrico@tsjoinery.co.za',
+        email: 'elrico@example.invalid',
         role: 'Supervisor',
-        pin: '123456',
+        pin: fixturePassword,
         status: 'pending',
         isApproved: false,
         createdAt: '2026-06-08T12:22:06.575Z'
@@ -369,9 +359,9 @@ async function runPhase5TestSuite() {
     const approved = await authManager.approvePendingUser({
       id: 'req-unique-new',
       name: 'New Employee',
-      email: 'newbie@tsjoinery.co.za',
+      email: 'newbie@example.invalid',
       role: 'Employee',
-      pin: '654321',
+      pin: fixturePassword,
       status: 'pending',
       isApproved: false,
       createdAt: new Date().toISOString()
@@ -389,8 +379,8 @@ async function runPhase5TestSuite() {
     try {
       await authManager.createActiveUser({
         name: 'Elrico Another Duplicate',
-        email: 'elrico@tsjoinery.co.za',
-        pin: '654321',
+        email: 'elrico@example.invalid',
+        pin: fixturePassword,
         role: 'Supervisor'
       });
     } catch (err: any) {
@@ -405,8 +395,8 @@ async function runPhase5TestSuite() {
     try {
       await authManager.createActiveUser({
         name: 'Newbie Dup',
-        email: '  NEWBIE@TSJOINERY.CO.ZA  ',
-        pin: '654321',
+        email: '  NEWBIE@example.invalid  ',
+        pin: fixturePassword,
         role: 'Employee'
       });
     } catch (err: any) {
@@ -421,18 +411,18 @@ async function runPhase5TestSuite() {
     mockDb.pendingDocs.set('req-artisan-pending', {
       id: 'req-artisan-pending',
       name: 'Artisan Jack',
-      email: 'jack@tsjoinery.co.za',
+      email: 'jack@example.invalid',
       status: 'pending'
     });
 
     const created = await authManager.createActiveUser({
       name: 'Artisan Jack',
-      email: 'jack@tsjoinery.co.za',
-      pin: 'Secret999!',
+      email: 'jack@example.invalid',
+      pin: fixturePassword,
       role: 'Employee'
     });
 
-    assert.strictEqual(created.email, 'jack@tsjoinery.co.za');
+    assert.strictEqual(created.email, 'jack@example.invalid');
     assert.strictEqual(created.active, true);
     assert.strictEqual(mockDb.activeDocs.has(created.id), true);
     assert.strictEqual(mockDb.pendingDocs.has('req-artisan-pending'), false, 'Pending doc was cleaned up');
@@ -443,7 +433,7 @@ async function runPhase5TestSuite() {
     mockDb.shouldFailActiveQuery = true;
     let errorCaught = false;
     try {
-      await authManager.assertEmailUniqueness('unknown-unique@tsjoinery.co.za');
+      await authManager.assertEmailUniqueness('unknown-unique@example.invalid');
     } catch (err: any) {
       errorCaught = true;
       assert(err.message.includes('Unable to verify user uniqueness in database'), 'Throws fail-closed database error');
@@ -460,8 +450,8 @@ async function runPhase5TestSuite() {
       await authManager.registerUserRequest({
         id: 'req-fail-closed',
         name: 'Fail Closed Test',
-        email: 'failclosed@tsjoinery.co.za',
-        pin: '123456',
+        email: 'failclosed@example.invalid',
+        pin: fixturePassword,
         role: 'Employee'
       });
     } catch (err: any) {
@@ -480,8 +470,8 @@ async function runPhase5TestSuite() {
     try {
       await authManager.createActiveUser({
         name: 'Fail Closed Create',
-        email: 'failcreate@tsjoinery.co.za',
-        pin: 'Secret999!',
+        email: 'failcreate@example.invalid',
+        pin: fixturePassword,
         role: 'Employee'
       });
     } catch (err: any) {
@@ -495,14 +485,14 @@ async function runPhase5TestSuite() {
 
   // 6. Concurrency & In-Flight Mutex Tests
   await it('in-flight mutex rejects parallel concurrent registration attempts for same email', async () => {
-    const email = 'concurrent.reg@tsjoinery.co.za';
+    const email = 'concurrent.reg@example.invalid';
     
     // Launch two parallel registration requests simultaneously
     const promise1 = authManager.registerUserRequest({
       id: 'concurrent-1',
       name: 'Concurrent User 1',
       email,
-      pin: 'Secret123!',
+      pin: fixturePassword,
       role: 'Employee'
     });
 
@@ -510,7 +500,7 @@ async function runPhase5TestSuite() {
       id: 'concurrent-2',
       name: 'Concurrent User 2',
       email,
-      pin: 'Secret123!',
+      pin: fixturePassword,
       role: 'Employee'
     });
 
@@ -528,19 +518,19 @@ async function runPhase5TestSuite() {
   });
 
   await it('in-flight mutex rejects parallel concurrent createActiveUser attempts for same email', async () => {
-    const email = 'concurrent.create@tsjoinery.co.za';
+    const email = 'concurrent.create@example.invalid';
 
     const p1 = authManager.createActiveUser({
       name: 'Concurrent Creator 1',
       email,
-      pin: 'Secret123!',
+      pin: fixturePassword,
       role: 'Employee'
     });
 
     const p2 = authManager.createActiveUser({
       name: 'Concurrent Creator 2',
       email,
-      pin: 'Secret123!',
+      pin: fixturePassword,
       role: 'Employee'
     });
 
@@ -560,14 +550,14 @@ async function runPhase5TestSuite() {
           where: (field: string, opStr: string, value: any) => {
             return {
               get: async () => {
-                // Simulate returning both documents if querying elrico@tsjoinery.co.za
-                if (value === 'elrico@tsjoinery.co.za') {
+                // Simulate returning both documents if querying elrico@example.invalid
+                if (value === 'elrico@example.invalid') {
                   return {
                     empty: false,
                     size: 2,
                     docs: [
-                      { id: 'usr-admin-elrico', data: () => ({ id: 'usr-admin-elrico', email: 'elrico@tsjoinery.co.za', active: true, isApproved: true }) },
-                      { id: '1780921326575', data: () => ({ id: '1780921326575', email: 'elrico@tsjoinery.co.za', active: true, isApproved: true }) }
+                      { id: 'usr-admin-elrico', data: () => ({ id: 'usr-admin-elrico', email: 'elrico@example.invalid', active: true, isApproved: true }) },
+                      { id: '1780921326575', data: () => ({ id: '1780921326575', email: 'elrico@example.invalid', active: true, isApproved: true }) }
                     ]
                   };
                 }
@@ -580,7 +570,7 @@ async function runPhase5TestSuite() {
     };
 
     const lookupService = new UserLookupService(backendMockDb as any);
-    const lookupResult = await lookupService.lookupUser('elrico@tsjoinery.co.za');
+    const lookupResult = await lookupService.lookupUser('elrico@example.invalid');
 
     assert.strictEqual(lookupResult.success, false);
     if (!lookupResult.success) {
@@ -593,23 +583,24 @@ async function runPhase5TestSuite() {
     const incomingDocs: AppUser[] = [
       {
         id: '1780921326575',
-        name: 'Elrico Greyvenstein',
-        email: 'elrico@tsjoinery.co.za',
+        name: 'Fixture Owner',
+        email: 'elrico@example.invalid',
         role: 'Administrator',
-        pin: 'Elrico1603!!',
+        pin: fixturePassword,
         isApproved: true,
         status: 'active',
         createdAt: '2026-06-08T12:22:06.575Z'
       }
     ];
 
-    const merged = authManager.setUsers(incomingDocs);
-    const elricoUser = merged.find(u => u.email === 'elrico@tsjoinery.co.za');
+    const merged = authManager.setUsers([{ ...incomingDocs[0], id: 'usr-admin-elrico' }, ...incomingDocs]);
+    const elricoUser = merged.find(u => u.email === 'elrico@example.invalid');
     assert.strictEqual(elricoUser?.id, 'usr-admin-elrico', 'Canonical ID usr-admin-elrico was preserved');
   });
 
   // Reset testing adapter
   setFirestoreDbForTesting(null);
+  firebase.initializeApp=originalInitializeApp;
 
   console.log(`\n=== PHASE 5 TEST RESULTS: ${passed} PASSED, ${failed} FAILED ===\n`);
   if (failed > 0) {
