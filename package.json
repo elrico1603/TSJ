@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx server.ts",
     "generate-icons": "node scripts/generate-icons.js",
-    "prebuild": "node scripts/generate-icons.js",
+    "prebuild": "node scripts/generate-icons.js && node scripts/stage-face-pilot.mjs",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "gcp-build": "npm run build",
     "start": "node dist/server.cjs",
@@ -16,7 +16,9 @@
     "release": "node scripts/release.js",
     "release:patch": "node scripts/release.js --patch",
     "release:minor": "node scripts/release.js --minor",
-    "release:major": "node scripts/release.js --major"
+    "release:major": "node scripts/release.js --major",
+    "face:prepare": "node scripts/stage-face-pilot.mjs --prepare",
+    "test:face": "tsx scripts/test-face-profile.ts"
   },
   "dependencies": {
     "@google-cloud/storage": "^8.0.0",
