@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<title>TS Hub | Face Verification Pilot</title>
+<link rel="stylesheet" href="./pilot.css">
+<script src="./vendor/human.js" defer></script>
+<script type="module" src="./pilot.js"></script>
+</head>
+<body>
+<main>
+<header><div class="logo">TS</div><div><h1>TS HUB <span>Face Verification</span></h1><small>PRIVATE TEST • NOT CONNECTED TO CLOCKING</small></div></header>
+<p class="intro">Test your own face against a temporary profile on this phone. The camera and model run locally. No images or biometric templates are uploaded or saved. Closing or refreshing this page clears the test profile.</p>
+<section class="camera-panel">
+  <video id="camera" autoplay muted playsinline aria-label="Live camera preview"></video>
+  <div class="oval" aria-hidden="true"></div>
+  <span id="camera-label" class="camera-label">Camera off</span>
+</section>
+<section class="panel">
+  <div class="steps"><span>1. Camera</span><span>2. Enroll</span><span>3. Verify</span></div>
+  <p id="instruction" role="status" aria-live="polite">Start the camera and allow access. Use good lighting and keep only one face in view.</p>
+  <div id="result" class="result neutral" aria-live="polite">Ready to test</div>
+  <div class="buttons">
+    <button id="start">Start camera &amp; load model</button>
+    <button id="enroll" disabled>Enroll my face</button>
+    <button id="verify" disabled>Verify my face</button>
+    <button id="cancel" class="secondary" disabled>Stop camera</button>
+    <button id="clear" class="secondary" disabled>Clear test profile</button>
+  </div>
+  <p id="profile">No temporary profile enrolled.</p>
+</section>
+<section class="panel">
+  <h2>Live diagnostic scores</h2>
+  <p class="muted">These are model scores, not probabilities of identity or guarantees of security. Pilot thresholds are experimental.</p>
+  <dl>
+    <div><dt>Faces detected</dt><dd id="faces">—</dd></div>
+    <div><dt>Face confidence</dt><dd id="confidence">—</dd></div>
+    <div><dt>Anti-spoof</dt><dd id="real">—</dd></div>
+    <div><dt>Liveness</dt><dd id="live">—</dd></div>
+    <div><dt>Face similarity</dt><dd id="match">—</dd></div>
+    <div><dt>Challenge</dt><dd id="challenge">—</dd></div>
+  </dl>
+</section>
+<footer>Experimental local RGB-camera test. Not a certified biometric attendance system. No employee records or payroll are affected.</footer>
+</main>
+</body>
+</html>
