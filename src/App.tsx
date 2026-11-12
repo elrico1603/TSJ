@@ -28,6 +28,7 @@ import { PhotoAvatar, ClockingTerminal } from './components/ClockingTerminal';
 import { OrderManagement } from './components/OrderManagement';
 import { WorkAnalytics } from './components/WorkAnalytics';
 import { EnrollmentModal } from './components/EnrollmentModal';
+import { EmployeeFaceRegistration, FACE_INTEGRATION_PREVIEW } from './components/EmployeeFaceRegistration';
 import { SettingsModal } from './components/SettingsModal';
 import { EmployeeDetailsModal } from './components/EmployeeDetailsModal';
 import { ReportPrintTemplate } from './components/ReportPrintTemplate';
@@ -445,6 +446,7 @@ export default function App() {
 
   // Enrollment configuration controls
   const [showEnrollModal, setShowEnrollModal] = useState(false);
+  const [faceRegistrationEmployee, setFaceRegistrationEmployee] = useState<Employee | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isCapturing, setIsCapturing] = useState(false);
@@ -1088,8 +1090,9 @@ TS Joinery Kanban System`
     announce(`Order email drafted for ${kanbanId}`);
   };
 
-  // Cameras and users scan verification action
+  // The controlled face preview replaces the simulated scan timer entirely.
   useEffect(() => {
+    if (FACE_INTEGRATION_PREVIEW) return;
     if (view === 'scanning' && selectedEmployee) {
       const waitTimer = setTimeout(() => {
         setScanComplete(true);
@@ -1112,7 +1115,7 @@ TS Joinery Kanban System`
         return;
       }
 
-      if (view === 'scanning' || isCapturing) {
+      if ((view === 'scanning' && !FACE_INTEGRATION_PREVIEW) || isCapturing) {
         try {
           if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
             const media = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: 1280, height: 720 } });
@@ -1449,13 +1452,13 @@ TS Joinery Kanban System`
     if (!selectedEmployee) return;
 
     const expectedCode = selectedEmployee.personalCode || selectedEmployee.pin || selectedEmployee.clockPin;
-    const isValid = 
-      (expectedCode && String(pinStr) === String(expectedCode)) ||
-      pinStr === '1234' ||
-      pinStr === '0000' ||
-      pinStr === '1001';
+    const isValid = FACE_INTEGRATION_PREVIEW
+      ? !!expectedCode && String(pinStr) === String(expectedCode)
+      : (expectedCode && String(pinStr) === String(expectedCode)) ||
+        pinStr === '1234' || pinStr === '0000' || pinStr === '1001';
 
-    console.log('[CLOCKING FLOW] Selected employee:', selectedEmployee);
+    // Do not log employee records containing personal PINs.
+    console.log('[CLOCKING FLOW] Employee verification started');
     console.log('[CLOCKING FLOW] Employer verification started');
     console.log('[CLOCKING FLOW] Password verification result:', isValid ? 'SUCCESS' : 'FAILED');
 
@@ -1910,6 +1913,13 @@ TS Joinery Kanban System`
   };
 
   const processClockEvent = async (emp: Employee, forcedIntent?: 'In' | 'Out' | 'Break') => {
+    // Fail closed in the integration preview, including supervisor paths.
+    // A local biometric result is NOT a production attendance authorization.
+    if (FACE_INTEGRATION_PREVIEW) {
+      setSelectedEmployee(emp);
+      setView('scanning');
+      return;
+    }
     try {
       const clockTime = new Date();
       let newStatus: 'In' | 'Out' | 'Break' | 'Archived';
@@ -3303,8 +3313,14 @@ TS Joinery Kanban System`
         </div>
       )}
 
-      {/* VIEW SCANNING PROFILE CAMERA PREVIEW */}
-      {view === 'scanning' && selectedEmployee && (
+      {/* Protected face integration preview — never writes real hours. */}
+      {FACE_INTEGRATION_PREVIEW && view === 'scanning' && selectedEmployee && (
+        <EmployeeFaceRegistration key={selectedEmployee.id} employee={selectedEmployee} mode="verify" onClose={() => {
+          setView('dashboard'); setSelectedEmployee(null); setScanComplete(false); setPendingAction('normal'); setPersonalPinInput('');
+        }} />
+      )}
+      {/* Existing legacy screen remains unchanged when preview is disabled. */}
+      {!FACE_INTEGRATION_PREVIEW && view === 'scanning' && selectedEmployee && (
         <div className="fixed inset-0 z-[200] bg-[#0c0c0c] flex flex-col items-center justify-center animate-in slide-in-from-bottom-20 italic font-sans text-center">
           <div className="bg-[#151515] p-12 rounded-[5rem] border border-white/10 text-center w-full max-w-lg shadow-[0_50px_100px_rgba(0,0,0,0.8)]">
             <div className="relative w-80 h-80 mx-auto mb-8 overflow-hidden rounded-[3rem] border border-white/5">
@@ -3746,8 +3762,16 @@ TS Joinery Kanban System`
           canvasRef={canvasRef}
           streamRef={streamRef}
           handleEnrollSubmit={handleEnrollSubmit}
+          onOpenFaceRegistration={FACE_INTEGRATION_PREVIEW && isEditing && editingId && currentUser && !isLocked && permissionService.hasPermission(currentUser, 'Employer Registration', 'Edit') ? () => {
+            const employee = employees.find(item => item.id === editingId && !item.isArchived && item.status !== 'Archived');
+            if (employee) setFaceRegistrationEmployee(employee);
+          } : undefined}
           setShowEnrollModal={setShowEnrollModal}
         />
+      )}
+
+      {FACE_INTEGRATION_PREVIEW && faceRegistrationEmployee && !isLocked && currentUser && (
+        <EmployeeFaceRegistration key={faceRegistrationEmployee.id} employee={faceRegistrationEmployee} mode="manage" onClose={() => setFaceRegistrationEmployee(null)} />
       )}
 
       {/* POPUP: KANBAN CARD CREATION & EDITING */}
