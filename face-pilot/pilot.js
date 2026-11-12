@@ -2,12 +2,12 @@ import {LIMITS,frameCheck,matchScore,profileMatch,yawAngle} from './checks.js';
 const el=id=>document.getElementById(id);
 const camera=el('camera'), canvas=document.createElement('canvas');
 const ctx=canvas.getContext('2d',{alpha:false});
-let engine=null, stream=null, profile=null, busy=false, generation=0;
-const buttons=['start','enroll','verify','cancel','clear'];
+let engine=null, stream=null, profile=null, busy=false, generation=0, retryStep=null;
 function controls(){
   el('start').disabled=busy||!!stream;
   el('enroll').disabled=busy||!stream||!!profile;
   el('verify').disabled=busy||!stream||!profile;
+  el('retry').disabled=!busy||!retryStep;
   el('cancel').disabled=!stream&&!busy;
   el('clear').disabled=busy||!profile;
 }
@@ -35,7 +35,7 @@ function setProfile(value){
 function stopCamera(){
   generation++;
   if(stream){for(const track of stream.getTracks())track.stop();}
-  stream=null;camera.srcObject=null;busy=false;
+  stream=null;camera.srcObject=null;busy=false;retryStep=null;
   el('camera-label').textContent='Camera off';
   tell('Camera stopped. Start it again to continue.');
   controls();
@@ -104,35 +104,32 @@ async function freshFrame(id,lastTime){
   assertCurrent(id);
   return {data,time,capturedAt};
 }
-// Two opposite head turns replace the blink challenge. Slow mobile inference
-// can miss natural blinks. Eye position is not required.
+// Simple, three-step pilot. An unsuccessful pose or quality check retries
+// ONLY the current stage. Never approve an unverified frame or substitute
+// a different person's face for the person who began the challenge.
 async function scan(mode){
   if(busy||!engine||!stream||(mode==='verify'&&!profile)||(mode==='enroll'&&profile))return;
   const id=++generation;
-  busy=true;controls();clearDiagnostics();result(mode==='enroll'?'Enrolling…':'Verifying…');
-  // One instruction at a time. Never advance on a single noisy inference.
-  // Two fresh qualifying frames, captured at least 350 ms apart, and a
-  // minimum 1.2 second reading period after each cue are required.
-  const steps=['center','firstTurn','firstCenter','secondTurn','secondCenter','samples'];
+  busy=true;clearDiagnostics();result(mode==='enroll'?'Enrolling…':'Verifying…');
   const instructions=[
-    'Step 1 of 5 — Look straight at the camera. Blink normally.',
-    'Step 2 of 5 — Slowly turn your head slightly to either side. Hold until the next instruction.',
-    'Step 3 of 5 — Look straight at the camera again. Hold until the next instruction.',
-    'Step 4 of 5 — Slowly turn your head to the OTHER side. Hold until the next instruction.',
-    'Step 5 of 5 — Look straight at the camera again. Almost done!',
-    'Stay facing the camera naturally while we finish. Blink normally.'
+    'Step 1 of 3 — Look straight at the camera. Blink normally.',
+    'Step 2 of 3 — Turn your head slightly to EITHER side. Hold there until the next instruction.',
+    'Step 3 of 3 — Look straight at the camera again. We will finish automatically.'
   ];
-  const TURN=0.20, RETURN=0.13, CUE_MS=1200, HOLD_MS=350;
-  let step=0, cueAt=performance.now(), holdAt=null, holdCount=0, holdDirection=0;
-  let base=null, baselineYaw=null, firstDirection=0;
-  let lastTime=-1, collected=[], lastReason='Waiting for a clear, live face.';
-  let lastAcceptedAt=0;
-  const deadline=performance.now()+75000;
+  const TURN=0.20, RETURN=0.16, HOLD_MS=300, CUE_MS=850;
+  const STEP_MS=20000, SESSION_MS=300000;
+  let step=0,cueAt=performance.now(),holdAt=null,holdCount=0,holdDirection=0;
+  let base=null,baselineYaw=null,identityFailures=0;
+  let lastTime=-1,collected=[],lastAcceptedAt=0,lastReason='Waiting for a clear, live face.';
+  const deadline=performance.now()+SESSION_MS;
   function resetHold(){holdAt=null;holdCount=0;holdDirection=0;}
-  function cue(){
-    resetHold();cueAt=performance.now();quality('');
+  function resetStep(message=''){
+    resetHold();cueAt=performance.now();collected=[];lastAcceptedAt=0;
+    // Keep the baseline, identity and already completed stages.
     tell(instructions[step]);
-    el('challenge').textContent=step<5?'Step '+(step+1)+' / 5':'Collecting final samples';
+    el('challenge').textContent='Step '+(step+1)+' / 3';
+    quality(message||'Follow the instruction above.');
+    result((mode==='enroll'?'Enrolling':'Verifying')+' — step '+(step+1)+' of 3');
   }
   function stable(ok,capturedAt,direction=0){
     if(!ok||capturedAt<cueAt){resetHold();return false;}
@@ -141,85 +138,110 @@ async function scan(mode){
     }else holdCount++;
     return holdCount>=2&&capturedAt-holdAt>=HOLD_MS&&capturedAt-cueAt>=CUE_MS;
   }
-  function next(){step++;cue();}
-  cue();
+  function next(){step++;resetStep('Previous step accepted.');}
+  retryStep=()=>{
+    if(id===generation&&busy&&performance.now()<deadline){
+      resetStep('Retrying this step only. Your earlier steps are kept.');
+    }
+  };
+  resetStep();controls();
   try{
     while(performance.now()<deadline){
+      if(performance.now()-cueAt>=STEP_MS){
+        resetStep('Still on this step. Retrying automatically — '+lastReason);
+      }
       const {data,time,capturedAt}=await freshFrame(id,lastTime);lastTime=time;
       if(performance.now()>=deadline)break;
+      // A manual retry may have happened during inference. Ignore that frame.
+      if(capturedAt<cueAt)continue;
       const check=frameCheck(data);
       if(!check.ok){
         diagnostics(data);lastReason=check.reason;resetHold();
-        if(base && data?.face?.length>1)throw Error('More than one face detected. Start a new scan.');
-        quality(lastReason);await sleep(120);continue;
+        collected=[];lastAcceptedAt=0;
+        if(data?.face?.length>1){
+          identityFailures++;
+          if(identityFailures>=2)throw Error('Multiple faces detected. Verification refused; use one person only.');
+        }else identityFailures=0;
+        quality(lastReason+' Stay on this step.');await sleep(120);continue;
       }
       const f=check.face;
       const own=mode==='verify'?profileMatch(engine,profile,f.embedding):null;
       diagnostics(data,own);
-      if(mode==='verify'&&(own===null||own<LIMITS.similarity)){
-        throw Error('Face does not match the enrolled test profile.');
+      const continuity=base?matchScore(engine,base,f.embedding):1;
+      // A momentary poor match during a turn is not an automatic restart.
+      // Two consecutive high-quality mismatches are an identity failure.
+      const wrongIdentity=(mode==='verify'&&(own===null||own<LIMITS.similarity))||
+        continuity===null||continuity<0.50;
+      if(wrongIdentity){
+        resetHold();collected=[];lastAcceptedAt=0;identityFailures++;
+        lastReason='Face match not confirmed. Face the camera and adjust your position.';
+        quality(lastReason);
+        if(identityFailures>=2)throw Error('Face does not match the enrolled or original test profile.');
+        await sleep(120);continue;
       }
-      if(base){
-        const continuity=matchScore(engine,base,f.embedding);
-        if(continuity===null||continuity<0.50)throw Error('The face changed during the challenge.');
-      }
+      identityFailures=0;
       const yaw=yawAngle(f);
       el('yaw').textContent=yaw===null?'—':(yaw*180/Math.PI).toFixed(1)+'°';
-      if(yaw===null){lastReason='Face rotation unavailable. Keep one clear face in view.';resetHold();quality(lastReason);continue;}
-      quality('Face detected. Follow the instruction above.');
-      const phase=steps[step];
-      if(phase==='center'){
+      if(yaw===null){
+        lastReason='Face rotation unavailable. Keep one clear face in view.';
+        resetHold();collected=[];lastAcceptedAt=0;quality(lastReason);await sleep(120);continue;
+      }
+      if(step===0){
         const centered=Math.abs(yaw)<=0.35;
+        lastReason=centered?'Hold this natural position briefly.':'Turn your face toward the camera.';
+        quality(lastReason);
         if(stable(centered,capturedAt)){
           base=f.embedding.slice();baselineYaw=yaw;next();
         }
-      }else if(phase==='firstTurn'||phase==='secondTurn'){
+      }else if(step===1){
         const delta=yaw-baselineYaw,direction=Math.sign(delta);
-        const correct=Math.abs(delta)>=TURN&&(phase==='firstTurn'||direction===-firstDirection);
-        if(!correct&&phase==='secondTurn'&&Math.abs(delta)>=TURN)quality('Turn to the opposite side from your first turn.');
-        if(stable(correct,capturedAt,direction)){
-          if(phase==='firstTurn')firstDirection=direction;
-          next();
-        }
-      }else if(phase==='firstCenter'||phase==='secondCenter'){
-        if(stable(Math.abs(yaw-baselineYaw)<=RETURN,capturedAt))next();
-      }else if(phase==='samples'){
-        if(Math.abs(yaw-baselineYaw)<=RETURN&&capturedAt>cueAt&&capturedAt-lastAcceptedAt>250){
+        const correct=Math.abs(delta)>=TURN;
+        lastReason=correct?'Head turn detected. Hold there briefly.':'Turn a little further to either side.';
+        quality(lastReason);
+        if(stable(correct,capturedAt,direction))next();
+      }else if(step===2){
+        const centered=Math.abs(yaw-baselineYaw)<=RETURN;
+        if(!centered){
+          collected=[];lastAcceptedAt=0;
+          lastReason='Return your head to the centre.';
+          quality(lastReason);
+        }else if(capturedAt-cueAt>=CUE_MS&&capturedAt-lastAcceptedAt>=250){
           collected.push(f.embedding.slice());lastAcceptedAt=capturedAt;
-          el('challenge').textContent='Final samples '+collected.length+' / '+LIMITS.samples;
+          lastReason='Finishing: '+collected.length+' / '+LIMITS.samples+' valid frames.';
+          quality(lastReason);
           if(collected.length===LIMITS.samples){
             assertCurrent(id);
-            if(step!==5||performance.now()>=deadline)throw Error('Challenge incomplete or expired.');
+            if(step!==2||!base||performance.now()>=deadline)throw Error('Challenge incomplete or expired.');
             if(mode==='enroll'){
               setProfile(collected);result('TEST PROFILE ENROLLED','pass');
-              tell('Now select Verify my face. No employee data was changed.');
+              tell('Done! Select Verify my face.');
             }else{
               result('TEST VERIFIED — SAME FACE','pass');
-              tell('Face match, anti-spoofing, liveness and both head turns passed. No real clock event was created.');
+              tell('Done! Face match, anti-spoofing, liveness and movement checks passed. No real clock event was created.');
             }
             quality('All required checks passed.');
             return;
           }
         }
       }
-      lastReason='The current movement has not yet been confirmed.';
       await sleep(120);
     }
-    throw Error('Timed out. '+lastReason);
+    throw Error('Test session expired after five minutes. Start a fresh scan for security.');
   }catch(error){
     if(id===generation){
       result('TEST REFUSED — '+(error?.message||String(error)),'fail');
-      tell('No verification granted. Improve lighting or try again with the enrolled person.');
+      tell('No verification granted. Retry with the enrolled person and a working camera.');
       quality('');
     }
   }finally{
-    if(id===generation){busy=false;controls();}
+    if(id===generation){busy=false;retryStep=null;controls();}
     base=null;collected=[];ctx?.clearRect(0,0,canvas.width,canvas.height);
   }
 }
 el('start').addEventListener('click',()=>void start());
 el('enroll').addEventListener('click',()=>void scan('enroll'));
 el('verify').addEventListener('click',()=>void scan('verify'));
+el('retry').addEventListener('click',()=>retryStep?.());
 el('cancel').addEventListener('click',()=>{stopCamera();result('Camera stopped');clearDiagnostics();});
 el('clear').addEventListener('click',()=>{setProfile(null);clearDiagnostics();result('Test profile cleared');tell('Enroll again if you want another test.');});
 window.addEventListener('pagehide',()=>{stopCamera();setProfile(null);});
