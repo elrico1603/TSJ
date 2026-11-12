@@ -160,7 +160,7 @@ async function scan(mode){
         collected=[];lastAcceptedAt=0;
         if(data?.face?.length>1){
           identityFailures++;
-          if(identityFailures>=2)throw Error('Multiple faces detected. Verification refused; use one person only.');
+          if(identityFailures>=2)result('NOT VERIFIED — only one person may be in view.','fail');
         }else identityFailures=0;
         quality(lastReason+' Stay on this step.');await sleep(120);continue;
       }
@@ -169,17 +169,19 @@ async function scan(mode){
       diagnostics(data,own);
       const continuity=base?matchScore(engine,base,f.embedding):1;
       // A momentary poor match during a turn is not an automatic restart.
-      // Two consecutive high-quality mismatches are an identity failure.
+      // A persistent mismatch refuses verification without discarding earlier
+      // steps. A matching, live face must return before any progress resumes.
       const wrongIdentity=(mode==='verify'&&(own===null||own<LIMITS.similarity))||
         continuity===null||continuity<0.50;
       if(wrongIdentity){
         resetHold();collected=[];lastAcceptedAt=0;identityFailures++;
         lastReason='Face match not confirmed. Face the camera and adjust your position.';
         quality(lastReason);
-        if(identityFailures>=2)throw Error('Face does not match the enrolled or original test profile.');
+        if(identityFailures>=2)result('NOT VERIFIED — face does not match.','fail');
         await sleep(120);continue;
       }
       identityFailures=0;
+      result((mode==='enroll'?'Enrolling':'Verifying')+' — step '+(step+1)+' of 3');
       const yaw=yawAngle(f);
       el('yaw').textContent=yaw===null?'—':(yaw*180/Math.PI).toFixed(1)+'°';
       if(yaw===null){
