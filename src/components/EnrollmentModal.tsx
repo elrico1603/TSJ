@@ -14,6 +14,7 @@ interface EnrollmentModalProps {
   streamRef: React.MutableRefObject<MediaStream | null>;
   handleEnrollSubmit: (e: React.FormEvent) => void;
   setShowEnrollModal: (b: boolean) => void;
+  onOpenFaceRegistration?: () => void;
 }
 
 export const EnrollmentModal: React.FC<EnrollmentModalProps> = ({
@@ -28,7 +29,8 @@ export const EnrollmentModal: React.FC<EnrollmentModalProps> = ({
   canvasRef,
   streamRef,
   handleEnrollSubmit,
-  setShowEnrollModal
+  setShowEnrollModal,
+  onOpenFaceRegistration
 }) => {
   
   useEffect(() => {
@@ -88,6 +90,12 @@ export const EnrollmentModal: React.FC<EnrollmentModalProps> = ({
           <h2 className="text-3xl font-black uppercase italic tracking-tighter font-sans">
             {isEditing ? 'Update Artisan Records' : 'Artisan Enrollment'}
           </h2>
+          {isEditing && onOpenFaceRegistration && (
+            <button type="button" onClick={onOpenFaceRegistration}
+              className="rounded-xl bg-[#ff8c00] px-4 py-3 text-xs font-black uppercase text-black hover:bg-amber-400">
+              Face Registration
+            </button>
+          )}
           <button 
             type="button" 
             onClick={() => {
