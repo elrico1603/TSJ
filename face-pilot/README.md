@@ -13,7 +13,7 @@ npm run build --prefix face-pilot
 
 The output is `face-pilot/dist`. Open https://app.netlify.com/drop and create a **separate** temporary test site by uploading only this folder. Do not deploy to the existing TS Hub site. Check your Netlify plan's allowance first. Alternatively use an HTTPS static host. Camera access is unavailable on ordinary HTTP LAN IP addresses.
 
-Open the new HTTPS URL on the phone. Allow the camera. Choose Start camera & load model, Enroll my face, then Verify my face. Follow the on-screen blink and head-turn prompts. Keep the page open; the enrolled template exists in memory only.
+Open the new HTTPS URL on the phone. Allow the camera. Choose Start camera & load model, Enroll my face, then Verify my face. Follow the three on-screen prompts: look straight, turn slightly to either side, look straight again. Ordinary blinking is fine. Each step retries automatically after 20 seconds, or press Retry current step. Completed stages stay intact; only genuine identity failures, camera cancellation, page exit or the five-minute security session limit require a new scan. Keep the page open; the enrolled template exists in memory only.
 
 ## Acceptance tests on the actual device
 
@@ -30,7 +30,7 @@ Record scores and pass/refusal results; no face images or templates are needed f
 
 Human 3.3.6 runs a face embedding model, anti-spoof and liveness models locally. The library is MIT; model weights retain source-specific terms, and model licensing must be reviewed before commercial deployment. See https://github.com/vladmandic/human/wiki/Models and https://github.com/vladmandic/human/wiki/Embedding. The model may internally calculate attributes alongside its descriptor; the pilot does not display or persist them.
 
-The thresholds in checks.js are experimental, not independently calibrated or certified. RGB-only cameras can be fooled by sophisticated attacks. The pilot uses fresh frames, a randomized blink/turn order and matching across the challenge, but cannot guarantee protection against replay, deepfakes or a compromised browser. Its result is not an authorization token.
+The thresholds in checks.js are experimental, not independently calibrated or certified. RGB-only cameras can be fooled by sophisticated attacks. The pilot uses fresh frames, one head-turn-and-return challenge (simplified from the earlier blink/two-turn challenge) and matching across the challenge, but cannot guarantee protection against replay, deepfakes or a compromised browser. Its result is not an authorization token.
 
 Production requires approval to unlock the Clocking integration, supervised enrollment, a protected template store and secure device/backend binding; a user must not be able to replace the enrolled template or bypass verification using the legacy PIN route. The previous offline Clocking branch remains separate. POPIA review, retention controls and a supervised exception process are required before employee biometric processing.
 
