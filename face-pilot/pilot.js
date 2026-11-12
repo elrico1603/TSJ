@@ -2,6 +2,19 @@ import {LIMITS,frameCheck,matchScore,profileMatch,yawAngle} from './checks.js';
 const el=id=>document.getElementById(id);
 const camera=el('camera'), canvas=document.createElement('canvas');
 const ctx=canvas.getContext('2d',{alpha:false});
+// The integrated preview captures fresh live samples for the protected API.
+// The standalone phone pilot remains entirely in memory and unchanged.
+const params=new URLSearchParams(location.search);
+const bridgeNonce=params.get('nonce')||'';
+const embedded=window.parent!==window && params.get('embedded')==='capture' &&
+  /^[a-f0-9-]{36}$/i.test(bridgeNonce);
+if(embedded){
+  el('enroll').textContent='Scan face';
+  el('verify').hidden=true;
+  el('clear').hidden=true;
+  document.querySelector('.intro').textContent='Follow the three simple steps. This supervised scan sends only face descriptors to the TS Hub preview for registration or comparison.';
+  document.querySelector('header small').textContent='TS HUB • CONTROLLED INTEGRATION PREVIEW';
+}
 let engine=null, stream=null, profile=null, busy=false, generation=0, retryStep=null;
 function controls(){
   el('start').disabled=busy||!!stream;
@@ -215,8 +228,19 @@ async function scan(mode){
             assertCurrent(id);
             if(step!==2||!base||performance.now()>=deadline)throw Error('Challenge incomplete or expired.');
             if(mode==='enroll'){
-              setProfile(collected);result('TEST PROFILE ENROLLED','pass');
-              tell('Done! Select Verify my face.');
+              if(embedded){
+                // Only completed V3 scans reach this branch. Parent checks
+                // exact origin, frame identity and per-instance nonce.
+                window.parent.postMessage({
+                  type:'TSJ_FACE_CAPTURE_COMPLETE',nonce:bridgeNonce,
+                  model:'human-3.3.6-faceres',samples:collected
+                },location.origin);
+                setProfile(collected);result('SCAN COMPLETE','pass');
+                tell('Done! Return to the TS Hub registration panel.');
+              }else{
+                setProfile(collected);result('TEST PROFILE ENROLLED','pass');
+                tell('Done! Select Verify my face.');
+              }
             }else{
               result('TEST VERIFIED — SAME FACE','pass');
               tell('Done! Face match, anti-spoofing, liveness and movement checks passed. No real clock event was created.');
