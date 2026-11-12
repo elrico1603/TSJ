@@ -21,6 +21,7 @@
 <section class="panel">
   <div class="steps"><span>1. Camera</span><span>2. Enroll</span><span>3. Verify</span></div>
   <p id="instruction" role="status" aria-live="polite">Start the camera and allow access. Use good lighting and keep only one face in view.</p>
+  <p id="quality" class="muted" role="status" aria-live="polite"></p>
   <div id="result" class="result neutral" aria-live="polite">Ready to test</div>
   <div class="buttons">
     <button id="start">Start camera &amp; load model</button>
@@ -41,6 +42,7 @@
     <div><dt>Liveness</dt><dd id="live">—</dd></div>
     <div><dt>Face similarity</dt><dd id="match">—</dd></div>
     <div><dt>Challenge</dt><dd id="challenge">—</dd></div>
+    <div><dt>Head angle</dt><dd id="yaw">—</dd></div>
   </dl>
 </section>
 <footer>Experimental local RGB-camera test. Not a certified biometric attendance system. No employee records or payroll are affected.</footer>
