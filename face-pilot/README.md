@@ -13,7 +13,7 @@ npm run build --prefix face-pilot
 
 The output is `face-pilot/dist`. Open https://app.netlify.com/drop and create a **separate** temporary test site by uploading only this folder. Do not deploy to the existing TS Hub site. Check your Netlify plan's allowance first. Alternatively use an HTTPS static host. Camera access is unavailable on ordinary HTTP LAN IP addresses.
 
-Open the new HTTPS URL on the phone. Allow the camera. Choose Start camera & load model, Enroll my face, then Verify my face. Follow the three on-screen prompts: look straight, turn slightly to either side, look straight again. Ordinary blinking is fine. Each step retries automatically after 20 seconds, or press Retry current step. Completed stages stay intact; only genuine identity failures, camera cancellation, page exit or the five-minute security session limit require a new scan. Keep the page open; the enrolled template exists in memory only.
+Open the new HTTPS URL on the phone. Allow the camera. Choose Start camera & load model, Enroll my face, then Verify my face. Follow the three on-screen prompts: look straight, turn slightly to either side, look straight again. Ordinary blinking is fine. Each step retries automatically after 20 seconds, or press Retry current step. Completed stages stay intact; bad frames, mismatches and multiple faces refuse verification without restarting the current stage. Only camera failure/cancellation, page exit or the five-minute security session limit require a new scan. A valid matching live face must return before progress can resume. Keep the page open; the enrolled template exists in memory only.
 
 ## Acceptance tests on the actual device
 
