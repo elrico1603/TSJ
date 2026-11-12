@@ -10,6 +10,7 @@ import { serverStorage, ALLOWED_IMAGE_MIME_TYPES, MAX_PHOTO_FILE_SIZE_BYTES } fr
 import { serverGemini } from './server/geminiService';
 import { gmailOAuthService, SendPOPayload } from './server/gmailOAuthService';
 import { sessionStore } from './server/sessionStore';
+import { createFaceProfileRouter, faceProfileApiEnabled } from './server/faceProfiles/router';
 import { StorageUploadRequest } from './src/types/storage';
 import { ChatGenerateRequest } from './src/types/chat';
 
@@ -71,6 +72,9 @@ async function startServer() {
   // ==========================================
   // API ROUTES (FIRST)
   // ==========================================
+
+  // Explicitly enabled integration preview. This router cannot write attendance.
+  if (faceProfileApiEnabled()) app.use('/api/face-profiles', createFaceProfileRouter());
 
   // 1. Backend Health & Service Status
   app.get('/api/health', (req, res) => {
