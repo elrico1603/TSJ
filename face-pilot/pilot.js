@@ -1,4 +1,4 @@
-import {LIMITS,frameCheck,matchScore,profileMatch,eyeOpenness,yawAngle} from './checks.js';
+import {LIMITS,frameCheck,matchScore,profileMatch,yawAngle} from './checks.js';
 const el=id=>document.getElementById(id);
 const camera=el('camera'), canvas=document.createElement('canvas');
 const ctx=canvas.getContext('2d',{alpha:false});
@@ -25,7 +25,7 @@ function diagnostics(data,similarity=null){
   el('live').textContent=score(f?.live);
   el('match').textContent=score(similarity);
 }
-function clearDiagnostics(){for(const id of ['faces','confidence','real','live','match','challenge'])el(id).textContent='—';}
+function clearDiagnostics(){for(const id of ['faces','confidence','real','live','match','challenge','yaw'])el(id).textContent='—';}
 function setProfile(value){
   profile=value;
   el('profile').textContent=profile?'Temporary profile enrolled in this page only.':'No temporary profile enrolled.';
@@ -102,27 +102,27 @@ async function freshFrame(id,lastTime){
   assertCurrent(id);
   return {data,time};
 }
-function randomActions(){
-  return crypto.getRandomValues(new Uint8Array(1))[0]%2===0?['blink','turn']:['turn','blink'];
-}
+// Two opposite head turns replace the blink challenge. Slow mobile inference
+// can miss natural blinks. Eye position is not required.
 async function scan(mode){
   if(busy||!engine||!stream||(mode==='verify'&&!profile)||(mode==='enroll'&&profile))return;
   const id=++generation;
   busy=true;controls();clearDiagnostics();result(mode==='enroll'?'Enrolling…':'Verifying…');
-  const actions=randomActions(), completed=[];
-  let phase='center', base=null, eyesOpen=null, closed=false, turned=false;
+  const completed=[];
+  let phase='center', base=null, baselineYaw=null, firstDirection=0, turned=false;
+  const TURN=0.20, RETURN=0.13;
   let lastTime=-1, collected=[], lastReason='Waiting for a clear, live face.';
   let lastAcceptedAt=0;
   const deadline=performance.now()+60000;
   function prompt(){
-    if(phase==='center')return 'Look straight at the camera. Keep your eyes open.';
-    if(phase==='blink')return closed?'Open your eyes and look straight at the camera.':'Close both eyes briefly, then open them.';
-    if(phase==='turn')return turned?'Turn your head back to the centre.':'Slowly turn your head slightly to either side.';
-    return 'Look straight at the camera while we confirm three matching frames.';
+    if(phase==='center')return 'Look naturally at the camera. Blink normally.';
+    if(phase==='turn1')return turned?'Return your head to the centre.':'Slowly turn your head slightly to either side and hold briefly until instructed.';
+    if(phase==='turn2')return turned?'Return your head to the centre.':'Now slowly turn your head to the opposite side and hold briefly.';
+    return 'Look naturally at the camera while we confirm three matching frames.';
   }
   function advance(){
-    if(phase==='blink'||phase==='turn')completed.push(phase);
-    phase=actions.shift()||'samples';closed=false;turned=false;
+    if(phase==='turn1'||phase==='turn2')completed.push(phase);
+    phase=phase==='center'?'turn1':phase==='turn1'?'turn2':'samples';turned=false;
     el('challenge').textContent=completed.length+' / 2 completed';
     tell(prompt());
   }
@@ -148,21 +148,21 @@ async function scan(mode){
         const continuity=matchScore(engine,base,f.embedding);
         if(continuity===null||continuity<0.50)throw Error('The face changed during the challenge.');
       }
-      const yaw=yawAngle(f), eye=eyeOpenness(f);
-      if(yaw===null||eye===null){lastReason='Face landmarks unavailable.';tell(lastReason);continue;}
+      const yaw=yawAngle(f);
+      el('yaw').textContent=yaw===null?'—':(yaw*180/Math.PI).toFixed(1)+'°';
+      if(yaw===null){lastReason='Face rotation unavailable. Keep one clear face in view.';tell(lastReason);continue;}
       if(phase==='center'){
-        if(Math.abs(yaw)>0.18||eye<0.12){lastReason='Face the camera with eyes open.';tell(lastReason);continue;}
-        base=f.embedding.slice();eyesOpen=eye;advance();
-      }else if(phase==='blink'){
-        if(Math.abs(yaw)<=0.25){
-          if(!closed&&eye<eyesOpen*0.58){closed=true;tell(prompt());}
-          else if(closed&&eye>eyesOpen*0.80){advance();}
-        }
-      }else if(phase==='turn'){
-        if(!turned&&Math.abs(yaw)>0.25){turned=true;tell(prompt());}
-        else if(turned&&Math.abs(yaw)<0.15){advance();}
+        if(Math.abs(yaw)>0.35){lastReason='Turn your face toward the camera.';tell(lastReason);continue;}
+        base=f.embedding.slice();baselineYaw=yaw;advance();
+      }else if(phase==='turn1'||phase==='turn2'){
+        const delta=yaw-baselineYaw;
+        if(!turned&&Math.abs(delta)>=TURN){
+          const direction=Math.sign(delta);
+          if(phase==='turn2'&&direction===firstDirection){tell('Turn to the OTHER side, please.');}
+          else {if(phase==='turn1')firstDirection=direction;turned=true;tell(prompt());}
+        }else if(turned&&Math.abs(delta)<=RETURN){advance();}
       }else if(phase==='samples'){
-        if(Math.abs(yaw)<0.18&&eye>eyesOpen*0.75&&performance.now()-lastAcceptedAt>250){
+        if(Math.abs(yaw-baselineYaw)<=RETURN&&performance.now()-lastAcceptedAt>250){
           collected.push(f.embedding.slice());lastAcceptedAt=performance.now();
           el('challenge').textContent='2 / 2 complete • '+collected.length+' / '+LIMITS.samples+' samples';
           if(collected.length===LIMITS.samples){
@@ -173,7 +173,7 @@ async function scan(mode){
               result('TEST PROFILE ENROLLED','pass');tell('Now select Verify my face. No employee data was changed.');
             }else{
               result('TEST VERIFIED — SAME FACE','pass');
-              tell('Face match, anti-spoofing, liveness and both challenges passed. No real clock event was created.');
+              tell('Face match, anti-spoofing, liveness and both head turns passed. No real clock event was created.');
             }
             return;
           }
