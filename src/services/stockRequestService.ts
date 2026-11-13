@@ -2,6 +2,7 @@ import { db, APP_ID_PATH } from '../firebase';
 import { StockRequest, StockRequestItem, StockRequestHistoryItem } from '../types';
 import { notificationService } from './notificationService';
 import { inventoryService } from './inventoryService';
+import { protectedNotificationDeliveryEnabled, deliverStockRequestNotification } from './notificationBackendClient';
 
 const STOCK_REQUESTS_STORAGE_KEY = 'tsj_stock_requests_v1';
 
@@ -62,7 +63,7 @@ export const stockRequestService = {
     branchName: string;
     notes?: string;
     items: StockRequestItem[];
-  }): Promise<StockRequest> {
+  }): Promise<StockRequest & {notificationDelivery?: 'confirmed' | 'pending'}> {
     const existing = this.getLocalRequests();
     const count = existing.length + 1;
     const year = new Date().getFullYear();
@@ -106,6 +107,7 @@ export const stockRequestService = {
     notifyListeners(updated);
 
     // 2. Save Firebase
+    let cloudConfirmed = false;
     if (db && APP_ID_PATH) {
       try {
         await db.collection('artifacts')
@@ -115,6 +117,7 @@ export const stockRequestService = {
           .collection('stockRequests')
           .doc(id)
           .set(newRequest);
+        cloudConfirmed = true;
 
         await db.collection('stockRequests').doc(id).set(newRequest).catch(() => {});
       } catch (err) {
@@ -122,6 +125,21 @@ export const stockRequestService = {
       }
     }
 
+    // Protected mode: one policy event per committed request. Never emit
+    // notifications for a local-only request. Do not change the business
+    // record or resubmit it just because notification delivery fails.
+    if (protectedNotificationDeliveryEnabled()) {
+      if (!cloudConfirmed) return {...newRequest,notificationDelivery:'pending'};
+      try {
+        await deliverStockRequestNotification(newRequest.requestedByUid,id);
+        return {...newRequest,notificationDelivery:'confirmed'};
+      } catch (error) {
+        console.warn('Stock request was saved; notification delivery remains pending:',error);
+        return {...newRequest,notificationDelivery:'pending'};
+      }
+    }
+
+    // Preserve existing production behavior while protected delivery is off.
     // 3. Trigger ONE notification for the whole request
     try {
       const itemSummaries = params.items.map(i => `Product: ${i.productName} (Code: ${i.productId})`).join(' | ');
