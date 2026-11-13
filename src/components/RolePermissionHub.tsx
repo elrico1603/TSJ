@@ -447,44 +447,12 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
   };
 
   // User Role Assignment Handler (Dropdown change in table)
-  const handleAssignUserRole = async (user: AppUser, targetRoleId: string) => {
+  const handleAssignUserRole = (user: AppUser, targetRoleId: string) => {
     if (isReadOnly) return;
-    try {
-      const matchedRole = roles.find(r => r.id === targetRoleId);
-      const roleName = matchedRole ? matchedRole.roleName : user.role;
-
-      // Update active user in Firestore
-      if (updateActiveUser) {
-        await updateActiveUser(user.id, {
-          role: roleName,
-          roleId: targetRoleId
-        });
-      } else if (db && APP_ID_PATH && canMutateAuthOrRBAC('assignRole', user.id)) {
-        await db.collection('artifacts')
-          .doc(APP_ID_PATH)
-          .collection('private')
-          .doc('users')
-          .collection('active')
-          .doc(user.id)
-          .update({
-            role: roleName,
-            roleId: targetRoleId
-          });
-      }
-
-      // Record in permission service
-      const assigned = await permissionService.assignUserRole(
-        user.id,
-        user.name,
-        user.email,
-        targetRoleId,
-        currentUser?.name || 'Administrator'
-      );
-      announce?.(`Assigned role "${assigned.roleName}" to ${user.name}`);
-    } catch (err) {
-      console.error(err);
-      announce?.('Failed to assign user role.');
-    }
+    // Quick role changes must use exactly the same editor and confirmed save.
+    // No second role-only write path that can leave old permissions in place.
+    handleOpenEditUser(user);
+    applyRoleTemplate(targetRoleId);
   };
 
   // Create User Handler
@@ -809,6 +777,10 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
     // Self-Deactivation Protection: Prevent user from locking themselves out
     const isEditingSelf = (editingUser.email && currentUser?.email && editingUser.email.toLowerCase().trim() === currentUser.email.toLowerCase().trim()) ||
                           editingUser.id === currentUser?.id;
+    if (isEditingSelf && roleTemplateApplied && userPermissionOverridesBuffer['User Assignments']?.Edit !== 'allow') {
+      setUserSaveError('You cannot apply a role template that removes your own User Assignments Edit access. Ask another administrator.');
+      return;
+    }
     if (isEditingSelf && editUserForm.active === false) {
       alert('Protection: You cannot deactivate your own active account.');
       return;
