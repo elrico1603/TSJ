@@ -4536,17 +4536,17 @@ TS Joinery Kanban System`
         notifications={userNotifications}
         onMarkAsRead={(id) => {
           if (currentUser?.id) {
-            userNotificationService.markAsRead(currentUser.id, id);
+            userNotificationService.markAsRead(currentUser.id, id).catch(error => announce(error?.message || 'Notification update was not confirmed.'));
           }
         }}
         onMarkAllAsRead={() => {
           if (currentUser?.id) {
-            userNotificationService.markAllAsRead(currentUser.id);
+            userNotificationService.markAllAsRead(currentUser.id).catch(error => announce(error?.message || 'Notification update was not confirmed.'));
           }
         }}
         onDeleteNotification={(id) => {
           if (currentUser?.id) {
-            userNotificationService.deleteNotification(currentUser.id, id);
+            userNotificationService.deleteNotification(currentUser.id, id).catch(error => announce(error?.message || 'Notification update was not confirmed.'));
           }
         }}
         onNavigateToPage={(relatedPage) => {
