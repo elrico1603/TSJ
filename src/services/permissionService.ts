@@ -486,10 +486,13 @@ function indexUserOverrideRecord(docId: string, record: UserPermissionOverride) 
   const userEmail = record.userEmail?.toLowerCase().trim();
 
   overridesByDocId.set(docId, record);
-  if (userId) {
+  // Duplicate legacy aliases must not win merely due to snapshot order.
+  const newer = (previous?:UserPermissionOverride) =>
+    !previous || String(record.updatedAt || '') >= String(previous.updatedAt || '');
+  if (userId && newer(overridesByUserId.get(userId))) {
     overridesByUserId.set(userId, record);
   }
-  if (userEmail) {
+  if (userEmail && newer(overridesByEmail.get(userEmail))) {
     overridesByEmail.set(userEmail, record);
   }
 }
@@ -504,8 +507,8 @@ function rebuildPermissionMaps(records: Array<{ id: string; data: UserPermission
     if (!data) return;
     indexUserOverrideRecord(id, data);
     newMap[id] = data;
-    if (data.userId?.trim()) newMap[data.userId.trim()] = data;
-    if (data.userEmail?.toLowerCase().trim()) newMap[data.userEmail.toLowerCase().trim()] = data;
+    if (data.userId?.trim()) newMap[data.userId.trim()] = overridesByUserId.get(data.userId.trim())!;
+    if (data.userEmail?.toLowerCase().trim()) newMap[data.userEmail.toLowerCase().trim()] = overridesByEmail.get(data.userEmail.toLowerCase().trim())!;
   });
 
   activeUserOverrides = newMap;
@@ -1748,39 +1751,33 @@ export const permissionService = {
     newPermissions: Record<string, Record<PermissionAction, boolean>>,
     adminName: string
   ): Promise<void> {
-    const roles = this.getLocalRoles();
-    const roleDef = roles.find(r => r.id === roleId);
-    const roleName = roleDef ? roleDef.roleName : roleId;
-
-    const permsMap = this.getLocalRolePermissions();
-    const oldPerms = permsMap[roleId];
-
-    const updatedRolePerms: RolePermissions = {
-      roleId,
-      roleName,
-      permissions: newPermissions,
-      updatedAt: new Date().toISOString(),
-      updatedBy: adminName
-    };
-
-    permsMap[roleId] = updatedRolePerms;
-    this.saveLocalRolePermissions(permsMap);
-
-    await this.logAudit(
-      adminName,
-      'ROLE_PERMISSIONS_UPDATED',
-      oldPerms ? `Updated matrix for ${roleName}` : 'None',
-      `Saved ${Object.keys(newPermissions).length} module permissions`
-    );
-
-    if (db && APP_ID_PATH && canMutateAuthOrRBAC('savePermissionsForRole', roleId)) {
-      try {
-        await db.collection('rolePermissions').doc(roleId).set(updatedRolePerms);
-        await db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('rolePermissions').collection('items').doc(roleId).set(updatedRolePerms);
-      } catch (e) {
-        console.warn('Firebase savePermissionsForRole sync error:', e);
-      }
+    const roleDef = this.getLocalRoles().find(r => r.id === roleId);
+    if (!roleDef || roleDef.status !== 'active') throw new Error('Select an active role.');
+    if (!db || !APP_ID_PATH || !canMutateAuthOrRBAC('savePermissionsForRole', roleId)) {
+      throw new Error('Live role matrices cannot be saved in preview mode.');
     }
+    const updatedRolePerms: RolePermissions = {
+      roleId, roleName:roleDef.roleName, permissions:newPermissions,
+      updatedAt:new Date().toISOString(), updatedBy:adminName
+    };
+    const ref=db.collection('rolePermissions').doc(roleId);
+    const mirror=db.collection('artifacts').doc(APP_ID_PATH)
+      .collection('public').doc('rolePermissions').collection('items').doc(roleId);
+    const batch=db.batch();
+    batch.set(ref,updatedRolePerms);
+    batch.set(mirror,updatedRolePerms);
+    await batch.commit();
+    const confirmed=(await ref.get({source:'server'})).data() as RolePermissions | undefined;
+    if (!confirmed || confirmed.roleId !== roleId ||
+        !Object.entries(newPermissions).every(([module,actions]) =>
+          ALL_PERMISSION_ACTIONS.every(action => confirmed.permissions?.[module]?.[action] === actions[action]))) {
+      throw new Error('Firestore did not confirm the saved role matrix.');
+    }
+    const permsMap=this.getLocalRolePermissions();
+    permsMap[roleId]=confirmed;
+    this.saveLocalRolePermissions(permsMap);
+    await this.logAudit(adminName,'ROLE_PERMISSIONS_UPDATED',roleDef.roleName,
+      'Confirmed '+Object.keys(newPermissions).length+' module permissions');
   },
 
   async assignUserRole(
