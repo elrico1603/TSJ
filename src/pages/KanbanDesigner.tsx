@@ -409,8 +409,8 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
   // Fit Page function
   const handleFitPage = () => {
     if (!workspaceRef.current) return;
-    const viewportWidth = workspaceRef.current.clientWidth - 64; // subtract padding
-    const viewportHeight = workspaceRef.current.clientHeight - 160; // subtract padding and header info
+    const viewportWidth = workspaceRef.current.clientWidth - (compactLayout ? 24 : 64); // subtract padding
+    const viewportHeight = workspaceRef.current.clientHeight - (compactLayout ? 150 : 160); // subtract padding and header info
     const scaleX = viewportWidth / canvasWidthPx;
     const scaleY = viewportHeight / canvasHeightPx;
     const fitScale = Math.min(scaleX, scaleY) * 100;
@@ -1024,7 +1024,7 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
                         {groupTemplates.map(t => (
                           <div
                             key={t.id}
-                            onClick={() => handleSelectTemplate(t)}
+                            onClick={() => { handleSelectTemplate(t); if (compactLayout) setIsSidebarOpen(false); }}
                             className={`p-3 rounded-2xl border transition-all cursor-pointer ${
                               activeTemplate?.id === t.id
                                 ? 'bg-purple-600/10 border-purple-500'
