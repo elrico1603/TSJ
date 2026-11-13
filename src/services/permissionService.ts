@@ -759,6 +759,118 @@ export const permissionService = {
     return CENTRAL_MODULE_REGISTRY.filter(m => m.supportsDevices[deviceContext]);
   },
 
+  /**
+   * Commit the existing account, its role and its explicit access together.
+   * Only acknowledge success after a Firestore server read confirms the save.
+   */
+  async saveUserAccessEditor(
+    user: {id:string; email:string},
+    updates: {name:string; email:string; role:string; roleId:string; [key:string]:any},
+    override: UserPermissionOverride,
+    adminName: string
+  ): Promise<UserPermissionOverride> {
+    if (!db || !APP_ID_PATH || !canMutateAuthOrRBAC('saveUserAccessEditor', user.id)) {
+      throw new Error('Live access changes cannot be saved in preview mode. Open the production app as an administrator.');
+    }
+    const normalizedEmail = user.email.trim().toLowerCase();
+    const newEmail = updates.email.trim().toLowerCase();
+    if (!normalizedEmail || !newEmail || !user.id || !updates.roleId) {
+      throw new Error('A valid existing user, email and role are required.');
+    }
+    const active = db.collection('artifacts').doc(APP_ID_PATH)
+      .collection('private').doc('users').collection('active');
+    const overrideCollection = db.collection(CANONICAL_PERMISSIONS_COLLECTION);
+    const [usersSnapshot, overridesSnapshot] = await Promise.all([
+      active.get({source:'server'}),
+      overrideCollection.get({source:'server'})
+    ]);
+    const matchingUsers = usersSnapshot.docs.filter(doc =>
+      String(doc.data()?.email || '').trim().toLowerCase() === normalizedEmail);
+    if (matchingUsers.length !== 1) {
+      throw new Error(matchingUsers.length ? 'Duplicate active accounts have this email. Resolve the duplicates before saving.' :
+        'The existing account was not found in Firestore. No new user was created.');
+    }
+    const target = matchingUsers[0];
+    if (usersSnapshot.docs.some(doc => doc.id !== target.id &&
+        String(doc.data()?.email || '').trim().toLowerCase() === newEmail)) {
+      throw new Error('Another active account already uses that email.');
+    }
+    const ids = new Set([user.id, target.id, String(target.data()?.id || '')].filter(Boolean));
+    const related = overridesSnapshot.docs.filter(doc => {
+      const record = doc.data() as UserPermissionOverride;
+      return ids.has(doc.id) || ids.has(record.userId) ||
+        doc.id.toLowerCase() === normalizedEmail ||
+        record.userEmail?.trim().toLowerCase() === normalizedEmail;
+    });
+    if (related.some(doc => {
+      const record = doc.data() as UserPermissionOverride;
+      const email = record.userEmail?.trim().toLowerCase();
+      return Boolean(email && email !== normalizedEmail && email !== newEmail);
+    })) throw new Error('Conflicting permission records found. No settings were changed.');
+    const latest = [...related].sort((a,b) =>
+      String(b.data()?.updatedAt || '').localeCompare(String(a.data()?.updatedAt || '')) ||
+      a.id.localeCompare(b.id))[0]?.data() as UserPermissionOverride | undefined;
+    const updated: UserPermissionOverride = {
+      ...latest,
+      ...override,
+      userId: user.id,
+      userEmail: newEmail,
+      updatedAt: new Date().toISOString(),
+      updatedBy: adminName || 'Administrator'
+    };
+    const assignment: UserRoleAssignment = {
+      userId:user.id, userName:updates.name, userEmail:newEmail,
+      roleId:updates.roleId, roleName:updates.role,
+      updatedAt:updated.updatedAt!
+    };
+    const canonical = overrideCollection.doc(target.id);
+    const batch = db.batch();
+    // Replace complete nested device maps so removed entries cannot survive.
+    batch.update(target.ref, {...updates, email:newEmail});
+    batch.set(canonical, updated);
+    related.forEach(doc => { if (doc.id !== canonical.id) batch.set(doc.ref, updated); });
+    for (const id of [...new Set([user.id, target.id])]) {
+      const value = {...assignment,userId:id};
+      batch.set(db.collection('userRoles').doc(id),value);
+      batch.set(db.collection('artifacts').doc(APP_ID_PATH).collection('public')
+        .doc('userRoles').collection('items').doc(id),value);
+    }
+    await batch.commit();
+    const [savedUser,savedOverride] = await Promise.all([
+      target.ref.get({source:'server'}),canonical.get({source:'server'})
+    ]);
+    const saved = savedOverride.data() as UserPermissionOverride | undefined;
+    const actual = savedUser.data();
+    const normalized = (value:any):any => Array.isArray(value) ? value.map(normalized) :
+      value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key=>[key,normalized(value[key])])) : value;
+    const equal = (a:any,b:any) => JSON.stringify(normalized(a)) === JSON.stringify(normalized(b));
+    if (!saved || !actual || actual.roleId !== updates.roleId || actual.role !== updates.role ||
+        !equal(saved.deviceAccess,updated.deviceAccess) ||
+        !equal(saved.deviceViewAccess,updated.deviceViewAccess) ||
+        !equal(saved.permissions,updated.permissions) ||
+        !equal(actual.deviceAccess,updates.deviceAccess) ||
+        !equal(actual.deviceViewAccess,updates.deviceViewAccess)) {
+      throw new Error('Firestore could not confirm the saved role and permissions. Reload before retrying.');
+    }
+    for(const doc of related) indexUserOverrideRecord(doc.id,saved);
+    indexUserOverrideRecord(canonical.id,saved);
+    if(!activeUserOverrides) activeUserOverrides={};
+    for(const doc of related) activeUserOverrides[doc.id]=saved;
+    activeUserOverrides[canonical.id]=saved;
+    activeUserOverrides[user.id]=saved;
+    activeUserOverrides[newEmail]=saved;
+    this.saveLocalUserOverrides(activeUserOverrides);
+    const roles = this.getLocalUserRoles();
+    roles[user.id]=assignment;
+    this.saveLocalUserRoles(roles);
+    overrideListeners.forEach(listener => {
+      try { listener(activeUserOverrides!); } catch(error) { console.warn('Permission listener failed:',error); }
+    });
+    await this.logAudit(adminName,'USER_ACCESS_EDITOR_SAVED',normalizedEmail,
+      'Confirmed role '+updates.role+' and device/module permissions');
+    return saved;
+  },
+
   // Save or update an explicit user permission override
   // Uses ONLY the canonical userPermissionOverrides Firestore collection
   async saveUserOverride(override: UserPermissionOverride, adminName: string = 'Administrator'): Promise<UserPermissionOverride> {
