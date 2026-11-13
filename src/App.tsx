@@ -2460,7 +2460,7 @@ TS Joinery Kanban System`
             )}
           </div>
 
-          <div className="flex items-center gap-3 lg:gap-6 font-sans">
+          <div className={`flex items-center font-sans ${layoutMode === 'tablet' ? 'gap-1.5 flex-wrap justify-end min-w-0' : 'gap-3 lg:gap-6'}`}>
             {/* Current User Badge */}
             <div 
               onClick={() => setShowUserProfileModal(true)}
@@ -2480,7 +2480,7 @@ TS Joinery Kanban System`
               </div>
             </div>
 
-            <div className="text-right flex flex-col justify-center select-none hidden sm:flex">
+            <div className={`text-right flex-col justify-center select-none ${layoutMode === 'tablet' ? 'hidden lg:flex' : 'hidden sm:flex'}`}>
               <p className="text-lg lg:text-2xl font-mono font-black leading-none text-white tracking-tight">
                 {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
               </p>
@@ -2567,7 +2567,7 @@ TS Joinery Kanban System`
                 title="TimberSmith Gemini AI Assistant"
               >
                 <Icon name="bot" size={18} />
-                <span className="hidden sm:inline text-[10px] font-mono font-bold uppercase tracking-wider text-cyan-300">Gemini AI</span>
+                <span className={`${layoutMode === 'tablet' ? 'hidden' : 'hidden sm:inline'} text-[10px] font-mono font-bold uppercase tracking-wider text-cyan-300`}>Gemini AI</span>
               </button>
 
               {canManageUsers && (
