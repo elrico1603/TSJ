@@ -21,12 +21,14 @@ import { renderSectionContent as renderSharedSectionContent } from '../component
 import { QRCodeRenderer } from '../components/QRCodeRenderer';
 
 interface KanbanDesignerProps {
+  compactLayout?: boolean;
   currentUser: any;
   announce: (message: string) => void;
   onPrintPreview: (template: KanbanTemplateV2, sampleCard: KanbanCardMaster, masterInfo?: MasterInfoType) => void;
 }
 
 export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
+  compactLayout = false,
   currentUser,
   announce,
   onPrintPreview
@@ -37,7 +39,8 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
   const [selectedProductMaster, setSelectedProductMaster] = useState<ProductMaster | null>(null);
   const [activeSectionId, setActiveSectionId] = useState<string>('master_info');
   const [loading, setLoading] = useState<boolean>(true);
-  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(!compactLayout);
+  const [propertiesOpen, setPropertiesOpen] = useState(false);
 
   // Right sidebar panel triple tabs
   const [rightActiveTab, setRightActiveTab] = useState<'master' | 'layout' | 'typography'>('master');
@@ -406,8 +409,8 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
   // Fit Page function
   const handleFitPage = () => {
     if (!workspaceRef.current) return;
-    const viewportWidth = workspaceRef.current.clientWidth - 64; // subtract padding
-    const viewportHeight = workspaceRef.current.clientHeight - 160; // subtract padding and header info
+    const viewportWidth = workspaceRef.current.clientWidth - (compactLayout ? 24 : 64); // subtract padding
+    const viewportHeight = workspaceRef.current.clientHeight - (compactLayout ? 150 : 160); // subtract padding and header info
     const scaleX = viewportWidth / canvasWidthPx;
     const scaleY = viewportHeight / canvasHeightPx;
     const fitScale = Math.min(scaleX, scaleY) * 100;
@@ -804,9 +807,9 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
   const activeSection = activeTemplate?.sections.find(s => s.id === activeSectionId);
 
   return (
-    <div className="h-full flex bg-[#0c0c0c] text-white overflow-hidden font-sans">
+    <div className="h-full min-h-0 flex relative bg-[#0c0c0c] text-white overflow-hidden font-sans">
       {/* 1. Sidebar Panel: List of saved template designs */}
-      <aside className={`w-80 bg-[#121212] border-r border-white/10 flex flex-col shrink-0 transition-all duration-300 ${isSidebarOpen ? 'ml-0' : '-ml-80'}`}>
+      <aside className={`w-80 max-w-[85vw] bg-[#121212] border-r border-white/10 flex flex-col shrink-0 transition-all duration-300 ${compactLayout ? (isSidebarOpen ? 'absolute inset-y-0 left-0 z-30 shadow-2xl' : 'hidden') : (isSidebarOpen ? 'ml-0' : '-ml-80')}`}>
         <div className="p-5 border-b border-white/10 flex justify-between items-center bg-black/40">
           <h2 className="text-sm font-black uppercase tracking-widest text-orange-400 flex items-center gap-2">
             <Icon name="layout-template" size={16} /> Kanban Templates
@@ -1021,7 +1024,7 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
                         {groupTemplates.map(t => (
                           <div
                             key={t.id}
-                            onClick={() => handleSelectTemplate(t)}
+                            onClick={() => { handleSelectTemplate(t); if (compactLayout) setIsSidebarOpen(false); }}
                             className={`p-3 rounded-2xl border transition-all cursor-pointer ${
                               activeTemplate?.id === t.id
                                 ? 'bg-purple-600/10 border-purple-500'
@@ -1069,7 +1072,7 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
       </aside>
 
       {/* Toggle Sidebar handle if closed */}
-      {!isSidebarOpen && (
+      {!isSidebarOpen && !compactLayout && (
         <button
           onClick={() => setIsSidebarOpen(true)}
           className="fixed left-4 top-20 z-50 p-2 bg-[#ff8c00] hover:bg-[#e07b00] rounded-xl text-white shadow-xl transition-all"
@@ -1079,11 +1082,12 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
       )}
 
       {/* 2. Main Canvas Area */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 min-h-0">
+        {compactLayout && <div className="flex items-center gap-2 p-2 border-b border-white/10 bg-[#101010] shrink-0"><button type="button" aria-expanded={isSidebarOpen} onClick={() => { setIsSidebarOpen(v => !v); setPropertiesOpen(false); }} className="min-h-[44px] px-3 rounded-xl bg-purple-600/20 border border-purple-500/30 text-xs font-bold">Templates</button><button type="button" aria-expanded={propertiesOpen} onClick={() => { setPropertiesOpen(v => !v); setIsSidebarOpen(false); }} className="min-h-[44px] px-3 rounded-xl bg-white/10 text-xs font-bold">Properties</button></div>}
         {/* Dynamic Editor Header Controls */}
-        <div className="h-16 border-b border-white/10 px-6 flex justify-between items-center bg-[#101010]">
+        <div className={`${compactLayout ? 'min-h-16 px-2 py-2' : 'h-16 px-6'} border-b border-white/10 flex justify-between items-center bg-[#101010] shrink-0`}>
           {activeTemplate ? (
-            <div className="flex items-center gap-3 w-full justify-between">
+            <div className={`flex items-center gap-3 w-full justify-between ${compactLayout ? 'flex-wrap' : ''}`}>
               <div className="flex items-center gap-3 max-w-sm flex-1">
                 <input
                   type="text"
@@ -1133,7 +1137,7 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
               </div>
 
               {/* Action Toolbar */}
-              <div className="flex gap-2">
+              <div className={`flex gap-2 ${compactLayout ? 'flex-wrap' : ''}`}>
                 <button
                   onClick={handleSave}
                   className="px-4 py-2 bg-[#ff8c00] hover:bg-[#e07b00] rounded-xl text-xs font-black uppercase tracking-widest text-white transition-all flex items-center gap-1.5"
@@ -1170,7 +1174,7 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
         </div>
 
         {/* Interactive Workspace Area */}
-        <div className="flex-1 flex overflow-hidden">
+        <div className="flex-1 min-h-0 flex overflow-hidden relative">
           {activeTemplate ? (
             <div 
               ref={workspaceRef}
@@ -1178,7 +1182,7 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
               onMouseMove={handleMouseMove}
               onMouseUp={handleMouseUp}
               onMouseLeave={handleMouseLeave}
-              className="flex-1 flex flex-col items-center justify-start p-8 overflow-auto select-none relative custom-scrollbar bg-[#0f0f0f]"
+              className={`flex-1 min-w-0 flex flex-col items-center justify-start ${compactLayout ? 'p-3' : 'p-8'} overflow-auto select-none relative custom-scrollbar bg-[#0f0f0f]`}
               style={{ cursor: isPanning ? 'grabbing' : 'default' }}
             >
               <div className="mb-4 text-center shrink-0">
@@ -1191,11 +1195,12 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
               </div>
 
               {/* Zoom Toolbar */}
-              <div className="mb-6 flex items-center justify-center gap-2 bg-neutral-900 border border-white/10 px-4 py-2 rounded-2xl shadow-xl shrink-0">
+              <div className="mb-6 flex flex-wrap items-center justify-center gap-2 bg-neutral-900 border border-white/10 px-4 py-2 rounded-2xl shadow-xl shrink-0 max-w-full">
                 <button
                   onClick={() => {
                     const idx = ZOOM_LEVELS.indexOf(zoom);
                     if (idx > 0) setZoom(ZOOM_LEVELS[idx - 1]);
+                    else if (idx === -1) { const previous = [...ZOOM_LEVELS].reverse().find(z => z < zoom); if (previous) setZoom(previous); }
                   }}
                   disabled={zoom <= 25}
                   className="w-8 h-8 flex items-center justify-center bg-black hover:bg-white/10 text-white rounded-lg disabled:opacity-40 transition-colors text-sm font-bold"
@@ -1374,7 +1379,7 @@ export const KanbanDesigner: React.FC<KanbanDesignerProps> = ({
             const currentElementId = isValidElement ? selectedTextElementId : (sectionTextElements[0]?.id || '');
 
             return (
-              <aside className="w-80 bg-[#121212] border-l border-white/10 flex flex-col overflow-y-auto custom-scrollbar p-5 space-y-5">
+              <aside className={`w-80 max-w-[85vw] shrink-0 bg-[#121212] border-l border-white/10 flex flex-col overflow-y-auto custom-scrollbar p-5 space-y-5 ${compactLayout ? (propertiesOpen ? 'absolute inset-y-0 right-0 z-30 shadow-2xl' : 'hidden') : ''}`}>
               
               {/* Triple-Tab Panel Headings */}
               <div className="grid grid-cols-3 gap-1 bg-black/60 p-1 rounded-2xl border border-white/5 shrink-0">

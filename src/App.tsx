@@ -88,6 +88,7 @@ export default function App() {
     return 'desktop';
   };
 
+  const [navigationOpen, setNavigationOpen] = useState<boolean | null>(null);
   const [layoutMode, setLayoutMode] = useState<'desktop' | 'tablet' | 'phone'>(() => {
     if (typeof window !== 'undefined') {
       try {
@@ -2427,7 +2428,8 @@ TS Joinery Kanban System`
 
         {/* Global header bar - Fixed Header (never scrolls) */}
         <header className="px-4 sm:px-6 lg:px-8 py-3.5 pt-[calc(0.875rem+env(safe-area-inset-top,0px))] pl-[calc(1rem+env(safe-area-inset-left,0px))] pr-[calc(1rem+env(safe-area-inset-right,0px))] border-b border-white/10 bg-[#0c0c0c]/90 backdrop-blur-2xl sticky top-0 z-50 flex justify-between items-center select-none font-sans shrink-0">
-          <div className="flex items-center space-x-3 lg:space-x-5">
+          <div className="flex items-center space-x-3 lg:space-x-5 min-w-0">
+            {layoutMode !== 'phone' && <button type="button" aria-label="Toggle navigation menu" aria-controls="ts-main-navigation" aria-expanded={navigationOpen ?? layoutMode === 'desktop'} onClick={() => setNavigationOpen(prev => !(prev ?? layoutMode === 'desktop'))} className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl border border-white/15 bg-white/5 hover:bg-white/10 shrink-0"><span aria-hidden="true">☰</span></button>}
             <div className="p-2.5 lg:p-3 rounded-2xl bg-[#ff8c00]/10 text-[#ff8c00] shadow-[0_0_20px_rgba(255,140,0,0.15)] shrink-0">
               <Icon name="hard-hat" size={24} className="lg:w-7 lg:h-7" />
             </div>
@@ -2442,7 +2444,7 @@ TS Joinery Kanban System`
           </div>
 
           {/* Header Search Input */}
-          <div className="relative hidden md:flex items-center mx-4">
+          <div className={`relative ${layoutMode === 'tablet' ? 'hidden' : 'hidden md:flex'} items-center mx-4`}>
             <Icon name="search" size={14} className="absolute left-3 text-gray-400 pointer-events-none" />
             <input
               type="text"
@@ -2458,7 +2460,7 @@ TS Joinery Kanban System`
             )}
           </div>
 
-          <div className="flex items-center gap-3 lg:gap-6 font-sans">
+          <div className={`flex items-center font-sans ${layoutMode === 'tablet' ? 'gap-1.5 flex-wrap justify-end min-w-0' : 'gap-3 lg:gap-6'}`}>
             {/* Current User Badge */}
             <div 
               onClick={() => setShowUserProfileModal(true)}
@@ -2478,7 +2480,7 @@ TS Joinery Kanban System`
               </div>
             </div>
 
-            <div className="text-right flex flex-col justify-center select-none hidden sm:flex">
+            <div className={`text-right flex-col justify-center select-none ${layoutMode === 'tablet' ? 'hidden lg:flex' : 'hidden sm:flex'}`}>
               <p className="text-lg lg:text-2xl font-mono font-black leading-none text-white tracking-tight">
                 {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
               </p>
@@ -2565,7 +2567,7 @@ TS Joinery Kanban System`
                 title="TimberSmith Gemini AI Assistant"
               >
                 <Icon name="bot" size={18} />
-                <span className="hidden sm:inline text-[10px] font-mono font-bold uppercase tracking-wider text-cyan-300">Gemini AI</span>
+                <span className={`${layoutMode === 'tablet' ? 'hidden' : 'hidden sm:inline'} text-[10px] font-mono font-bold uppercase tracking-wider text-cyan-300`}>Gemini AI</span>
               </button>
 
               {canManageUsers && (
@@ -2589,7 +2591,7 @@ TS Joinery Kanban System`
         <div className="flex-1 flex overflow-hidden w-full relative">
           {/* Main lateral application routing sidebar (Hidden by default on mobile screens < 768px) */}
           {layoutMode !== 'phone' && (
-            <aside className="hidden md:flex w-72 xl:w-80 bg-black/60 backdrop-blur-2xl border-r border-white/10 p-4 xl:p-6 flex-col justify-between h-full overflow-y-auto custom-scrollbar shrink-0 select-none">
+            <aside id="ts-main-navigation" className={`${(navigationOpen ?? layoutMode === 'desktop') ? 'flex' : 'hidden'} ${layoutMode === 'tablet' ? 'absolute inset-y-0 left-0 z-40 w-72 max-w-[85vw] bg-[#121212] shadow-2xl' : 'w-72 xl:w-80 bg-black/60'} backdrop-blur-2xl border-r border-white/10 p-4 xl:p-6 flex-col justify-between h-full overflow-y-auto custom-scrollbar shrink-0 select-none`} onClick={(e) => { if (layoutMode === 'tablet' && (e.target as HTMLElement).closest('button')) setNavigationOpen(false); }}>
               <div className="space-y-6 xl:space-y-8 font-sans flex-1 overflow-y-auto custom-scrollbar pr-1">
                 <div>
                   <p className="text-[10px] font-black uppercase text-gray-500 tracking-[0.2em] mb-3 xl:mb-4">Artisan Terminal</p>
@@ -2802,9 +2804,10 @@ TS Joinery Kanban System`
           )}
 
           {/* Workspace view wrapper */}
-          <div className={`w-full flex-1 overflow-y-auto custom-scrollbar relative ${layoutMode === 'phone' ? 'pb-24' : ''}`}>
+          <div className={`w-full min-w-0 flex-1 overflow-y-auto custom-scrollbar relative ${layoutMode === 'phone' ? 'pb-24' : ''}`}>
             {appMode === 'template_designer' && !showCardEditor ? (
               <KanbanDesigner 
+                compactLayout={layoutMode === 'tablet'}
                 currentUser={currentUser}
                 announce={announce}
                 onPrintPreview={(template, cardData, masterInfo) => {
