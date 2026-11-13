@@ -121,7 +121,7 @@ export const notificationPolicyService = {
   },
   async resetAllPolicies(): Promise<void> {
     if (!canMutateNotificationPolicies('resetAllPolicies')) {
-      for (const policy of Object.values(this.getAllDefaultPolicies())) localPolicyOverrides.set(policy.eventId,policy);
+      for (const policy of Object.values(notificationEventRegistry.getDefaultPoliciesMap())) localPolicyOverrides.set(policy.eventId,policy);
       notifySubscribers();return;
     }
     const snapshot = await collection().get({source:'server'});
