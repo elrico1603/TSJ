@@ -209,6 +209,8 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
   const [userModalPermSearch, setUserModalPermSearch] = useState('');
   const [userModalCategoryFilter, setUserModalCategoryFilter] = useState('ALL');
   const [isSavingUser, setIsSavingUser] = useState(false);
+  const [userSaveError, setUserSaveError] = useState('');
+  const [roleTemplateApplied, setRoleTemplateApplied] = useState(false);
 
   const [deleteConfirmUser, setDeleteConfirmUser] = useState<AppUser | null>(null);
   const [showPasswordIds, setShowPasswordIds] = useState<Record<string, boolean>>({});
@@ -445,44 +447,12 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
   };
 
   // User Role Assignment Handler (Dropdown change in table)
-  const handleAssignUserRole = async (user: AppUser, targetRoleId: string) => {
+  const handleAssignUserRole = (user: AppUser, targetRoleId: string) => {
     if (isReadOnly) return;
-    try {
-      const matchedRole = roles.find(r => r.id === targetRoleId);
-      const roleName = matchedRole ? matchedRole.roleName : user.role;
-
-      // Update active user in Firestore
-      if (updateActiveUser) {
-        await updateActiveUser(user.id, {
-          role: roleName,
-          roleId: targetRoleId
-        });
-      } else if (db && APP_ID_PATH && canMutateAuthOrRBAC('assignRole', user.id)) {
-        await db.collection('artifacts')
-          .doc(APP_ID_PATH)
-          .collection('private')
-          .doc('users')
-          .collection('active')
-          .doc(user.id)
-          .update({
-            role: roleName,
-            roleId: targetRoleId
-          });
-      }
-
-      // Record in permission service
-      const assigned = await permissionService.assignUserRole(
-        user.id,
-        user.name,
-        user.email,
-        targetRoleId,
-        currentUser?.name || 'Administrator'
-      );
-      announce?.(`Assigned role "${assigned.roleName}" to ${user.name}`);
-    } catch (err) {
-      console.error(err);
-      announce?.('Failed to assign user role.');
-    }
+    // Quick role changes must use exactly the same editor and confirmed save.
+    // No second role-only write path that can leave old permissions in place.
+    handleOpenEditUser(user);
+    applyRoleTemplate(targetRoleId);
   };
 
   // Create User Handler
@@ -607,8 +577,10 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
 
   // Open Edit User Modal
   const handleOpenEditUser = (user: AppUser) => {
+    setUserSaveError('');
+    setRoleTemplateApplied(false);
     setEditingUser(user);
-    const assignedRoleId = user.roleId || userRolesMap[user.id || user.email]?.roleId || roles.find(r => r.roleName.toLowerCase() === (user.role || '').toLowerCase())?.id || roles[0]?.id || '';
+    const assignedRoleId = userRolesMap[user.id]?.roleId || user.roleId || roles.find(r => r.roleName.toLowerCase() === (user.role || '').toLowerCase())?.id || roles[0]?.id || '';
     const userBranch = branches.find(b => b.id === user.branchId || b.branchName === user.branchName) || branches[0];
     const userOverride = permissionService.getUserOverride(user);
 
@@ -627,7 +599,7 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
       physicalLocation: user.physicalLocation || userOverride?.physicalLocation || '',
       pin: user.pin || '',
       roleId: assignedRoleId,
-      roleName: user.role || 'Employee',
+      roleName: roles.find(r => r.id === assignedRoleId)?.roleName || user.role || 'Employee',
       department: user.department || 'Operations',
       active: user.active !== undefined ? user.active : true,
       deviceAccess: userOverride?.deviceAccess || user.deviceAccess || {
@@ -644,7 +616,7 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
     PERMISSION_CATEGORIES_CONFIG.flatMap(c => c.modules).forEach(moduleName => {
       initialBuffer[moduleName] = {};
       ALL_PERMISSION_ACTIONS.forEach(act => {
-        const overrideVal = userOverride?.permissions?.[moduleName]?.[act];
+        const overrideVal = userOverride?.permissions?.[moduleName]?.[act] ?? user.userPermissions?.[moduleName]?.[act];
         if (overrideVal === 'allow' || overrideVal === true) {
           initialBuffer[moduleName]![act] = 'allow';
         } else if (overrideVal === 'deny' || overrideVal === false) {
@@ -657,8 +629,42 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
     setUserPermissionOverridesBuffer(initialBuffer);
     setUserModalPermSearch('');
     setUserModalCategoryFilter('ALL');
-    setSelectedDeviceViewTab('phone');
+    setSelectedDeviceViewTab(userOverride?.deviceAccess?.tablet || user.deviceAccess?.tablet ? 'tablet' : 'phone');
     setShowEditUserModal(true);
+  };
+
+  // A role is an explicit template, not a hidden runtime privilege grant.
+  // Existing users retain their custom grants until an administrator applies
+  // a template. All action values are materialized, including explicit denies.
+  const applyRoleTemplate = (roleId: string) => {
+    if (isReadOnly || isSavingUser) return;
+    const selected = roles.find(r => r.id === roleId && r.status === 'active');
+    const matrix = rolePermissionsMap[roleId]?.permissions;
+    if (!selected || !matrix || Object.keys(matrix).length === 0) {
+      setUserSaveError('This role has no saved permission matrix. Configure the role first.');
+      return;
+    }
+    if (!window.confirm('Apply the '+selected.roleName+' role template? This replaces this user’s current action and device-view overrides. Hardware access and existing account details remain unchanged. Nothing is saved until you press Save.')) return;
+    const next: Record<string, Partial<Record<PermissionAction, 'allow' | 'deny' | 'inherit'>>> = {};
+    PERMISSION_CATEGORIES_CONFIG.flatMap(c => c.modules).forEach(moduleName => {
+      next[moduleName] = {};
+      ALL_PERMISSION_ACTIONS.forEach(action => {
+        next[moduleName][action] = matrix[moduleName]?.[action] === true ? 'allow' : 'deny';
+      });
+    });
+    // Derive device-view defaults from the same saved action matrix.
+    const views = {phone:{} as Record<string,boolean>,tablet:{} as Record<string,boolean>,desktop:{} as Record<string,boolean>,terminal:{} as Record<string,boolean>};
+    for (const device of ['phone','tablet','desktop','terminal'] as const) {
+      for (const module of permissionService.getCentralModules()) {
+        views[device][module.id] = module.supportsDevices[device] === true &&
+          (module.id === 'gemini_ai' ? false :
+           Boolean(module.permissionModules?.some(name => next[name]?.View === 'allow')));
+      }
+    }
+    setUserPermissionOverridesBuffer(next);
+    setEditUserForm(prev => ({...prev, roleId: selected.id, roleName: selected.roleName, deviceViewAccess: views}));
+    setRoleTemplateApplied(true);
+    setUserSaveError('');
   };
 
   // 3-state Permission Cell Cycling
@@ -771,11 +777,16 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
     // Self-Deactivation Protection: Prevent user from locking themselves out
     const isEditingSelf = (editingUser.email && currentUser?.email && editingUser.email.toLowerCase().trim() === currentUser.email.toLowerCase().trim()) ||
                           editingUser.id === currentUser?.id;
+    if (isEditingSelf && roleTemplateApplied && userPermissionOverridesBuffer['User Assignments']?.Edit !== 'allow') {
+      setUserSaveError('You cannot apply a role template that removes your own User Assignments Edit access. Ask another administrator.');
+      return;
+    }
     if (isEditingSelf && editUserForm.active === false) {
       alert('Protection: You cannot deactivate your own active account.');
       return;
     }
 
+    setUserSaveError('');
     setIsSavingUser(true);
     try {
       const selectedRole = roles.find(r => r.id === editUserForm.roleId);
@@ -811,46 +822,31 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
         updates.pin = editUserForm.pin.trim();
       }
 
-      if (updateActiveUser) {
-        await updateActiveUser(editingUser.id, updates);
-      } else if (db && APP_ID_PATH && canMutateAuthOrRBAC('updateUser', editingUser.id)) {
-        await db.collection('artifacts')
-          .doc(APP_ID_PATH)
-          .collection('private')
-          .doc('users')
-          .collection('active')
-          .doc(editingUser.id)
-          .update(updates);
-      }
-
-      // Persist user-specific override to permissionService
-      await permissionService.saveUserOverride({
-        userId: editingUser.id,
-        userEmail: editUserForm.email.trim().toLowerCase(),
-        branchId,
-        branchName,
-        physicalLocation: editUserForm.physicalLocation.trim(),
-        deviceAccess: editUserForm.deviceAccess,
-        deviceViewAccess: editUserForm.deviceViewAccess,
-        permissions: userPermissionOverridesBuffer,
-        updatedBy: currentUser?.name || 'Administrator'
-      }, currentUser?.name || 'Administrator');
-
-      if (roleId && roleId !== editingUser.roleId) {
-        await permissionService.assignUserRole(
-          editingUser.id,
-          editUserForm.name.trim(),
-          editUserForm.email.trim(),
-          roleId,
-          currentUser?.name || 'Administrator'
-        );
-      }
-
+      // Do not publish optimistic changes or call the old multi-write path.
+      // This save commits the existing user and all permissions together.
+      await permissionService.saveUserAccessEditor(
+        editingUser,
+        { ...updates, name: editUserForm.name.trim(), email: editUserForm.email.trim().toLowerCase(), role: roleName, roleId },
+        {
+          userId: editingUser.id,
+          userEmail: editUserForm.email.trim().toLowerCase(),
+          branchId,
+          branchName,
+          physicalLocation: editUserForm.physicalLocation.trim(),
+          deviceAccess: editUserForm.deviceAccess,
+          deviceViewAccess: editUserForm.deviceViewAccess,
+          permissions: userPermissionOverridesBuffer,
+          ...(roleTemplateApplied ? {deviceOverrides: {}} : {}),
+          updatedBy: currentUser?.name || 'Administrator'
+        },
+        currentUser?.name || 'Administrator'
+      );
       announce?.(`User ${editUserForm.name} permissions and access updated successfully.`);
       setShowEditUserModal(false);
       setEditingUser(null);
     } catch (err: any) {
       console.error('Failed to update user:', err);
+      setUserSaveError(err.message || 'Failed to update user.');
       announce?.(err.message || 'Failed to update user.');
     } finally {
       setIsSavingUser(false);
@@ -1569,7 +1565,7 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
                     filteredUsers.map(user => {
                       const isMasterAccount = user.id === '1' || user.id === 'local-admin' || user.id === 'usr-admin-elrico';
                       const assignedInfo = userRolesMap[user.id];
-                      const currentRoleId = user.roleId || assignedInfo?.roleId || roles.find(r => r.roleName.toLowerCase() === (user.role || '').toLowerCase())?.id || roles[0]?.id || '';
+                      const currentRoleId = assignedInfo?.roleId || user.roleId || roles.find(r => r.roleName.toLowerCase() === (user.role || '').toLowerCase())?.id || roles[0]?.id || '';
                       const isPasswordVisible = !!showPasswordIds[user.id];
                       const currentPinVal = editingPins[user.id] !== undefined ? editingPins[user.id] : (user.pin || '');
                       const isPinChanged = currentPinVal !== (user.pin || '');
@@ -2507,6 +2503,7 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
             </div>
 
             <form onSubmit={handleEditUserSubmit} className="flex flex-col flex-1 overflow-hidden space-y-4">
+                {userSaveError && <p role="alert" className="rounded-xl bg-red-950/50 border border-red-500/40 p-3 text-sm text-red-200">{userSaveError}</p>}
               {/* Two-Column Responsive Layout */}
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 flex-1 overflow-hidden">
                 {/* LEFT COLUMN: User Info, Device Access, Branch & Location */}
@@ -2545,14 +2542,8 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
                         <label className="text-[11px] font-bold text-gray-400 uppercase">Assigned Role</label>
                         <select
                           value={editUserForm.roleId}
-                          onChange={e => {
-                            const selected = roles.find(r => r.id === e.target.value);
-                            setEditUserForm({
-                              ...editUserForm,
-                              roleId: e.target.value,
-                              roleName: selected ? selected.roleName : ''
-                            });
-                          }}
+                          disabled={isReadOnly || isSavingUser}
+                          onChange={e => applyRoleTemplate(e.target.value)}
                           className="w-full bg-black/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500 font-bold"
                         >
                           {roles.map(r => (
@@ -2561,6 +2552,11 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
                             </option>
                           ))}
                         </select>
+                        <button type="button" disabled={isReadOnly || isSavingUser}
+                          onClick={() => applyRoleTemplate(editUserForm.roleId)}
+                          className="text-[10px] text-purple-300 hover:text-white font-bold underline disabled:opacity-40">
+                          Apply / Reapply Role Template
+                        </button>
                       </div>
 
                       <div className="space-y-1">
@@ -2739,7 +2735,7 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
                           }}
                           className="px-2 py-0.5 bg-white/5 hover:bg-white/10 text-gray-400 rounded border border-white/10"
                         >
-                          Reset to Role
+                          Reset to Default
                         </button>
                       </div>
                     </div>
@@ -2754,14 +2750,10 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
                         if (explicitVal !== undefined) {
                           isEffectiveAllowed = !!explicitVal;
                         } else {
-                          // Inherited from role
-                          const mockUser = {
-                            role: editUserForm.roleName,
-                            roleId: editUserForm.roleId,
-                            active: true,
-                            deviceAccess: editUserForm.deviceAccess
-                          };
-                          isEffectiveAllowed = permissionService.canAccessDeviceView(mockUser, moduleDef.id, selectedDeviceViewTab);
+                          // Preview the actual unsaved user-specific permission buffer.
+                          // Roles are labels only, not permission grants.
+                          isEffectiveAllowed = moduleDef.id === 'gemini_ai' ||
+                            Boolean(moduleDef.permissionModules?.some(name => userPermissionOverridesBuffer[name]?.View === 'allow'));
                         }
 
                         const isExplicitOverride = explicitVal !== undefined;
@@ -3055,7 +3047,7 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
                                 </tr>
 
                                 {filteredMods.map(moduleName => {
-                                  const roleBaseline = rolePermissionsMap[editUserForm.roleId]?.permissions[moduleName];
+                                  // The role template is copied into the explicit action buffer.
 
                                   return (
                                     <tr key={moduleName} className="hover:bg-white/5 transition-colors">
@@ -3089,7 +3081,6 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
 
                                       {ALL_PERMISSION_ACTIONS.map(act => {
                                         const overrideState = userPermissionOverridesBuffer[moduleName]?.[act] || 'inherit';
-                                        const roleVal = roleBaseline?.[act] ?? false;
 
                                         let buttonClass = 'bg-white/5 border-white/10 text-gray-500 hover:border-white/30';
                                         let label = '—';

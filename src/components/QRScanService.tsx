@@ -584,7 +584,9 @@ export const QRScanService: React.FC<QRScanServiceProps> = ({
       saveBasket([]);
       setRecentScanAlert(null);
       
-      announce(`Stock Request ${orderId} submitted successfully.`);
+      announce(stockReq.notificationDelivery === 'pending'
+        ? `Stock Request ${orderId} recorded; notification delivery pending confirmation.`
+        : `Stock Request ${orderId} submitted successfully.`);
     } catch (err) {
       console.error('Error submitting stock request:', err);
       announce('Failed to submit stock request to cloud database.');

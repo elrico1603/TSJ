@@ -1,224 +1,135 @@
-/**
- * Canonical Notification Policy Service
- * Phase 2B-3G: Notification Policy Centre Implementation
- *
- * This service manages retrieval of canonical event definitions and effective notification policies.
- *
- * CANONICAL FIRESTORE PATH (Production only):
- * artifacts/{APP_ID_PATH}/private/config/notifications/policies/{eventId}
- *
- * CRITICAL ARCHITECTURAL CONSTRAINTS:
- * 1. Default policies are strictly sourced from notificationEventRegistry.
- * 2. Default recipientUserIds is strictly [] (empty array).
- * 3. Roles, departments, and emails have ZERO notification-routing authority.
- * 4. PREVIEW SAFETY: In GAIS Preview, canMutateNotificationPolicies() returns false.
- *    Policies are mutated and simulated strictly in memory (localPolicyOverrides)
- *    to protect production configuration.
+/** Canonical notification policies. Stored policies are the source of truth.
+ * Actual path: artifacts/{APP_ID_PATH}/private/config/notifications_policies/{eventId}.
+ * Preview modifications are isolated from live policies.
  */
-
-import {
-  NotificationEventDefinition,
-  NotificationPolicy
-} from '../types/notification';
-import {
-  notificationEventRegistry
-} from './notificationEventRegistry';
+import { NotificationEventDefinition, NotificationPolicy } from '../types/notification';
+import { notificationEventRegistry } from './notificationEventRegistry';
 import { db, APP_ID_PATH } from '../firebase';
-import { canMutateNotificationPolicies } from './previewSafety';
+import { canMutateNotificationPolicies, isDevelopmentPreview } from './previewSafety';
 
-// In-memory local overrides map (transient; zero Firestore persistence in Preview)
+const storedPolicies = new Map<string, NotificationPolicy>();
 const localPolicyOverrides = new Map<string, NotificationPolicy>();
-
-// Subscribers for real-time policy updates
 const policyListeners = new Set<(policies: NotificationPolicy[]) => void>();
+let unsubscribeLive: (() => void) | null = null;
+const collection = () => db.collection('artifacts').doc(APP_ID_PATH)
+  .collection('private').doc('config').collection('notifications_policies');
 
+function normalize(eventId: string, value: any): NotificationPolicy | undefined {
+  const definition = notificationEventRegistry.getEvent(eventId);
+  if (!definition || !value || typeof value.enabled !== 'boolean') return undefined;
+  const base = notificationEventRegistry.createDefaultPolicy(definition);
+  if (!['critical','high','normal','info','silent'].includes(value.priority)) return undefined;
+  const minutes = Number(value.coalesceWindowMinutes);
+  return {
+    ...base, ...value, eventId, eventName: definition.eventName, groupId: definition.groupId,
+    recipientUserIds: Array.isArray(value.recipientUserIds) ? [...new Set<string>(
+      value.recipientUserIds.filter((id: unknown): id is string => typeof id === 'string' && !!id.trim() && !id.includes('/'))
+    )] : [],
+    coalesceEnabled: value.coalesceEnabled === true,
+    coalesceWindowMinutes: Number.isFinite(minutes) ? Math.max(0,Math.min(10080,minutes)) : 0
+  };
+}
 function notifySubscribers(): void {
-  const allEffective = notificationPolicyService.getAllEffectivePolicies();
-  policyListeners.forEach(listener => {
-    try {
-      listener(allEffective);
-    } catch (err) {
-      console.error('[NOTIFICATION POLICY SERVICE] Error notifying subscriber:', err);
-    }
-  });
+  const all = notificationPolicyService.getAllEffectivePolicies();
+  policyListeners.forEach(listener => { try { listener(all); } catch(err) { console.error('Policy listener error:',err); } });
 }
 
 export const notificationPolicyService = {
-  /**
-   * Retrieves the canonical event definition from the event registry.
-   */
   getEventDefinition(eventId: string): NotificationEventDefinition | undefined {
     return notificationEventRegistry.getEvent(eventId);
   },
-
-  /**
-   * Retrieves all canonical event definitions.
-   */
   getAllEventDefinitions(): readonly NotificationEventDefinition[] {
     return notificationEventRegistry.getAllEvents();
   },
-
-  /**
-   * Generates the canonical default NotificationPolicy for a specific event ID.
-   * recipientUserIds is strictly [] (empty array).
-   */
   getDefaultPolicy(eventId: string): NotificationPolicy | undefined {
     const definition = notificationEventRegistry.getEvent(eventId);
-    if (!definition) return undefined;
-    return notificationEventRegistry.createDefaultPolicy(definition);
+    return definition ? notificationEventRegistry.createDefaultPolicy(definition) : undefined;
   },
-
-  /**
-   * Retrieves default policies for all canonical events.
-   */
-  getAllDefaultPolicies(): Record<string, NotificationPolicy> {
+  getAllDefaultPolicies(): Record<string,NotificationPolicy> {
     return notificationEventRegistry.getDefaultPoliciesMap();
   },
-
-  /**
-   * Retrieves the effective policy for an event.
-   * Checks in-memory local override first; falls back to the canonical default policy.
-   */
   getEffectivePolicy(eventId: string): NotificationPolicy | undefined {
-    const override = localPolicyOverrides.get(eventId);
-    if (override) {
-      return override;
-    }
-    return this.getDefaultPolicy(eventId);
+    return localPolicyOverrides.get(eventId) || storedPolicies.get(eventId) || this.getDefaultPolicy(eventId);
   },
-
-  /**
-   * Retrieves all effective policies for all registered canonical events.
-   */
   getAllEffectivePolicies(): NotificationPolicy[] {
-    const definitions = this.getAllEventDefinitions();
-    return definitions.map(def => this.getEffectivePolicy(def.eventId)!).filter(Boolean);
+    return this.getAllEventDefinitions().map(def => this.getEffectivePolicy(def.eventId)!).filter(Boolean);
   },
-
-  /**
-   * Subscribes to real-time policy updates.
-   * Immediately calls back with current effective policies.
-   */
+  // Business events always read the authoritative policy from the server.
+  // A failed read must not silently turn into an empty recipient list.
+  async getConfirmedPolicy(eventId: string): Promise<NotificationPolicy | undefined> {
+    if (isDevelopmentPreview()) return this.getEffectivePolicy(eventId);
+    const snap = await collection().doc(eventId).get({source:'server'});
+    if (!snap.exists) return this.getDefaultPolicy(eventId);
+    const policy = normalize(eventId,snap.data());
+    if (!policy) throw new Error('Invalid stored notification policy: '+eventId);
+    return policy;
+  },
   subscribeToPolicies(callback: (policies: NotificationPolicy[]) => void): () => void {
     policyListeners.add(callback);
     callback(this.getAllEffectivePolicies());
-
+    if (!unsubscribeLive && db && APP_ID_PATH) {
+      unsubscribeLive = collection().onSnapshot(snapshot => {
+        storedPolicies.clear();
+        snapshot.forEach(doc => {
+          const value = normalize(doc.id,doc.data());
+          if (value) storedPolicies.set(doc.id,value);
+        });
+        notifySubscribers();
+      }, error => console.error('Unable to read stored notification policies:',error));
+    }
     return () => {
       policyListeners.delete(callback);
+      if (!policyListeners.size && unsubscribeLive) {unsubscribeLive();unsubscribeLive=null;}
     };
   },
-
-  /**
-   * Sets a local in-memory policy override (transient; for testing and simulation).
-   */
   setLocalPolicyOverride(policy: NotificationPolicy): void {
-    if (!policy || !policy.eventId) return;
-    localPolicyOverrides.set(policy.eventId, policy);
-    notifySubscribers();
+    if (!policy?.eventId) return;
+    localPolicyOverrides.set(policy.eventId,policy);notifySubscribers();
   },
-
-  /**
-   * Clears a specific local in-memory override.
-   */
   removeLocalPolicyOverride(eventId: string): void {
-    localPolicyOverrides.delete(eventId);
-    notifySubscribers();
+    localPolicyOverrides.delete(eventId);notifySubscribers();
   },
-
-  /**
-   * Clears all local in-memory policy overrides.
-   */
-  clearLocalPolicyOverrides(): void {
-    localPolicyOverrides.clear();
-    notifySubscribers();
-  },
-
-  /**
-   * Saves an updated policy.
-   * Updates in-memory state immediately for simulation.
-   * In GAIS Preview, blocks persistent Firestore writes via Preview Safety.
-   */
+  clearLocalPolicyOverrides(): void {localPolicyOverrides.clear();notifySubscribers();},
   async savePolicy(policy: NotificationPolicy): Promise<void> {
-    if (!policy || !policy.eventId) {
-      throw new Error('Cannot save policy: eventId is required.');
+    const normalized = normalize(policy?.eventId,policy);
+    if (!normalized) throw new Error('Invalid notification policy.');
+    if (!canMutateNotificationPolicies('savePolicy',normalized.eventId)) {
+      this.setLocalPolicyOverride(normalized);return;
     }
-
-    // 1. Immediately update in-memory simulation
-    localPolicyOverrides.set(policy.eventId, { ...policy });
-    notifySubscribers();
-
-    // 2. Check Preview Safety Guard
-    if (!canMutateNotificationPolicies('savePolicy', policy.eventId)) {
-      console.info(
-        `[NOTIFICATION POLICY SERVICE] Policy for ${policy.eventId} saved in-memory (Preview Mode). Live Firestore write blocked.`
-      );
-      return;
+    const ref = collection().doc(normalized.eventId);
+    await ref.set(normalized);
+    const confirmed = normalize(normalized.eventId,(await ref.get({source:'server'})).data());
+    if (!confirmed || confirmed.enabled !== normalized.enabled ||
+        confirmed.priority !== normalized.priority ||
+        confirmed.coalesceEnabled !== normalized.coalesceEnabled ||
+        confirmed.coalesceWindowMinutes !== normalized.coalesceWindowMinutes ||
+        JSON.stringify([...confirmed.recipientUserIds].sort()) !== JSON.stringify([...normalized.recipientUserIds].sort())) {
+      throw new Error('Firestore did not confirm the notification policy.');
     }
-
-    // 3. In verified production, persist to Firestore
-    if (db && APP_ID_PATH) {
-      try {
-        await db.collection('artifacts')
-          .doc(APP_ID_PATH)
-          .collection('private')
-          .doc('config')
-          .collection('notifications_policies')
-          .doc(policy.eventId)
-          .set({ ...policy }, { merge: true });
-        console.info(`[NOTIFICATION POLICY SERVICE] Policy for ${policy.eventId} persisted to Firestore.`);
-      } catch (err) {
-        console.error(`[NOTIFICATION POLICY SERVICE] Failed to persist policy ${policy.eventId}:`, err);
-        throw err;
-      }
-    }
+    storedPolicies.set(normalized.eventId,confirmed);
+    localPolicyOverrides.delete(normalized.eventId);notifySubscribers();
   },
-
-  /**
-   * Resets an event policy back to its canonical default.
-   */
   async resetPolicy(eventId: string): Promise<void> {
-    if (!eventId) return;
-
-    localPolicyOverrides.delete(eventId);
-    notifySubscribers();
-
-    if (!canMutateNotificationPolicies('resetPolicy', eventId)) {
-      console.info(
-        `[NOTIFICATION POLICY SERVICE] Policy for ${eventId} reset to canonical default in-memory. Live Firestore write blocked.`
-      );
-      return;
+    if (!this.getDefaultPolicy(eventId)) return;
+    if (!canMutateNotificationPolicies('resetPolicy',eventId)) {
+      localPolicyOverrides.set(eventId,this.getDefaultPolicy(eventId)!);notifySubscribers();return;
     }
-
-    if (db && APP_ID_PATH) {
-      try {
-        await db.collection('artifacts')
-          .doc(APP_ID_PATH)
-          .collection('private')
-          .doc('config')
-          .collection('notifications_policies')
-          .doc(eventId)
-          .delete();
-      } catch (err) {
-        console.warn(`[NOTIFICATION POLICY SERVICE] Failed to delete Firestore policy ${eventId}:`, err);
-      }
-    }
+    const ref = collection().doc(eventId);
+    await ref.delete();
+    if ((await ref.get({source:'server'})).exists) throw new Error('Policy reset could not be confirmed.');
+    storedPolicies.delete(eventId);localPolicyOverrides.delete(eventId);notifySubscribers();
   },
-
-  /**
-   * Resets all event policies back to their canonical defaults.
-   */
   async resetAllPolicies(): Promise<void> {
-    localPolicyOverrides.clear();
-    notifySubscribers();
-
     if (!canMutateNotificationPolicies('resetAllPolicies')) {
-      console.info(
-        `[NOTIFICATION POLICY SERVICE] All policies reset to canonical defaults in-memory. Live Firestore write blocked.`
-      );
-      return;
+      for (const policy of Object.values(notificationEventRegistry.getDefaultPoliciesMap())) localPolicyOverrides.set(policy.eventId,policy);
+      notifySubscribers();return;
     }
-
-    // In production, batch delete would occur here if authorized
+    const snapshot = await collection().get({source:'server'});
+    const known = snapshot.docs.filter(doc=>!!this.getDefaultPolicy(doc.id));
+    if (known.length > 450) throw new Error('Too many policies for a safe batch reset.');
+    const batch = db.batch();
+    known.forEach(doc => batch.delete(doc.ref));
+    await batch.commit();
+    storedPolicies.clear();localPolicyOverrides.clear();notifySubscribers();
   }
 };
-

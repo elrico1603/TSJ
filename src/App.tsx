@@ -120,7 +120,7 @@ export default function App() {
   const [isLocked, setIsLocked] = useState(() => !authManager.getStoredSession());
   const [appMode, setAppMode] = useState<string>(() => {
     const session = authManager.getStoredSession();
-    return session ? permissionService.getInitialModeAndView(session, getAutoLayoutMode()).appMode : 'employee';
+    return session ? permissionService.getInitialModeAndView(session, layoutMode).appMode : 'employee';
   });
   const [showPinModal, setShowPinModal] = useState(false);
   const [unlockUsername, setUnlockUsername] = useState('');
@@ -128,7 +128,7 @@ export default function App() {
   const [pinInput, setPinInput] = useState('');
   const [view, setView] = useState<string>(() => {
     const session = authManager.getStoredSession();
-    return session ? permissionService.getInitialModeAndView(session, getAutoLayoutMode()).view : 'dashboard';
+    return session ? permissionService.getInitialModeAndView(session, layoutMode).view : 'dashboard';
   });
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
   const [actionSubMenu, setActionSubMenu] = useState<'menu' | 'clocking'>('menu');
@@ -184,6 +184,20 @@ export default function App() {
       }
     };
   }, []);
+
+  // Recheck the authorized route whenever the selected interface changes or
+  // a live user/permission update arrives. Keep the dedicated clocking kiosk
+  // and in-progress employee flow unchanged.
+  useEffect(() => {
+    if (isLocked || !currentUser || permissionService.isClockingTerminalUser(currentUser)) return;
+    if (!permissionService.canAccessMode(currentUser, appMode, layoutMode)) {
+      const route = permissionService.getInitialModeAndView(currentUser, layoutMode);
+      if (route.appMode !== appMode) {
+        setAppMode(route.appMode);
+        setView(route.view || 'dashboard');
+      }
+    }
+  }, [currentUser, appMode, layoutMode, isLocked]);
 
   const changeLayoutMode = (mode: 'desktop' | 'tablet' | 'phone') => {
     setLayoutMode(mode);
@@ -898,6 +912,26 @@ export default function App() {
                   });
                   const mergedUsers = authManager.setUsers(users);
                   setActiveUsers(mergedUsers);
+                  // A tablet that is already signed in must see the saved
+                  // account role/device settings, not its older session copy.
+                  // Match the same account by its normalized email or ID.
+                  setCurrentUser((previous: any) => {
+                    if (!previous) return previous;
+                    const email = String(previous.email || '').trim().toLowerCase();
+                    const fresh = mergedUsers.find(u => u.id === previous.id ||
+                      (email && String(u.email || '').trim().toLowerCase() === email));
+                    if (!fresh) return previous;
+                    const ov = permissionService.getUserOverride(fresh);
+                    const next = {
+                      ...previous,
+                      ...fresh,
+                      deviceAccess: ov?.deviceAccess || fresh.deviceAccess,
+                      deviceViewAccess: ov?.deviceViewAccess || fresh.deviceViewAccess,
+                      permissions: ov?.permissions || (fresh as any).permissions
+                    };
+                    authManager.saveSession(next);
+                    return next;
+                  });
                   console.log('[TSHUB USERS] sync received, count:', mergedUsers.length);
                   
                   // Load custom permission overrides from users directly
@@ -1611,7 +1645,7 @@ TS Joinery Kanban System`
           setIsLocked(false);
           setLoginError('');
 
-          const { appMode: initMode, view: initView } = permissionService.getInitialModeAndView(normUser);
+          const { appMode: initMode, view: initView } = permissionService.getInitialModeAndView(normUser, layoutMode);
           console.log('[AUTH ROUTING]', {
             User: normUser.email,
             Role: normUser.role,
@@ -4502,24 +4536,29 @@ TS Joinery Kanban System`
         notifications={userNotifications}
         onMarkAsRead={(id) => {
           if (currentUser?.id) {
-            userNotificationService.markAsRead(currentUser.id, id);
+            userNotificationService.markAsRead(currentUser.id, id).catch(error => announce(error?.message || 'Notification update was not confirmed.'));
           }
         }}
         onMarkAllAsRead={() => {
           if (currentUser?.id) {
-            userNotificationService.markAllAsRead(currentUser.id);
+            userNotificationService.markAllAsRead(currentUser.id).catch(error => announce(error?.message || 'Notification update was not confirmed.'));
           }
         }}
         onDeleteNotification={(id) => {
           if (currentUser?.id) {
-            userNotificationService.deleteNotification(currentUser.id, id);
+            userNotificationService.deleteNotification(currentUser.id, id).catch(error => announce(error?.message || 'Notification update was not confirmed.'));
           }
         }}
         onNavigateToPage={(relatedPage) => {
-          if (relatedPage === 'leave_management') setAppMode('leave');
-          else if (relatedPage === 'orders') setAppMode('orders');
-          else if (relatedPage === 'analytics') setAppMode('analytics');
-          else if (relatedPage === 'admin') setAppMode('admin');
+          const target = relatedPage === 'leave_management' ? 'leave' :
+            relatedPage === 'orders' ? 'orders' : relatedPage === 'analytics' ? 'analytics' :
+            relatedPage === 'admin' ? 'admin' : relatedPage === 'kanban' ? 'template_designer' : null;
+          if (target && permissionService.canAccessMode(currentUser, target, layoutMode)) {
+            setAppMode(target);
+            setView('dashboard');
+          } else {
+            announce('This notification does not grant access to a restricted module.');
+          }
         }}
         userRole={currentUser?.role}
         userEmail={currentUser?.email || currentUser?.name}

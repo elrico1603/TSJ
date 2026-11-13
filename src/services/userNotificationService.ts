@@ -17,6 +17,7 @@
  */
 
 import { db, APP_ID_PATH } from '../firebase';
+import { protectedNotificationDeliveryEnabled, notificationBackendRequest } from './notificationBackendClient';
 import {
   UserNotification,
   BusinessEvent,
@@ -308,6 +309,10 @@ export const userNotificationService = {
    */
   async markAsRead(userId: string, notificationId: string): Promise<boolean> {
     if (!userId || !notificationId) return false;
+    if (protectedNotificationDeliveryEnabled()) {
+      const result = await notificationBackendRequest(userId,'inbox/'+encodeURIComponent(notificationId)+'/read');
+      return result.success === true;
+    }
 
     const userPool = inMemoryUserNotifications.get(userId) || [];
     const target = userPool.find(n => n.notificationId === notificationId);
@@ -340,6 +345,10 @@ export const userNotificationService = {
    */
   async markAllAsRead(userId: string): Promise<number> {
     if (!userId) return 0;
+    if (protectedNotificationDeliveryEnabled()) {
+      const result = await notificationBackendRequest(userId,'inbox/read-all');
+      return Number(result.changed || 0);
+    }
 
     const userPool = inMemoryUserNotifications.get(userId) || [];
     let count = 0;
@@ -373,6 +382,10 @@ export const userNotificationService = {
    */
   async deleteNotification(userId: string, notificationId: string): Promise<boolean> {
     if (!userId || !notificationId) return false;
+    if (protectedNotificationDeliveryEnabled()) {
+      const result = await notificationBackendRequest(userId,'inbox/'+encodeURIComponent(notificationId)+'/delete');
+      return result.success === true;
+    }
 
     const userPool = inMemoryUserNotifications.get(userId) || [];
     const filtered = userPool.filter(n => n.notificationId !== notificationId);
