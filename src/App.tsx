@@ -898,6 +898,26 @@ export default function App() {
                   });
                   const mergedUsers = authManager.setUsers(users);
                   setActiveUsers(mergedUsers);
+                  // A tablet that is already signed in must see the saved
+                  // account role/device settings, not its older session copy.
+                  // Match the same account by its normalized email or ID.
+                  setCurrentUser((previous: any) => {
+                    if (!previous) return previous;
+                    const email = String(previous.email || '').trim().toLowerCase();
+                    const fresh = mergedUsers.find(u => u.id === previous.id ||
+                      (email && String(u.email || '').trim().toLowerCase() === email));
+                    if (!fresh) return previous;
+                    const ov = permissionService.getUserOverride(fresh);
+                    const next = {
+                      ...previous,
+                      ...fresh,
+                      deviceAccess: ov?.deviceAccess || fresh.deviceAccess,
+                      deviceViewAccess: ov?.deviceViewAccess || fresh.deviceViewAccess,
+                      permissions: ov?.permissions || (fresh as any).permissions
+                    };
+                    authManager.saveSession(next);
+                    return next;
+                  });
                   console.log('[TSHUB USERS] sync received, count:', mergedUsers.length);
                   
                   // Load custom permission overrides from users directly
