@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { initializeApp, deleteApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
+import { resolveManagedConfiguration } from '../server/managedConfiguration';
 import { ManagedNotificationPolicies } from '../server/managedNotificationPolicies';
 import { ManagedUserLifecycle } from '../server/managedUserLifecycle';
 import { ManagedUserService } from '../server/managedUserService';
@@ -57,6 +58,17 @@ async function main(){
   await policyService.reset('LOW_STOCK',auditActor);
   assert.equal((await db.doc(policyPath+'/LOW_STOCK').get()).exists,false);
   pass('Server-confirmed notification policy reset');
-  console.log(n+'/6 EXTRA MANAGED USER TESTS PASSED');
+  const legacy='artifacts/timbersmith-terminal-v1/public';
+  await db.doc(legacy+'/roles/items/LEGACY-TEST-ROLE').set({roleName:'Legacy Test Role',status:'active'});
+  await db.doc(legacy+'/branches/items/LEGACY-TEST-BRANCH').set({branchName:'Legacy Test Branch',branchCode:'LEGACY-TEST-CODE',status:'active'});
+  const resolved=await db.runTransaction(tx=>resolveManagedConfiguration(db,tx,'LEGACY-TEST-ROLE','LEGACY-TEST-CODE'));
+  assert.equal(resolved.roleSource,'legacy');
+  assert.equal(resolved.branchSource,'legacy');
+  assert.equal(resolved.branchId,'LEGACY-TEST-BRANCH');
+  pass('Existing legacy role and branch code resolve to canonical ID');
+  await db.doc('branches/AMBIGUOUS-TEST-BRANCH').set({branchName:'Other Test Branch',branchCode:'LEGACY-TEST-CODE'});
+  await assert.rejects(db.runTransaction(tx=>resolveManagedConfiguration(db,tx,'LEGACY-TEST-ROLE','LEGACY-TEST-CODE')));
+  pass('Ambiguous branch codes are rejected');
+  console.log(n+'/8 EXTRA MANAGED USER TESTS PASSED');
 }
 main().catch(e=>{console.error(e);process.exitCode=1}).finally(()=>deleteApp(app));
