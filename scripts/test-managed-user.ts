@@ -101,6 +101,16 @@ async function main() {
   const lifecycle = new ManagedUserLifecycle(db, auth);
   await lifecycle.changePassword(uid, 'EmulatorChangedPassword123!', 'Test admin');
   pass('Change password succeeds');
+  await lifecycle.setActive(uid,false,'Test admin');
+  assert.equal((await auth.getUser(uid)).disabled,true);
+  assert.equal((await profileRef.get()).data()!.active,false);
+  assert.equal((await db.collection('authUserLinks').doc(uid).get()).data()!.active,false);
+  pass('Suspension disables Auth and profile');
+  await lifecycle.setActive(uid,true,'Test admin');
+  assert.equal((await auth.getUser(uid)).disabled,false);
+  assert.equal((await profileRef.get()).data()!.active,true);
+  assert.equal((await db.collection('authUserLinks').doc(uid).get()).data()!.active,true);
+  pass('Reactivation restores linked identity');
   await lifecycle.deleteUser(uid, 'Test admin');
   await assert.rejects(auth.getUser(uid));
   assert.equal((await profileRef.get()).exists,false);
@@ -115,6 +125,6 @@ async function main() {
   assert.notEqual(recreated.uid,uid);
   pass('Same email can be recreated with a new UID');
   await lifecycle.deleteUser(recreated.uid,'Test admin');
-  console.log(passed+'/19 MANAGED USER INTEGRATION TESTS PASSED');
+  console.log(passed+'/21 MANAGED USER INTEGRATION TESTS PASSED');
 }
 main().catch(error=>{console.error('MANAGED USER TEST FAILED:',error.message);process.exitCode=1}).finally(()=>deleteApp(app));
