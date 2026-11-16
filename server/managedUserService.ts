@@ -425,6 +425,7 @@ export class ManagedUserService {
     names: {
       roleName: string;
       branchName: string;
+      branchId: string;
     },
     actor: string,
     create: boolean
