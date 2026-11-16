@@ -1,6 +1,11 @@
 import React, { useState, useEffect, useRef, Fragment, useCallback } from 'react';
 import { db, auth, APP_ID_PATH, APP_MOBILE_LINK } from './firebase';
 import {
+  FIREBASE_LOGIN_PILOT,
+  authenticateFirebasePilot,
+  signOutFirebasePilot
+} from './services/firebaseLoginPilot';
+import {
   SA_HOLIDAYS,
   Employee,
   ShiftRecord,
@@ -106,7 +111,9 @@ export default function App() {
 
   // Navigation State
   const [currentUser, setCurrentUser] = useState<any>(() => {
-    const session = authManager.getStoredSession();
+    const session = FIREBASE_LOGIN_PILOT
+      ? null
+      : authManager.getStoredSession();
     if (session) {
       const ov = permissionService.getUserOverride(session);
       return {
@@ -118,9 +125,13 @@ export default function App() {
     }
     return null;
   });
-  const [isLocked, setIsLocked] = useState(() => !authManager.getStoredSession());
+  const [isLocked, setIsLocked] = useState(
+    () => FIREBASE_LOGIN_PILOT || !authManager.getStoredSession()
+  );
   const [appMode, setAppMode] = useState<string>(() => {
-    const session = authManager.getStoredSession();
+    const session = FIREBASE_LOGIN_PILOT
+      ? null
+      : authManager.getStoredSession();
     return session ? permissionService.getInitialModeAndView(session, layoutMode).appMode : 'employee';
   });
   const [showPinModal, setShowPinModal] = useState(false);
@@ -128,7 +139,9 @@ export default function App() {
   const [unlockPassword, setUnlockPassword] = useState('');
   const [pinInput, setPinInput] = useState('');
   const [view, setView] = useState<string>(() => {
-    const session = authManager.getStoredSession();
+    const session = FIREBASE_LOGIN_PILOT
+      ? null
+      : authManager.getStoredSession();
     return session ? permissionService.getInitialModeAndView(session, layoutMode).view : 'dashboard';
   });
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
@@ -717,7 +730,11 @@ export default function App() {
 
     // 2. Re-hydrate active session and currentUser with latest permissions
     setCurrentUser((prevUser: any) => {
-      const targetUser = prevUser || authManager.getStoredSession();
+      const targetUser = prevUser || (
+        FIREBASE_LOGIN_PILOT
+          ? null
+          : authManager.getStoredSession()
+      );
       if (!targetUser) return null;
       const ov = permissionService.getUserOverride(targetUser);
       const updatedUser: AppUser = {
@@ -919,8 +936,17 @@ export default function App() {
                   setCurrentUser((previous: any) => {
                     if (!previous) return previous;
                     const email = String(previous.email || '').trim().toLowerCase();
-                    const fresh = mergedUsers.find(u => u.id === previous.id ||
-                      (email && String(u.email || '').trim().toLowerCase() === email));
+                    const fresh = FIREBASE_LOGIN_PILOT
+                      ? mergedUsers.find(u => u.id === previous.id)
+                      : mergedUsers.find(u =>
+                          u.id === previous.id ||
+                          (
+                            email &&
+                            String(u.email || '')
+                              .trim()
+                              .toLowerCase() === email
+                          )
+                        );
                     if (!fresh) return previous;
                     const ov = permissionService.getUserOverride(fresh);
                     const next = {
@@ -1432,12 +1458,23 @@ TS Joinery Kanban System`
     }, 800);
   };
 
-  const submitAdminPin = () => {
+  const submitAdminPin = async () => {
     const trimmedUser = unlockUsername.trim().toLowerCase();
     const trimmedPass = unlockPassword.trim();
 
     // Validate against registered active users (Standard User-Centric Authorization)
-    const matchedUser = authManager.authenticateUser(activeUsers, trimmedUser, trimmedPass);
+    let matchedUser: AppUser | null = null;
+
+    try {
+      matchedUser = FIREBASE_LOGIN_PILOT
+        ? await authenticateFirebasePilot(trimmedUser, trimmedPass)
+        : authManager.authenticateUser(activeUsers, trimmedUser, trimmedPass);
+    } catch (error) {
+      console.warn('[MANAGEMENT LOGIN] Verification failed');
+      setAdminPinError(true);
+      setTimeout(() => setAdminPinError(false), 1500);
+      return;
+    }
 
     if (matchedUser) {
       setIsLocked(false);
@@ -1618,7 +1655,9 @@ TS Joinery Kanban System`
       });
 
       try {
-        const match = authManager.authenticateUser(activeUsers, emailInput, pinInput);
+        const match = FIREBASE_LOGIN_PILOT
+          ? await authenticateFirebasePilot(emailInput, pinInput)
+          : authManager.authenticateUser(activeUsers, emailInput, pinInput);
         if (match) {
           if (match.active === false) {
             setLoginError('Account is currently deactivated. Contact administration.');
@@ -2413,6 +2452,7 @@ TS Joinery Kanban System`
           setView={setView}
           onSignOut={() => {
             authManager.clearSession();
+            void signOutFirebasePilot();
             setCurrentUser(null);
             setAppMode('clocking_terminal');
             setIsLocked(true);
@@ -2782,7 +2822,8 @@ TS Joinery Kanban System`
                   </button>
                 ) : (
                   <button 
-                    onClick={() => { authManager.clearSession(); setIsLocked(true); setAppMode('employee'); setCurrentUser(null); }} 
+                    onClick={() => { authManager.clearSession();
+            void signOutFirebasePilot(); setIsLocked(true); setAppMode('employee'); setCurrentUser(null); }} 
                     className="w-full py-3.5 xl:py-4 bg-red-600/10 border border-red-500/30 hover:bg-red-600/20 rounded-2xl text-xs font-black uppercase tracking-widest text-red-500 transition-all flex items-center justify-center space-x-3 font-sans"
                   >
                     <Icon name="unlock" size={16} />
@@ -4683,6 +4724,7 @@ TS Joinery Kanban System`
           onClose={() => setShowUserProfileModal(false)}
           onLock={() => {
             authManager.clearSession();
+            void signOutFirebasePilot();
             setIsLocked(true);
             setAppMode('employee');
             setCurrentUser(null);
