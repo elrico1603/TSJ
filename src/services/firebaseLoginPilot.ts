@@ -13,6 +13,8 @@ const env = (
 export const FIREBASE_LOGIN_PILOT =
   env.VITE_FIREBASE_LOGIN_PILOT === 'true';
 
+const MANAGED_LOGIN = env.VITE_TSJ_MANAGED_USER_UI === 'true';
+
 const PILOT_ACCOUNTS: Record<
   string,
   { uid: string; profileId: string }
@@ -46,7 +48,7 @@ export async function authenticateFirebasePilot(
   const email = normalizePilotEmail(identifier);
   const expected = PILOT_ACCOUNTS[email];
 
-  if (!expected) {
+  if (!MANAGED_LOGIN && !expected) {
     throw new Error(
       'This account is not yet enabled for the Firebase login pilot.'
     );
@@ -65,7 +67,7 @@ export async function authenticateFirebasePilot(
 
     const user = credential.user;
 
-    if (!user || user.uid !== expected.uid) {
+    if (!user || (!MANAGED_LOGIN && user.uid !== expected?.uid)) {
       throw new Error('Firebase identity mismatch.');
     }
 
@@ -75,13 +77,25 @@ export async function authenticateFirebasePilot(
       throw new Error('Firebase email mismatch.');
     }
 
+    let profileId = expected?.profileId || '';
+    if (MANAGED_LOGIN) {
+      const link = (await db.collection('authUserLinks').doc(user.uid)
+        .get({source:'server'})).data();
+      if (!link || link.uid !== user.uid || link.email !== email ||
+          link.active !== true || typeof link.profileId !== 'string' ||
+          !link.profileId || link.profileId.includes('/')) {
+        throw new Error('No valid managed user identity exists.');
+      }
+      profileId = link.profileId;
+    }
+
     const snapshot = await db
       .collection('artifacts')
       .doc(APP_ID_PATH)
       .collection('private')
       .doc('users')
       .collection('active')
-      .doc(expected.profileId)
+      .doc(profileId)
       .get({ source: 'server' });
 
     if (!snapshot.exists) {
@@ -107,7 +121,13 @@ export async function authenticateFirebasePilot(
       );
     }
 
-    if (profile.role !== 'Administrator') {
+    if (MANAGED_LOGIN && (profile.firebaseUid !== user.uid ||
+        profile.active !== true || profile.isApproved !== true ||
+        ['deleted','suspended','inactive','archived'].includes(String(profile.status || '').toLowerCase()))) {
+      throw new Error('Managed profile verification failed.');
+    }
+
+    if (!MANAGED_LOGIN && profile.role !== 'Administrator') {
       throw new Error(
         'Administrator profile verification failed.'
       );
@@ -121,7 +141,7 @@ export async function authenticateFirebasePilot(
 
     const result: AppUser & { firebaseUid: string } = {
       ...safeProfile,
-      id: expected.profileId,
+      id: profileId,
       name: String(profile.name || email),
       firstName: String(
         profile.firstName ||
@@ -148,7 +168,7 @@ export async function authenticateFirebasePilot(
     console.info(
       '[FIREBASE LOGIN PILOT] Verified:',
       email,
-      expected.profileId
+      profileId
     );
 
     return result;

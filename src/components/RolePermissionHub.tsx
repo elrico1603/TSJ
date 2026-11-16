@@ -896,7 +896,7 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
       } else {
         await authManager.deleteActiveUser(deleteConfirmUser);
       }
-      announce?.(MANAGED_USER_UI ? `User ${deleteConfirmUser.name} disabled and archived.` : `User ${deleteConfirmUser.name} deleted.`);
+      announce?.(MANAGED_USER_UI ? `User ${deleteConfirmUser.name} deleted. The email can be reused.` : `User ${deleteConfirmUser.name} deleted.`);
       setDeleteConfirmUser(null);
     } catch (err: any) {
       console.error('Failed to delete user:', err);

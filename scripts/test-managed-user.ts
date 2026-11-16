@@ -3,6 +3,7 @@ import { initializeApp, deleteApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 import { ManagedUserService, type CreateManagedUserInput } from '../server/managedUserService';
+import { ManagedUserLifecycle } from '../server/managedUserLifecycle';
 import { USER_PROFILES_COLLECTION } from '../server/firebaseIdentityService';
 
 if (process.env.FIRESTORE_EMULATOR_HOST !== '127.0.0.1:8085' ||
@@ -97,6 +98,23 @@ async function main() {
   assert.deepEqual((await policies.doc('LOW_STOCK').get()).data()!.recipientUserIds,['other-test-recipient']);
   assert.ok((await policies.doc('LEAVE_REQUEST_SUBMITTED').get()).data()!.recipientUserIds.includes(uid));
   pass('Changed notification subscriptions persist');
-  console.log(passed+'/15 MANAGED USER INTEGRATION TESTS PASSED');
+  const lifecycle = new ManagedUserLifecycle(db, auth);
+  await lifecycle.changePassword(uid, 'EmulatorChangedPassword123!', 'Test admin');
+  pass('Change password succeeds');
+  await lifecycle.deleteUser(uid, 'Test admin');
+  await assert.rejects(auth.getUser(uid));
+  assert.equal((await profileRef.get()).exists,false);
+  assert.equal((await overrideRef.get()).exists,false);
+  assert.equal((await db.collection('authUserLinks').doc(uid).get()).data()!.active,false);
+  assert.equal((await db.collection('managedUserArchive').doc(uid).get()).exists,true);
+  assert.ok(!(await policies.doc('LEAVE_REQUEST_SUBMITTED').get()).data()!.recipientUserIds.includes(uid));
+  pass('Delete removes Auth and access, preserves archive');
+  assert.equal((await lifecycle.deleteUser(uid,'Test admin')).emailReusable,true);
+  pass('Deletion can be safely retried');
+  const recreated = await service.createUser(input,'Test admin');
+  assert.notEqual(recreated.uid,uid);
+  pass('Same email can be recreated with a new UID');
+  await lifecycle.deleteUser(recreated.uid,'Test admin');
+  console.log(passed+'/19 MANAGED USER INTEGRATION TESTS PASSED');
 }
 main().catch(error=>{console.error('MANAGED USER TEST FAILED:',error.message);process.exitCode=1}).finally(()=>deleteApp(app));

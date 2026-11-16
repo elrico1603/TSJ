@@ -36,6 +36,19 @@ export class ManagedUserLifecycle {
     return { success: true, uid };
   }
   async deleteUser(uid: string, actor: string) {
+    if (!uid || uid.includes('/') || uid.length > 128) throw new Error('Invalid Firebase UID.');
+    const [linkSnap, archiveSnap, activeSnap] = await Promise.all([
+      this.db.collection(IDENTITY_LINKS_COLLECTION).doc(uid).get(),
+      this.db.collection('managedUserArchive').doc(uid).get(),
+      this.db.collection(USER_PROFILES_COLLECTION).doc(uid).get()
+    ]);
+    const oldLink = linkSnap.data(), archived = archiveSnap.data();
+    if (!activeSnap.exists && oldLink?.active === false && oldLink.uid === uid &&
+        oldLink.profileId === uid && archived?.firebaseUid === uid &&
+        archived.status === 'deleted' && archived.active === false &&
+        archived.email === oldLink.email && !PROTECTED.has(oldLink.email)) {
+      return this.finishDeletion(uid, oldLink.email);
+    }
     const t = await this.target(uid);
     if (t.id !== uid) throw new Error('Legacy accounts require migration before deletion.');
     const overrides = this.db.collection('userPermissionOverrides');
@@ -80,7 +93,22 @@ export class ManagedUserLifecycle {
       }
       tx.create(this.db.collection('managedUserAudit').doc(),{action:'USER_DELETED',uid,actor,at:new Date().toISOString()});
     });
-    // Retain disabled Auth until a separately verified purge/recreate flow.
-    return {success:true,uid,status:'disabled_and_archived',emailReusable:false};
+    return this.finishDeletion(uid, t.email);
+  }
+
+  private async finishDeletion(uid: string, email: string) {
+    try {
+      const user = await this.auth.getUser(uid);
+      if (!user.disabled || user.email?.toLowerCase() !== email || PROTECTED.has(email))
+        throw new Error('Invalid archived authentication account.');
+      await this.auth.deleteUser(uid);
+    } catch (error: any) {
+      if (error?.code !== 'auth/user-not-found') throw error;
+    }
+    await this.auth.getUser(uid).then(
+      () => { throw new Error('Account deletion could not be verified.'); },
+      error => { if (error?.code !== 'auth/user-not-found') throw error; }
+    );
+    return {success:true,uid,status:'deleted',emailReusable:true};
   }
 }
