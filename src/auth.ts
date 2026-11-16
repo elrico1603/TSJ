@@ -47,6 +47,7 @@ export const rolePermissions = {
 
 export interface AppUser {
   id: string;
+  firebaseUid?: string;
   firstName?: string;
   lastName?: string;
   name: string;

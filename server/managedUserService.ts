@@ -686,7 +686,9 @@ export class ManagedUserService {
   ) {
     const uid = safeId(uidInput, 'Firebase UID');
 
-    const access = normalizeAccess(input);
+    // Editing access must not replace notification selections from a stale UI snapshot.
+    const preserveNotifications = input.notificationEventIds === undefined;
+    const access = normalizeAccess({ ...input, notificationEventIds: input.notificationEventIds ?? [] });
 
     const authUser = await this.auth.getUser(uid);
 
@@ -768,12 +770,14 @@ export class ManagedUserService {
         false
       );
 
+      if (!preserveNotifications) {
       this.writeNotifications(
         tx,
         profileId,
         access.notificationEventIds,
         policies
       );
+      }
     });
 
     return {
