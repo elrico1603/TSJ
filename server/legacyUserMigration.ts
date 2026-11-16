@@ -1,3 +1,4 @@
+import { resolveManagedConfiguration } from './managedConfiguration';
 import type { Auth } from 'firebase-admin/auth';
 import type { Firestore, QueryDocumentSnapshot } from 'firebase-admin/firestore';
 import { IDENTITY_LINKS_COLLECTION, USER_PROFILES_COLLECTION } from './firebaseIdentityService';
@@ -136,11 +137,7 @@ export class LegacyUserMigration {
       if (typeof roleId!=='string' || !roleId || roleId.includes('/') ||
           typeof branchId!=='string' || !branchId || branchId.includes('/'))
         throw new Error('Missing role or branch for ' + target.email);
-      const [role,branch] = await Promise.all([
-        tx.get(this.db.collection('roles').doc(roleId)),tx.get(this.db.collection('branches').doc(branchId))
-      ]);
-      if (!role.exists || !branch.exists || typeof role.data()?.roleName !== 'string' || typeof branch.data()?.branchName !== 'string')
-        throw new Error('Role or branch not present in canonical configuration: ' + target.email);
+      const config=await resolveManagedConfiguration(this.db,tx,roleId,branchId);
       const name = target.correctedName || profile.name;
       if (typeof name !== 'string' || !name.trim()) throw new Error('Missing user name.');
       const access = target.fullAccess ? fullAccessSettings() : {
@@ -156,20 +153,20 @@ export class LegacyUserMigration {
         duplicateProfiles:duplicates.map(d=>d.id),permissionDocuments:related.map(d=>d.id),
         roleDocuments:relatedRoles.map(d=>d.id),notificationPolicies:relevantPolicies.map(d=>d.id),
         permissionGroups:Object.keys(access.permissions).length,deviceAccess:access.deviceAccess,
-        roleId,branchId,mode:apply?'emulator-apply':'read-only'
+        roleId,branchId:config.branchId,originalBranchId:branchId,roleSource:config.roleSource,branchSource:config.branchSource,mode:apply?'emulator-apply':'read-only'
       };
       if (!apply) return report;
 
       const now=new Date().toISOString();
       const updated = {...clean(profile),id:target.profileId,firebaseUid:target.uid,email:target.email,name,
         firstName:name.split(' ')[0],lastName:name.split(' ').slice(1).join(' '),
-        role:role.data()!.roleName,roleId,branchId,branchName:branch.data()!.branchName,
+        role:config.roleName,roleId,branchId:config.branchId,branchName:config.branchName,
         active:true,isApproved:true,status:'active',deviceAccess:access.deviceAccess,
         deviceViewAccess:access.deviceViewAccess,updatedAt:now};
       tx.set(current.ref,updated);
       tx.set(links.doc(target.uid),{uid:target.uid,profileId:target.profileId,email:target.email,active:true,updatedAt:now});
       tx.set(this.db.collection(OVERRIDES).doc(target.profileId),{
-        ...access,userId:target.profileId,userEmail:target.email,branchId,branchName:updated.branchName,
+        ...access,userId:target.profileId,userEmail:target.email,branchId:config.branchId,branchName:updated.branchName,
         physicalLocation:profile.physicalLocation || '',updatedAt:now,updatedBy:'managed-migration'
       });
       const assignment={userId:target.profileId,userEmail:target.email,userName:name,roleId,roleName:updated.role,updatedAt:now};
