@@ -3,6 +3,8 @@ import 'firebase/compat/auth';
 
 import { auth, db, APP_ID_PATH } from '../firebase';
 import type { AppUser } from '../auth';
+import type { UserPermissionOverride } from '../types';
+import { permissionService } from './permissionService';
 
 const env = (
   import.meta as unknown as {
@@ -10,10 +12,8 @@ const env = (
   }
 ).env || {};
 
-export const FIREBASE_LOGIN_PILOT =
-  env.VITE_FIREBASE_LOGIN_PILOT === 'true';
-
 const MANAGED_LOGIN = env.VITE_TSJ_MANAGED_USER_UI === 'true';
+export const FIREBASE_LOGIN_PILOT = MANAGED_LOGIN || env.VITE_FIREBASE_LOGIN_PILOT === 'true';
 
 const PILOT_ACCOUNTS: Record<
   string,
@@ -133,9 +133,17 @@ export async function authenticateFirebasePilot(
       );
     }
 
+    if (MANAGED_LOGIN) {
+      const override=(await db.collection('userPermissionOverrides').doc(profileId).get({source:'server'})).data() as UserPermissionOverride | undefined;
+      if (!override || override.userId!==profileId || override.userEmail!==email)
+        throw new Error('No valid canonical permission record exists.');
+      permissionService.replaceManagedOverrides([{id:profileId,data:override}]);
+    }
+
     const {
       pin,
       password: storedPassword,
+      passwordHash,
       ...safeProfile
     } = profile;
 
@@ -174,6 +182,7 @@ export async function authenticateFirebasePilot(
     return result;
 
   } catch (error: any) {
+    if (MANAGED_LOGIN) permissionService.replaceManagedOverrides([]);
     await auth.signOut().catch(() => {});
 
     if (
@@ -192,6 +201,7 @@ export async function authenticateFirebasePilot(
 
 export async function signOutFirebasePilot() {
   if (FIREBASE_LOGIN_PILOT) {
+    if (MANAGED_LOGIN) permissionService.replaceManagedOverrides([]);
     await auth.signOut().catch(() => {});
   }
 }
