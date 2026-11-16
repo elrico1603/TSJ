@@ -1,0 +1,62 @@
+import assert from 'node:assert/strict';
+import { initializeApp, deleteApp } from 'firebase-admin/app';
+import { getAuth } from 'firebase-admin/auth';
+import { getFirestore } from 'firebase-admin/firestore';
+import { ManagedNotificationPolicies } from '../server/managedNotificationPolicies';
+import { ManagedUserLifecycle } from '../server/managedUserLifecycle';
+import { ManagedUserService } from '../server/managedUserService';
+import { USER_PROFILES_COLLECTION } from '../server/firebaseIdentityService';
+
+if (process.env.FIRESTORE_EMULATOR_HOST!=='127.0.0.1:8085' ||
+    process.env.FIREBASE_AUTH_EMULATOR_HOST!=='127.0.0.1:9099')
+  throw new Error('Only demo emulators are allowed.');
+const app=initializeApp({projectId:'demo-tsj-user-admin'},'extra-managed-tests');
+const db=getFirestore(app),auth=getAuth(app);
+const email='stable-id-fixture@example.test',id='legacy-stable-id-fixture';
+const policyPath='artifacts/timbersmith-terminal-v1/private/config/notifications_policies';
+const auditActor='fixture-admin';
+async function main(){
+  let n=0;const pass=(s:string)=>{n++;console.log('PASS | '+s)};
+  const user=await auth.createUser({email,password:'EmulatorFixtureOnly123!'});
+  const uid=user.uid;
+  const profile=db.collection(USER_PROFILES_COLLECTION).doc(id);
+  await profile.set({id,email,firebaseUid:uid,active:true,isApproved:true,status:'active',name:'Stable ID Fixture'});
+  await db.doc('authUserLinks/'+uid).set({uid,profileId:id,email,active:true});
+  await db.doc('userPermissionOverrides/'+id).set({userId:id,userEmail:email,permissions:{}});
+  await db.doc('userRoles/'+id).set({userId:id,userEmail:email,roleId:'FIXTURE-ROLE'});
+  await db.doc('artifacts/timbersmith-terminal-v1/public/userRoles/items/'+id).set({userId:id,userEmail:email,roleId:'FIXTURE-ROLE'});
+  const policyService=new ManagedNotificationPolicies(db);
+  const policy={eventId:'LOW_STOCK',enabled:true,priority:'high',recipientUserIds:[id],coalesceEnabled:true,coalesceWindowMinutes:30};
+  const saved=await policyService.save(policy,auditActor);
+  assert.equal(saved.policy.updatedByUserId,auditActor);
+  assert.deepEqual((await db.doc(policyPath+'/LOW_STOCK').get()).data()!.recipientUserIds,[id]);
+  pass('Server confirms notification policy and actor');
+  await assert.rejects(policyService.save({...policy,recipientUserIds:['missing-fixture']},auditActor));
+  assert.deepEqual((await db.doc(policyPath+'/LOW_STOCK').get()).data()!.recipientUserIds,[id]);
+  pass('Invalid notification recipients cannot modify existing policy');
+  const lifecycle=new ManagedUserLifecycle(db,auth);
+  const deleted=await lifecycle.deleteUser(uid,auditActor);
+  assert.equal(deleted.emailReusable,true);
+  await assert.rejects(auth.getUser(uid));
+  assert.equal((await profile.get()).exists,false);
+  assert.equal((await db.doc('userPermissionOverrides/'+id).get()).exists,false);
+  assert.equal((await db.doc('userRoles/'+id).get()).exists,false);
+  assert.equal((await db.doc('managedUserArchive/'+uid).get()).data()!.id,id);
+  assert.deepEqual((await db.doc(policyPath+'/LOW_STOCK').get()).data()!.recipientUserIds,[]);
+  pass('Linked non-UID profile is deleted and history retained');
+  assert.equal((await lifecycle.deleteUser(uid,auditActor)).emailReusable,true);
+  pass('Deletion retry verifies the archived identity');
+  await db.doc('roles/FIXTURE-ROLE').set({roleName:'Fixture'});
+  await db.doc('branches/FIXTURE-BRANCH').set({branchName:'Fixture Branch'});
+  const recreated=await new ManagedUserService(db,auth).createUser({
+    email,name:'Recreated Fixture',password:'EmulatorFixtureOnly456!',roleId:'FIXTURE-ROLE',branchId:'FIXTURE-BRANCH',
+    deviceAccess:{desktop:true,tablet:false,phone:false,terminal:false},permissions:{},notificationEventIds:[]
+  },auditActor);
+  assert.notEqual(recreated.uid,uid);
+  pass('Deleted stable-profile email may be registered again');
+  await policyService.reset('LOW_STOCK',auditActor);
+  assert.equal((await db.doc(policyPath+'/LOW_STOCK').get()).exists,false);
+  pass('Server-confirmed notification policy reset');
+  console.log(n+'/6 EXTRA MANAGED USER TESTS PASSED');
+}
+main().catch(e=>{console.error(e);process.exitCode=1}).finally(()=>deleteApp(app));
