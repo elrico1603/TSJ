@@ -21,7 +21,7 @@ export async function restoreApprovedBranches(db:Firestore,apply=false) {
     if(candidates.some(d=>!matches(d,BFN)))throw new Error('Conflicting Bloemfontein branch; no changes made.');
     const missing=[root,mirror].filter(s=>!s.docs.some(d=>d.id===BFN.id));
     const now=new Date().toISOString();
-    if(apply)for(const s of missing)tx.create(db.collection(s===root?'branches':ROOT).doc(BFN.id),{...BFN,createdAt:now,updatedAt:now});
+    if(apply)for(const s of missing)tx.create(db.collection(s===root?'branches':ROOT).doc(BFN.id),{...BFN,manager:'',telephone:'',email:'',physicalAddress:'',province:'Free State',country:'South Africa',createdAt:now,updatedAt:now});
     return {mode:apply?'apply':'read-only',brandfort:BRAND,bloemfontein:BFN,missingCopies:missing.length};
   });
 }
