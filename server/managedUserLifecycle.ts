@@ -1,0 +1,86 @@
+import type { Auth } from 'firebase-admin/auth';
+import type { Firestore, Transaction } from 'firebase-admin/firestore';
+import { IDENTITY_LINKS_COLLECTION, USER_PROFILES_COLLECTION } from './firebaseIdentityService';
+
+const ROOT = 'artifacts/timbersmith-terminal-v1';
+const PROTECTED = new Set(['elrico@tsjoinery.co.za','sidwell@tsjoinery.co.za','clocking@tsjoinery.co.za']);
+
+export class ManagedUserLifecycle {
+  constructor(private readonly db: Firestore, private readonly auth: Auth) {}
+  private async target(uid: string) {
+    if (!uid || uid.includes('/') || uid.length > 128) throw new Error('Invalid Firebase UID.');
+    const user = await this.auth.getUser(uid);
+    const email = (user.email || '').trim().toLowerCase();
+    const linkRef = this.db.collection(IDENTITY_LINKS_COLLECTION).doc(uid);
+    const link = (await linkRef.get()).data();
+    const id = link?.profileId;
+    if (!email || !link || link.uid !== uid || link.email !== email ||
+        typeof id !== 'string' || !id || id.includes('/'))
+      throw new Error('Invalid identity link.');
+    if (PROTECTED.has(email) || ['usr-admin-elrico','usr-clocking-kiosk','1786096134420'].includes(id))
+      throw new Error('Protected account cannot be changed here.');
+    const profileRef = this.db.collection(USER_PROFILES_COLLECTION).doc(id);
+    const profile = (await profileRef.get()).data();
+    if (!profile || profile.firebaseUid !== uid || profile.email !== email)
+      throw new Error('Invalid user profile.');
+    return { user, email, id, linkRef, profileRef, profile };
+  }
+  async changePassword(uid: string, password: unknown, actor: string) {
+    if (typeof password !== 'string' || password.length < 6 || password.length > 128)
+      throw new Error('Password must contain 6 to 128 characters.');
+    const t = await this.target(uid);
+    if (t.user.disabled || t.profile.active !== true) throw new Error('User is inactive.');
+    await this.auth.updateUser(uid, { password });
+    await this.auth.revokeRefreshTokens(uid);
+    await this.db.collection('managedUserAudit').add({ action: 'PASSWORD_CHANGED', uid, actor, at: new Date().toISOString() });
+    return { success: true, uid };
+  }
+  async deleteUser(uid: string, actor: string) {
+    const t = await this.target(uid);
+    if (t.id !== uid) throw new Error('Legacy accounts require migration before deletion.');
+    const overrides = this.db.collection('userPermissionOverrides');
+    const assignments = this.db.collection('userRoles');
+    const mirror = this.db.collection(ROOT + '/public/userRoles/items');
+    const policies = this.db.collection(ROOT + '/private/config/notifications_policies');
+    const validate = async (tx: Transaction) => {
+      const [link, profile, duplicates, byId, byEmail, emailDoc, a, m] = await Promise.all([
+        tx.get(t.linkRef), tx.get(t.profileRef),
+        tx.get(this.db.collection(USER_PROFILES_COLLECTION).where('email','==',t.email)),
+        tx.get(overrides.where('userId','==',uid)),
+        tx.get(overrides.where('userEmail','==',t.email)),
+        tx.get(overrides.doc(t.email)),
+        tx.get(assignments.where('userEmail','==',t.email)),
+        tx.get(mirror.where('userEmail','==',t.email))
+      ]);
+      if (link.data()?.uid !== uid || link.data()?.profileId !== uid ||
+          profile.data()?.firebaseUid !== uid || profile.data()?.email !== t.email ||
+          duplicates.size !== 1 || duplicates.docs[0].id !== uid)
+        throw new Error('Invalid or duplicate managed identity.');
+      if ([...byId.docs,...byEmail.docs,...a.docs,...m.docs].some(d=>d.id!==uid) || emailDoc.exists)
+        throw new Error('Legacy permission or role records require migration.');
+      return profile.data()!;
+    };
+    await this.db.runTransaction(validate);
+    await this.auth.updateUser(uid,{disabled:true});
+    await this.auth.revokeRefreshTokens(uid);
+    await this.db.runTransaction(async tx => {
+      const profile = await validate(tx);
+      const policyDocs = await tx.get(policies);
+      const safe = {...profile};
+      delete safe.pin; delete safe.password;
+      tx.set(this.db.collection('managedUserArchive').doc(uid), {...safe,active:false,status:'deleted',deletedAt:new Date().toISOString(),deletedBy:actor});
+      tx.update(t.linkRef,{active:false});
+      tx.delete(t.profileRef);
+      tx.delete(overrides.doc(uid));
+      tx.delete(assignments.doc(uid));
+      tx.delete(mirror.doc(uid));
+      for(const doc of policyDocs.docs) {
+        const ids=doc.data().recipientUserIds;
+        if(Array.isArray(ids)&&ids.includes(uid)) tx.update(doc.ref,{recipientUserIds:ids.filter(id=>id!==uid)});
+      }
+      tx.create(this.db.collection('managedUserAudit').doc(),{action:'USER_DELETED',uid,actor,at:new Date().toISOString()});
+    });
+    // Retain disabled Auth until a separately verified purge/recreate flow.
+    return {success:true,uid,status:'disabled_and_archived',emailReusable:false};
+  }
+}

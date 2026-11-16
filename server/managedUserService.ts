@@ -706,7 +706,8 @@ export class ManagedUserService {
 
     if (
       email === 'elrico@tsjoinery.co.za' ||
-      email === 'clocking@tsjoinery.co.za'
+      email === 'clocking@tsjoinery.co.za' ||
+      email === 'sidwell@tsjoinery.co.za'
     ) {
       throw new Error(
         'Protected account cannot be edited here.'
@@ -740,6 +741,7 @@ export class ManagedUserService {
         !profile.exists ||
         profile.data()?.firebaseUid !== uid ||
         profile.data()?.active !== true ||
+        profile.data()?.isApproved !== true ||
         normalizeEmail(profile.data()?.email) !== email
       ) {
         throw new Error(
