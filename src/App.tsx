@@ -843,6 +843,64 @@ export default function App() {
         if (u && (!MANAGED_AUTH || !u.isAnonymous)) {
           setIsCloudLive(true);
 
+          if (MANAGED_AUTH) {
+            const stillCurrent=()=>isMounted && auth.currentUser?.uid===u.uid;
+            const invalidate=()=>{
+              if (!stillCurrent()) return;
+              permissionService.replaceManagedOverrides([]);
+              setCurrentUser(null);
+              setIsLocked(true);
+              void auth.signOut();
+            };
+            try {
+              const linkRef=db.collection('authUserLinks').doc(u.uid);
+              const link=(await linkRef.get({source:'server'})).data();
+              if (!stillCurrent()) return;
+              if (!link || link.uid!==u.uid || link.email!==u.email || link.active!==true ||
+                typeof link.profileId!=='string' || !link.profileId || link.profileId.includes('/')) {
+                invalidate();return;
+              }
+              const profileId=link.profileId;
+              const ownProfile=db.collection('artifacts').doc(APP_ID_PATH).collection('private').doc('users').collection('active').doc(profileId);
+              const ownOverride=db.collection('userPermissionOverrides').doc(profileId);
+              let stopAllOverrides:(()=>void)|null=null;
+              unsubs.push(()=>stopAllOverrides?.());
+              unsubs.push(linkRef.onSnapshot(snap=>{
+                if (!stillCurrent()) return;
+                const value=snap.data();
+                if (!value || value.active!==true || value.uid!==u.uid || value.profileId!==profileId || value.email!==u.email) invalidate();
+              },invalidate));
+              unsubs.push(ownProfile.onSnapshot(snap=>{
+                if (!stillCurrent()) return;
+                const value=snap.data();
+                if (!value || value.firebaseUid!==u.uid || value.email!==u.email ||
+                  value.active!==true || value.isApproved!==true || value.status!=='active') {invalidate();return;}
+                const safe=sanitizedManagedProfile({...value,id:profileId} as AppUser);
+                setCurrentUser((previous:any)=>previous?.firebaseUid===u.uid?{...previous,...safe}:previous);
+              },invalidate));
+              unsubs.push(ownOverride.onSnapshot(snap=>{
+                if (!stillCurrent()) return;
+                const override=snap.data() as UserPermissionOverride|undefined;
+                if (!override || override.userId!==profileId || override.userEmail!==u.email) {invalidate();return;}
+                permissionService.replaceManagedOverrides([{id:profileId,data:override}]);
+                const view=override.permissions?.['User Assignments']?.View;
+                if ((view==='allow'||view===true) && !stopAllOverrides) {
+                  stopAllOverrides=db.collection('userPermissionOverrides').onSnapshot(all=>{
+                    if (!stillCurrent()) return;
+                    permissionService.replaceManagedOverrides(all.docs.map(doc=>({id:doc.id,data:doc.data() as UserPermissionOverride})));
+                  },()=>{
+                    stopAllOverrides=null;
+                    if (stillCurrent()) permissionService.replaceManagedOverrides([{id:profileId,data:override}]);
+                  });
+                } else if (view!=='allow'&&view!==true&&stopAllOverrides) {
+                  stopAllOverrides();stopAllOverrides=null;
+                }
+              },invalidate));
+            } catch {
+              invalidate();return;
+            }
+          }
+
           // 1. Listen to employees list
           try {
             const unsubEmp = db.collection('artifacts').doc(APP_ID_PATH).collection('public').doc('data').collection('employees')
@@ -1038,6 +1096,7 @@ export default function App() {
           dismissSplash();
           if (MANAGED_AUTH) {
             setIsCloudLive(false);
+            permissionService.replaceManagedOverrides([]);
             setCurrentUser(null);
             setIsLocked(true);
             setActiveUsers(authManager.setUsers([]));
@@ -1488,6 +1547,12 @@ TS Joinery Kanban System`
     }
 
     if (matchedUser) {
+      if (MANAGED_AUTH && !permissionService.canAccessDevice(matchedUser,layoutMode)) {
+        setAdminPinError(true);
+        await auth.signOut();
+        announce('This account is not authorized for this device.');
+        return;
+      }
       setIsLocked(false);
       const override = permissionService.getUserOverride(matchedUser);
       const normUser: AppUser = {
@@ -1671,6 +1736,11 @@ TS Joinery Kanban System`
           ? await authenticateFirebasePilot(emailInput, pinInput)
           : authManager.authenticateUser(activeUsers, emailInput, pinInput);
         if (match) {
+          if (MANAGED_AUTH && !permissionService.canAccessDevice(match,layoutMode)) {
+            setLoginError('This account is not authorized for this device.');
+            await auth.signOut();
+            return;
+          }
           if (match.active === false) {
             setLoginError('Account is currently deactivated. Contact administration.');
             announce('Account deactivated.');
