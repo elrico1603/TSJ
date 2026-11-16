@@ -1,3 +1,4 @@
+import { resolveManagedConfiguration } from './managedConfiguration';
 import type { Auth } from 'firebase-admin/auth';
 import type {
   Firestore,
@@ -348,35 +349,7 @@ export class ManagedUserService {
     tx: Transaction,
     access: NormalizedAccess
   ) {
-    const role = await tx.get(
-      this.db.collection('roles')
-        .doc(access.roleId)
-    );
-
-    const branch = await tx.get(
-      this.db.collection('branches')
-        .doc(access.branchId)
-    );
-
-    if (!role.exists) {
-      throw new Error('Selected role does not exist.');
-    }
-
-    if (!branch.exists) {
-      throw new Error('Selected branch does not exist.');
-    }
-
-    const roleName = requiredText(
-      role.data()?.roleName,
-      'role name'
-    );
-
-    const branchName = requiredText(
-      branch.data()?.branchName,
-      'branch name'
-    );
-
-    return { roleName, branchName };
+    return resolveManagedConfiguration(this.db,tx,access.roleId,access.branchId);
   }
 
   private async readNotificationPolicies(
@@ -467,7 +440,7 @@ export class ManagedUserService {
       lastName: access.lastName,
       role: names.roleName,
       roleId: access.roleId,
-      branchId: access.branchId,
+      branchId: names.branchId,
       branchName: names.branchName,
       department: access.department,
       physicalLocation: access.physicalLocation,
@@ -507,7 +480,7 @@ export class ManagedUserService {
       {
         userId: profileId,
         userEmail: email,
-        branchId: access.branchId,
+        branchId: names.branchId,
         branchName: names.branchName,
         physicalLocation: access.physicalLocation,
         deviceAccess: access.deviceAccess,
