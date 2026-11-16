@@ -15,6 +15,8 @@ export interface LegacyIdentityTarget {
   email: string;
   profileId: string;
   knownDuplicateIds: readonly string[];
+  knownRoleOnlyIds?: readonly string[];
+  preferredRoleId?: string;
   aliasEmails?: readonly string[];
   fullAccess?: boolean;
   correctedName?: string;
@@ -22,11 +24,11 @@ export interface LegacyIdentityTarget {
 
 // Explicitly approved migration targets only; retain stable business IDs.
 export const LEGACY_TARGETS: readonly LegacyIdentityTarget[] = [
-  {uid:'sJ5Ub7SpxxZC954UBtLzxjDVFrP2',email:'elrico@tsjoinery.co.za',profileId:'usr-admin-elrico',knownDuplicateIds:[],fullAccess:true},
+  {uid:'sJ5Ub7SpxxZC954UBtLzxjDVFrP2',email:'elrico@tsjoinery.co.za',profileId:'usr-admin-elrico',knownDuplicateIds:[],knownRoleOnlyIds:['1780921326575'],fullAccess:true},
   {uid:'i8WKGeBgxIOjZ9nQU7U0EnIrmjr1',email:'janah@tsjoinery.co.za',profileId:'usr-manager-janah',knownDuplicateIds:['1781770439358'],fullAccess:true},
   {uid:'mVuOr9dKDqP63T7NHRyUzXvQSSF2',email:'frans@tsjoinery.co.za',profileId:'usr-hr-franz',knownDuplicateIds:['1781004152948','usr-hr-frans'],aliasEmails:['franz@tsjoinery.co.za'],correctedName:'Frans Posthumus',fullAccess:true},
-  {uid:'wkyaqGo86jQa2tUsM0Sg7X3D9fl2',email:'marietjie@tsjoinery.co.za',profileId:'usr-admin-marietjie',knownDuplicateIds:['1785831614380'],correctedName:'Marietjie Barkhuizen'},
-  {uid:'zwEVg4n8pSUhOUsVURoKxb6MczE2',email:'stock@tsjoinery.co.za',profileId:'zwEVg4n8pSUhOUsVURoKxb6MczE2',knownDuplicateIds:[]}
+  {uid:'wkyaqGo86jQa2tUsM0Sg7X3D9fl2',email:'marietjie@tsjoinery.co.za',profileId:'usr-admin-marietjie',knownDuplicateIds:['1785831614380'],preferredRoleId:'ROLE-13491',correctedName:'Marietjie Barkhuizen'},
+  {uid:'zwEVg4n8pSUhOUsVURoKxb6MczE2',email:'stock@tsjoinery.co.za',profileId:'zwEVg4n8pSUhOUsVURoKxb6MczE2',knownDuplicateIds:[],knownRoleOnlyIds:['1788770221231','1788770281409','1788771026007','1788771575650','1788771667859'],preferredRoleId:'ROLE-13491'}
 ];
 
 function emailOf(value: unknown): string {
@@ -126,13 +128,21 @@ export class LegacyUserMigration {
         return ['permissions','deviceAccess','deviceViewAccess','deviceOverrides'].some(key=>
           canonical(v[key] || {})!==canonical(existing?.[key] || {}));
       })) throw new Error('Conflicting permissions require review: ' + target.email);
-      const relatedRoles = roles.docs.filter(matches);
-      const relatedMirror = mirror.docs.filter(matches);
+      const roleIds=new Set([...ids,...(target.knownRoleOnlyIds||[])]);
+      const roleMatches=(doc:QueryDocumentSnapshot)=>matches(doc)||roleIds.has(doc.id)||roleIds.has(String(doc.data().userId||''));
+      const relatedRoles = roles.docs.filter(roleMatches);
+      const relatedMirror = mirror.docs.filter(roleMatches);
+      // Role-only historical IDs may not identify another active profile.
+      if(allUsers.docs.some(d=>(target.knownRoleOnlyIds||[]).includes(d.id)))
+        throw new Error('Historical role ID still has an active profile: '+target.email);
       if ([...relatedRoles,...relatedMirror].some(d=>{
         const v=d.data();
-        return (v.userId && !ids.has(v.userId)) || (v.userEmail && !emails.has(emailOf(v.userEmail)));
+        return !roleIds.has(d.id) && !emails.has(emailOf(d.id)) || (v.userId && !roleIds.has(v.userId)) || (v.userEmail && !emails.has(emailOf(v.userEmail))) || ((target.knownRoleOnlyIds||[]).includes(d.id) && emailOf(v.userEmail)!==target.email);
       })) throw new Error('Conflicting role assignment for ' + target.email);
-      const roleId = profile.roleId || relatedRoles.find(d=>d.id===target.profileId)?.data().roleId;
+      const canonicalAssignments=[...relatedRoles,...relatedMirror].filter(d=>d.id===target.profileId);
+      if(target.preferredRoleId && canonicalAssignments.some(d=>d.data().roleId!==target.preferredRoleId))
+        throw new Error('Canonical role assignment changed: '+target.email);
+      const roleId = target.preferredRoleId || profile.roleId || relatedRoles.find(d=>d.id===target.profileId)?.data().roleId;
       const branchId = profile.branchId || existing?.branchId;
       if (typeof roleId!=='string' || !roleId || roleId.includes('/') ||
           typeof branchId!=='string' || !branchId || branchId.includes('/'))
