@@ -23,6 +23,8 @@ import {
   SECURITY,
   rolePermissions,
   authManager,
+  MANAGED_AUTH,
+  sanitizedManagedProfile,
   AppUser,
   DEFAULT_ACCOUNTS
 } from './auth';
@@ -838,7 +840,7 @@ export default function App() {
         // Clean up any prior listeners before establishing fresh subscriptions
         cleanupFirestoreListeners();
 
-        if (u) {
+        if (u && (!MANAGED_AUTH || !u.isAnonymous)) {
           setIsCloudLive(true);
 
           // 1. Listen to employees list
@@ -928,7 +930,7 @@ export default function App() {
                       isApproved: data.isApproved !== undefined ? data.isApproved : true
                     } as AppUser;
                   });
-                  const mergedUsers = authManager.setUsers(users);
+                  const mergedUsers = authManager.setUsers(MANAGED_AUTH ? users.map(sanitizedManagedProfile) : users);
                   setActiveUsers(mergedUsers);
                   // A tablet that is already signed in must see the saved
                   // account role/device settings, not its older session copy.
@@ -947,7 +949,7 @@ export default function App() {
                               .toLowerCase() === email
                           )
                         );
-                    if (!fresh) return previous;
+                    if (!fresh) return MANAGED_AUTH ? null : previous;
                     const ov = permissionService.getUserOverride(fresh);
                     const next = {
                       ...previous,
@@ -1034,6 +1036,15 @@ export default function App() {
 
         } else {
           dismissSplash();
+          if (MANAGED_AUTH) {
+            setIsCloudLive(false);
+            setCurrentUser(null);
+            setIsLocked(true);
+            setActiveUsers(authManager.setUsers([]));
+            setIsUsersLoading(false);
+            if (u?.isAnonymous) void auth.signOut();
+            return;
+          }
           auth.signInAnonymously().catch(e => {
             console.warn("[AUTH INIT WARNING] Anonymous sign-in notice:", e);
           });
@@ -1602,13 +1613,14 @@ TS Joinery Kanban System`
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError('');
+    if (MANAGED_AUTH && authView !== 'login') { setLoginError('Ask your administrator to create an account.'); return; }
     if (authView === 'login') {
-      if (isUsersLoading && (!activeUsers || activeUsers.length === 0)) {
+      if (!MANAGED_AUTH && isUsersLoading && (!activeUsers || activeUsers.length === 0)) {
         setLoginError('Loading user accounts. Please wait...');
         announce('Loading user accounts. Please wait...');
         return;
       }
-      if (usersLoadError && (!activeUsers || activeUsers.length === 0)) {
+      if (!MANAGED_AUTH && usersLoadError && (!activeUsers || activeUsers.length === 0)) {
         setLoginError(usersLoadError);
         announce(usersLoadError);
         return;
@@ -2432,10 +2444,10 @@ TS Joinery Kanban System`
 
               <button 
                 type="submit" 
-                disabled={isUsersLoading && (!activeUsers || activeUsers.length === 0)}
+                disabled={!MANAGED_AUTH && isUsersLoading && (!activeUsers || activeUsers.length === 0)}
                 className="w-full py-4 bg-[#ff8c00] hover:bg-[#e07b00] disabled:opacity-60 disabled:cursor-not-allowed active:scale-[0.98] text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl transition-all min-h-[48px]"
               >
-                {isUsersLoading && (!activeUsers || activeUsers.length === 0) ? 'Loading Accounts...' : 'Authenticate Login'}
+                {!MANAGED_AUTH && isUsersLoading && (!activeUsers || activeUsers.length === 0) ? 'Loading Accounts...' : 'Authenticate Login'}
               </button>
             </form>
 
@@ -3125,14 +3137,14 @@ TS Joinery Kanban System`
                           </div>
                         )}
 
-                        <button type="submit" disabled={isUsersLoading && (!activeUsers || activeUsers.length === 0)} className="w-full py-5 bg-[#ff8c00] hover:bg-[#e07b00] disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl transition-colors mt-8">
-                          {isUsersLoading && (!activeUsers || activeUsers.length === 0) ? 'Loading Accounts...' : (authView === 'login' ? 'Authenticate Login' : 'Request Registry Access')}
+                        <button type="submit" disabled={!MANAGED_AUTH && isUsersLoading && (!activeUsers || activeUsers.length === 0)} className="w-full py-5 bg-[#ff8c00] hover:bg-[#e07b00] disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl transition-colors mt-8">
+                          {!MANAGED_AUTH && isUsersLoading && (!activeUsers || activeUsers.length === 0) ? 'Loading Accounts...' : (authView === 'login' ? 'Authenticate Login' : 'Request Registry Access')}
                         </button>
                       </form>
 
                       <div className="mt-8 border-t border-white/5 pt-6 flex justify-between text-[11px] font-bold uppercase text-gray-500 font-sans">
                         {authView === 'login' ? (
-                          <button onClick={() => setAuthView('register')} className="hover:text-white transition-colors">Request Access</button>
+                          (!MANAGED_AUTH && <button onClick={() => setAuthView('register')} className="hover:text-white transition-colors">Request Access</button>)
                         ) : (
                           <button onClick={() => setAuthView('login')} className="hover:text-white transition-colors">Back to Login</button>
                         )}
