@@ -1,0 +1,41 @@
+name: Managed user integration
+on:
+  push:
+    branches: [fix/user-authentication-cleanup]
+  pull_request:
+    branches: [main]
+    paths:
+      - 'server/**'
+      - 'src/auth.ts'
+      - 'src/services/**'
+      - 'src/components/RolePermissionHub.tsx'
+      - 'scripts/test-*.ts'
+      - 'tests/managed-users/**'
+      - '.github/workflows/managed-users.yml'
+      - 'package*.json'
+permissions:
+  contents: read
+jobs:
+  managed-users:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - run: npm ci --no-audit --no-fund
+      - run: npm run lint
+      - run: npx --no-install tsx scripts/test-firebase-identity.ts
+      - name: Run isolated Firebase integration tests
+        run: npx --yes firebase-tools emulators:exec --config tests/managed-users/firebase.json --project demo-tsj-user-admin --only auth,firestore 'npx --no-install tsx scripts/test-managed-user.ts'
+      - name: Build both managed login and user interface
+        run: npm run build
+        env:
+          VITE_FIREBASE_LOGIN_PILOT: 'true'
+          VITE_TSJ_MANAGED_USER_UI: 'true'
