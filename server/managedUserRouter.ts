@@ -48,6 +48,7 @@ export function createManagedUserRouter() {
     };
   router.post('/create', run((req, actor) => services().managed.createUser(req.body, actor)));
   router.post('/:uid/access', run((req, actor) => services().managed.saveUserAccess(req.params.uid, req.body, actor)));
+  router.post('/:uid/status', run((req, actor) => services().lifecycle.setActive(req.params.uid, req.body?.active, actor)));
   router.post('/:uid/password', run((req, actor) => services().lifecycle.changePassword(req.params.uid, req.body?.password, actor)));
   router.post('/:uid/delete', run((req, actor) => services().lifecycle.deleteUser(req.params.uid, actor)));
   return router;
