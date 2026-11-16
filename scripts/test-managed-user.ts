@@ -3,6 +3,7 @@ import { initializeApp, deleteApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 import { ManagedUserService, type CreateManagedUserInput } from '../server/managedUserService';
+import { LegacyUserMigration, LEGACY_TARGETS } from '../server/legacyUserMigration';
 import { ManagedUserLifecycle } from '../server/managedUserLifecycle';
 import { USER_PROFILES_COLLECTION } from '../server/firebaseIdentityService';
 
@@ -125,6 +126,49 @@ async function main() {
   assert.notEqual(recreated.uid,uid);
   pass('Same email can be recreated with a new UID');
   await lifecycle.deleteUser(recreated.uid,'Test admin');
-  console.log(passed+'/21 MANAGED USER INTEGRATION TESTS PASSED');
+  const frans=LEGACY_TARGETS.find(target=>target.email==='frans@tsjoinery.co.za')!;
+  const target={...frans,uid:'migration-frans-test'};
+  await auth.createUser({uid:target.uid,email:target.email,password:'EmulatorMigrationTest123!'});
+  const legacyUsers=db.collection(USER_PROFILES_COLLECTION);
+  await legacyUsers.doc(target.profileId).set({
+    id:target.profileId,name:'Frans Posthumus',email:target.email,active:true,isApproved:true,status:'active',
+    role:'Administrator',roleId:'TEST-ADMIN',branchId:'TEST-BFN',pin:'emulator-only'
+  });
+  await db.collection('roles').doc('TEST-ADMIN').set({roleName:'Administrator'});
+  for (const id of target.knownDuplicateIds) await legacyUsers.doc(id).set({id,name:'Frans User',email:target.email});
+  await db.collection('userPermissionOverrides').doc(target.profileId).set({
+    userId:target.profileId,userEmail:target.email,permissions:{'Kanban Designer':{View:'allow'}}
+  });
+  await db.collection('userPermissionOverrides').doc('franz@tsjoinery.co.za').set({
+    userId:target.profileId,userEmail:'franz@tsjoinery.co.za',permissions:{}
+  });
+  await policies.doc('LOW_STOCK').set({
+    eventId:'LOW_STOCK',enabled:true,priority:'high',
+    recipientUserIds:[target.profileId,target.knownDuplicateIds[0],'other-test-recipient'],coalesceEnabled:true,coalesceWindowMinutes:60
+  });
+  const migration=new LegacyUserMigration(db,auth);
+  const plan=await migration.migrate(target,false);
+  assert.equal(plan.duplicateProfiles.length,2);
+  assert.equal((await legacyUsers.doc(target.knownDuplicateIds[0]).get()).exists,true);
+  pass('Migration dry run leaves existing data unchanged');
+  await migration.migrate(target,true);
+  const migrated=(await legacyUsers.doc(target.profileId).get()).data()!;
+  assert.equal(migrated.firebaseUid,target.uid);
+  assert.equal(migrated.email,'frans@tsjoinery.co.za');
+  assert.equal(migrated.firstName,'Frans');
+  assert.equal('pin' in migrated,false);
+  for(const id of target.knownDuplicateIds) assert.equal((await legacyUsers.doc(id).get()).exists,false);
+  assert.equal((await db.collection('userPermissionOverrides').doc('franz@tsjoinery.co.za').get()).exists,false);
+  pass('Legacy Frans identity consolidated and correct spelling retained');
+  const migratedAccess=(await db.collection('userPermissionOverrides').doc(target.profileId).get()).data()!;
+  assert.equal(Object.keys(migratedAccess.permissions).length,35);
+  assert.equal(migratedAccess.permissions['User Assignments'].Edit,'allow');
+  assert.equal(migratedAccess.deviceAccess.tablet,true);
+  assert.equal(migratedAccess.deviceAccess.terminal,false);
+  pass('Administrator Full Access applied explicitly');
+  assert.deepEqual((await policies.doc('LOW_STOCK').get()).data()!.recipientUserIds,[target.profileId,'other-test-recipient']);
+  assert.equal((await db.collection('authUserLinks').doc(target.uid).get()).data()!.profileId,target.profileId);
+  pass('Stable notification recipients and identity link preserved');
+  console.log(passed+'/25 MANAGED USER INTEGRATION TESTS PASSED');
 }
 main().catch(error=>{console.error('MANAGED USER TEST FAILED:',error.message);process.exitCode=1}).finally(()=>deleteApp(app));
