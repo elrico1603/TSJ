@@ -4,6 +4,7 @@ import { getFirebaseAdminApp, getServerFirestore } from './firebaseAdmin';
 import { firebaseIdentityService } from './firebaseIdentityService';
 import { ManagedUserService, MANAGED_PERMISSION_MODULES, MANAGED_PERMISSION_ACTIONS } from './managedUserService';
 import { ManagedUserLifecycle } from './managedUserLifecycle';
+import { ManagedNotificationPolicies } from './managedNotificationPolicies';
 
 export function managedUserApiEnabled() {
   return process.env.TSJ_MANAGED_USER_API === 'true';
@@ -26,10 +27,13 @@ export function createManagedUserRouter() {
       const actor = await firebaseIdentityService.resolveToken(token);
       const override = (await getServerFirestore().collection('userPermissionOverrides')
         .doc(actor.profileId).get()).data();
+      const notificationOperation = req.path === '/notification-policy/save' || req.path === '/notification-policy/reset';
+      const notificationEdit = override?.permissions?.Notifications?.Edit;
       if (!override || override.userId !== actor.profileId || override.userEmail !== actor.email ||
-          !hasFullManagedAdministration(override.permissions))
-        return res.status(403).json({ error: 'Explicit Full Access is required for user administration.' });
+          !(notificationOperation ? notificationEdit === 'allow' || notificationEdit === true : hasFullManagedAdministration(override.permissions)))
+        return res.status(403).json({ error: notificationOperation ? 'Notifications Edit permission required.' : 'Explicit Full Access is required for user administration.' });
       res.locals.actor = actor.uid;
+      res.locals.actorProfileId = actor.profileId;
       next();
     } catch {
       return res.status(401).json({ error: 'Invalid or inactive identity.' });
@@ -56,6 +60,8 @@ export function createManagedUserRouter() {
         });
       }
     };
+  router.post('/notification-policy/save', run((req) => new ManagedNotificationPolicies(getServerFirestore()).save(req.body, req.res!.locals.actorProfileId)));
+  router.post('/notification-policy/reset', run((req) => new ManagedNotificationPolicies(getServerFirestore()).reset(req.body?.eventId, req.res!.locals.actorProfileId)));
   router.post('/create', run((req, actor) => services().managed.createUser(req.body, actor)));
   router.post('/:uid/access', run((req, actor) => services().managed.saveUserAccess(req.params.uid, req.body, actor)));
   router.post('/:uid/status', run((req, actor) => services().lifecycle.setActive(req.params.uid, req.body?.active, actor)));
