@@ -1,6 +1,59 @@
+// Isolated managed-identity rules candidate. NOT a production ruleset.
+// All business-module paths are deliberately denied pending live rules audit.
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function linkPath() {
+      return /databases/$(database)/documents/authUserLinks/$(request.auth.uid);
+    }
+    function linked() {
+      return request.auth != null &&
+        request.auth.token.firebase.sign_in_provider != 'anonymous' &&
+        exists(linkPath()) &&
+        get(linkPath()).data.uid == request.auth.uid &&
+        get(linkPath()).data.email == request.auth.token.email &&
+        get(linkPath()).data.active == true;
+    }
+    function profileId() { return get(linkPath()).data.profileId; }
+    function profilePath() {
+      return /databases/$(database)/documents/artifacts/timbersmith-terminal-v1/private/users/active/$(profileId());
+    }
+    function activeIdentity() {
+      return linked() && exists(profilePath()) &&
+        get(profilePath()).data.firebaseUid == request.auth.uid &&
+        get(profilePath()).data.email == request.auth.token.email &&
+        get(profilePath()).data.active == true &&
+        get(profilePath()).data.isApproved == true &&
+        get(profilePath()).data.status == 'active';
+    }
+    function overridePath() {
+      return /databases/$(database)/documents/userPermissionOverrides/$(profileId());
+    }
+    function permitted(module, action) {
+      return activeIdentity() && exists(overridePath()) &&
+        get(overridePath()).data.userId == profileId() &&
+        get(overridePath()).data.userEmail == request.auth.token.email &&
+        get(overridePath()).data.permissions.get(module, {}).get(action, 'deny') in ['allow', true];
+    }
+
+    match /authUserLinks/{uid} {
+      allow get: if linked() && request.auth.uid == uid;
+      allow list, write: if false;
+    }
+    match /artifacts/timbersmith-terminal-v1/private/users/active/{id} {
+      allow get: if activeIdentity() && (id == profileId() || permitted('User Assignments','View'));
+      allow list: if permitted('User Assignments','View');
+      allow write: if false;
+    }
+    match /userPermissionOverrides/{id} {
+      allow get: if activeIdentity() && (id == profileId() || permitted('User Assignments','View'));
+      allow list: if permitted('User Assignments','View');
+      allow write: if false;
+    }
+    match /artifacts/timbersmith-terminal-v1/private/config/notifications_policies/{id} {
+      allow read: if permitted('Notifications','View');
+      allow write: if false;
+    }
     match /{document=**} { allow read, write: if false; }
   }
 }
