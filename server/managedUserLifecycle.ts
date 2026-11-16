@@ -66,39 +66,45 @@ export class ManagedUserLifecycle {
 
   async deleteUser(uid: string, actor: string) {
     if (!uid || uid.includes('/') || uid.length > 128) throw new Error('Invalid Firebase UID.');
-    const [linkSnap, archiveSnap, activeSnap] = await Promise.all([
+    const [linkSnap, archiveSnap] = await Promise.all([
       this.db.collection(IDENTITY_LINKS_COLLECTION).doc(uid).get(),
-      this.db.collection('managedUserArchive').doc(uid).get(),
-      this.db.collection(USER_PROFILES_COLLECTION).doc(uid).get()
+      this.db.collection('managedUserArchive').doc(uid).get()
     ]);
     const oldLink = linkSnap.data(), archived = archiveSnap.data();
-    if (!activeSnap.exists && oldLink?.active === false && oldLink.uid === uid &&
-        oldLink.profileId === uid && archived?.firebaseUid === uid &&
+    if (oldLink?.active === false && oldLink.uid === uid &&
+        typeof oldLink.profileId==='string' && !!oldLink.profileId && !oldLink.profileId.includes('/') &&
+        !['usr-admin-elrico','usr-clocking-kiosk','1786096134420'].includes(oldLink.profileId) &&
+        archived?.firebaseUid === uid && archived.id===oldLink.profileId &&
         archived.status === 'deleted' && archived.active === false &&
         archived.email === oldLink.email && !PROTECTED.has(oldLink.email)) {
-      return this.finishDeletion(uid, oldLink.email);
+      const activeSnap=await this.db.collection(USER_PROFILES_COLLECTION).doc(oldLink.profileId).get();
+      if (!activeSnap.exists) return this.finishDeletion(uid, oldLink.email);
     }
     const t = await this.target(uid);
-    if (t.id !== uid) throw new Error('Legacy accounts require migration before deletion.');
+    const profileId=t.id;
     const overrides = this.db.collection('userPermissionOverrides');
     const assignments = this.db.collection('userRoles');
     const mirror = this.db.collection(ROOT + '/public/userRoles/items');
     const policies = this.db.collection(ROOT + '/private/config/notifications_policies');
     const validate = async (tx: Transaction) => {
-      const [link, profile, duplicates, byId, byEmail, emailDoc, a, m] = await Promise.all([
+      const [link, profile, duplicates, byId, byEmail, emailDoc, a, m, aId, mId, linkedProfiles] = await Promise.all([
         tx.get(t.linkRef), tx.get(t.profileRef),
         tx.get(this.db.collection(USER_PROFILES_COLLECTION).where('email','==',t.email)),
-        tx.get(overrides.where('userId','==',uid)),
+        tx.get(overrides.where('userId','==',profileId)),
         tx.get(overrides.where('userEmail','==',t.email)),
         tx.get(overrides.doc(t.email)),
         tx.get(assignments.where('userEmail','==',t.email)),
-        tx.get(mirror.where('userEmail','==',t.email))
+        tx.get(mirror.where('userEmail','==',t.email)),
+        tx.get(assignments.where('userId','==',profileId)),
+        tx.get(mirror.where('userId','==',profileId)),
+        tx.get(this.db.collection(IDENTITY_LINKS_COLLECTION).where('profileId','==',profileId))
       ]);
-      if (link.data()?.uid !== uid || link.data()?.profileId !== uid ||
+      if (link.data()?.uid !== uid || link.data()?.profileId !== profileId ||
           profile.data()?.firebaseUid !== uid || profile.data()?.email !== t.email ||
-          duplicates.size !== 1 || duplicates.docs[0].id !== uid)
+          duplicates.size !== 1 || duplicates.docs[0].id !== profileId ||
+          linkedProfiles.size!==1 || linkedProfiles.docs[0].id!==uid)
         throw new Error('Invalid or duplicate managed identity.');
-      if ([...byId.docs,...byEmail.docs,...a.docs,...m.docs].some(d=>d.id!==uid) || emailDoc.exists)
+      if ([...byId.docs,...byEmail.docs,...a.docs,...m.docs,...aId.docs,...mId.docs].some(d=>d.id!==profileId) || emailDoc.exists)
         throw new Error('Legacy permission or role records require migration.');
       return profile.data()!;
     };
@@ -109,16 +115,17 @@ export class ManagedUserLifecycle {
       const profile = await validate(tx);
       const policyDocs = await tx.get(policies);
       const safe = {...profile};
-      delete safe.pin; delete safe.password;
+      delete safe.pin; delete safe.password; delete safe.passwordHash;
+      safe.id=profileId;
       tx.set(this.db.collection('managedUserArchive').doc(uid), {...safe,active:false,status:'deleted',deletedAt:new Date().toISOString(),deletedBy:actor});
       tx.update(t.linkRef,{active:false});
       tx.delete(t.profileRef);
-      tx.delete(overrides.doc(uid));
-      tx.delete(assignments.doc(uid));
-      tx.delete(mirror.doc(uid));
+      tx.delete(overrides.doc(profileId));
+      tx.delete(assignments.doc(profileId));
+      tx.delete(mirror.doc(profileId));
       for(const doc of policyDocs.docs) {
         const ids=doc.data().recipientUserIds;
-        if(Array.isArray(ids)&&ids.includes(uid)) tx.update(doc.ref,{recipientUserIds:ids.filter(id=>id!==uid)});
+        if(Array.isArray(ids)&&ids.includes(profileId)) tx.update(doc.ref,{recipientUserIds:ids.filter(id=>id!==profileId)});
       }
       tx.create(this.db.collection('managedUserAudit').doc(),{action:'USER_DELETED',uid,actor,at:new Date().toISOString()});
     });
