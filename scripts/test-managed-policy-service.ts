@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { initializeApp, deleteApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
+import { LegacyUserMigration } from '../server/legacyUserMigration';
 import { restoreApprovedBranches } from '../server/restoreApprovedBranches';
 import { resolveManagedConfiguration } from '../server/managedConfiguration';
 import { ManagedNotificationPolicies } from '../server/managedNotificationPolicies';
@@ -94,11 +95,43 @@ async function main(){
   assert.equal((await restoreApprovedBranches(db,true)).missingCopies,0);
   assert.deepEqual((await bfnRoot.get()).data(),bfn);
   pass('Branch restoration is idempotent');
+  const migrationEmail='role-history-fixture@example.test',migrationId='role-history-profile';
+  const migrationAccount=await auth.createUser({email:migrationEmail,password:'EmulatorMigrationFixture123!'});
+  const migrationTarget={uid:migrationAccount.uid,email:migrationEmail,profileId:migrationId,
+    knownDuplicateIds:[],knownRoleOnlyIds:['old-role-history-1','old-role-history-2'],preferredRoleId:'FIXTURE-ROLE'};
+  const retainedPermissions={'Kanban Designer':{View:'allow',Edit:'deny'}};
+  await db.doc(USER_PROFILES_COLLECTION+'/'+migrationId).set({
+    id:migrationId,email:migrationEmail,name:'History Fixture',active:true,isApproved:true,
+    role:'Old Role',roleId:'LEGACY-TEST-ROLE',branchId:'BFN-01'
+  });
+  await db.doc('userPermissionOverrides/'+migrationId).set({userId:migrationId,userEmail:migrationEmail,permissions:retainedPermissions,deviceAccess:{desktop:true,phone:false,tablet:false,terminal:false}});
+  for(const path of ['userRoles',legacy+'/userRoles/items']){
+    await db.doc(path+'/'+migrationId).set({userId:migrationId,userEmail:migrationEmail,roleId:'FIXTURE-ROLE'});
+    for(const historyId of migrationTarget.knownRoleOnlyIds) await db.doc(path+'/'+historyId).set({
+      userId:historyId,userEmail:migrationEmail,roleId:'LEGACY-TEST-ROLE'
+    });
+  }
+  const migration=new LegacyUserMigration(db,auth);
+  const audit=await migration.migrate(migrationTarget,false);
+  assert.equal(audit.branchId,'BR-002');assert.equal(audit.roleId,'FIXTURE-ROLE');
+  assert.equal(audit.roleDocuments.length,3);
+  assert.equal((await db.doc('userRoles/old-role-history-1').get()).exists,true);
+  pass('Audited historical role-only IDs are accepted in dry run');
+  await migration.migrate(migrationTarget,true);
+  assert.equal((await db.doc(USER_PROFILES_COLLECTION+'/'+migrationId).get()).data()!.branchId,'BR-002');
+  assert.equal((await db.doc(USER_PROFILES_COLLECTION+'/'+migrationId).get()).data()!.roleId,'FIXTURE-ROLE');
+  assert.deepEqual((await db.doc('userPermissionOverrides/'+migrationId).get()).data()!.permissions,retainedPermissions);
+  for(const historyId of migrationTarget.knownRoleOnlyIds){
+    assert.equal((await db.doc('userRoles/'+historyId).get()).exists,false);
+    assert.equal((await db.doc(legacy+'/userRoles/items/'+historyId).get()).exists,false);
+    assert.equal((await db.doc('managedUserMigrationArchive/'+migrationAccount.uid+'-role-'+historyId).get()).exists,true);
+  }
+  pass('Role consolidation archives stale assignments and preserves explicit permissions');
   await bfnRoot.update({branchCode:'CONFLICTING-CODE'});
   await assert.rejects(restoreApprovedBranches(db,true));
   assert.equal((await bfnRoot.get()).data()!.branchCode,'CONFLICTING-CODE');
   assert.deepEqual((await brandRoot.get()).data(),brand);
   pass('Conflicting existing branch is not overwritten');
-  console.log(n+'/13 EXTRA MANAGED USER TESTS PASSED');
+  console.log(n+'/15 EXTRA MANAGED USER TESTS PASSED');
 }
 main().catch(e=>{console.error(e);process.exitCode=1}).finally(()=>deleteApp(app));
