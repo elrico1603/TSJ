@@ -71,7 +71,7 @@ export class LegacyUserMigration {
   // Dry-run reads production if explicitly invoked there. The write path is
   // deliberately restricted to the local test project until cutover is tested.
   async migrate(target: LegacyIdentityTarget, apply = false) {
-    if (apply && (this.db.projectId !== 'demo-tsj-user-admin' ||
+    if (apply && (this.auth.app.options.projectId !== 'demo-tsj-user-admin' ||
         process.env.FIRESTORE_EMULATOR_HOST !== '127.0.0.1:8085' ||
         process.env.FIREBASE_AUTH_EMULATOR_HOST !== '127.0.0.1:9099'))
       throw new Error('Production migration is disabled; use the isolated demo emulators.');
