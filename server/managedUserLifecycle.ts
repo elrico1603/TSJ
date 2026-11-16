@@ -35,6 +35,35 @@ export class ManagedUserLifecycle {
     await this.db.collection('managedUserAudit').add({ action: 'PASSWORD_CHANGED', uid, actor, at: new Date().toISOString() });
     return { success: true, uid };
   }
+  async setActive(uid: string, active: unknown, actor: string) {
+    if (typeof active !== 'boolean') throw new Error('Invalid account status.');
+    const t = await this.target(uid);
+    if (t.profile.isApproved !== true || ['deleted','archived'].includes(String(t.profile.status || '').toLowerCase()))
+      throw new Error('Invalid account status for activation.');
+    // Disable and revoke before changing Firestore, then enable only when
+    // the authoritative profile and identity link have been committed.
+    await this.auth.updateUser(uid, { disabled: true });
+    await this.auth.revokeRefreshTokens(uid);
+    await this.db.runTransaction(async tx => {
+      const [link,profile] = await Promise.all([tx.get(t.linkRef),tx.get(t.profileRef)]);
+      if (link.data()?.uid !== uid || link.data()?.profileId !== t.id ||
+          link.data()?.email !== t.email || profile.data()?.firebaseUid !== uid ||
+          profile.data()?.email !== t.email || profile.data()?.isApproved !== true ||
+          ['deleted','archived'].includes(String(profile.data()?.status || '').toLowerCase()))
+        throw new Error('Invalid managed identity.');
+      tx.update(t.linkRef, { active });
+      tx.update(t.profileRef, { active, status: active ? 'active' : 'suspended', updatedAt: new Date().toISOString() });
+      tx.create(this.db.collection('managedUserAudit').doc(), {
+        action: active ? 'USER_REACTIVATED' : 'USER_SUSPENDED', uid, actor, at: new Date().toISOString()
+      });
+    });
+    if (active) await this.auth.updateUser(uid, { disabled: false });
+    const [user,link,profile] = await Promise.all([this.auth.getUser(uid),t.linkRef.get(),t.profileRef.get()]);
+    if (user.disabled === active || link.data()?.active !== active || profile.data()?.active !== active)
+      throw new Error('Account status could not be verified. Retry the operation.');
+    return { success:true,uid,active };
+  }
+
   async deleteUser(uid: string, actor: string) {
     if (!uid || uid.includes('/') || uid.length > 128) throw new Error('Invalid Firebase UID.');
     const [linkSnap, archiveSnap, activeSnap] = await Promise.all([
