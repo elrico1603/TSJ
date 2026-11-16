@@ -2,15 +2,20 @@ import express from 'express';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirebaseAdminApp, getServerFirestore } from './firebaseAdmin';
 import { firebaseIdentityService } from './firebaseIdentityService';
-import { ManagedUserService } from './managedUserService';
+import { ManagedUserService, MANAGED_PERMISSION_MODULES, MANAGED_PERMISSION_ACTIONS } from './managedUserService';
 import { ManagedUserLifecycle } from './managedUserLifecycle';
 
 export function managedUserApiEnabled() {
   return process.env.TSJ_MANAGED_USER_API === 'true';
 }
 
-// Initial rollout is MASTER only. Never enable before restrictive Firestore
-// rules and identity links have been migrated and verified.
+// Full account administration requires explicit full access. Role labels and
+// browser claims never grant the ability to delegate permissions.
+export function hasFullManagedAdministration(permissions: any): boolean {
+  return MANAGED_PERMISSION_MODULES.every(module =>
+    MANAGED_PERMISSION_ACTIONS.every(action =>
+      permissions?.[module]?.[action] === 'allow' || permissions?.[module]?.[action] === true));
+}
 export function createManagedUserRouter() {
   const router = express.Router();
   router.use(async (req, res, next) => {
@@ -19,10 +24,11 @@ export function createManagedUserRouter() {
       const token = /^Bearer ([^\s]+)$/.exec(req.headers.authorization || '')?.[1];
       if (!token) return res.status(401).json({ error: 'Authentication required.' });
       const actor = await firebaseIdentityService.resolveToken(token);
-      if (actor.uid !== 'sJ5Ub7SpxxZC954UBtLzxjDVFrP2' ||
-          actor.profileId !== 'usr-admin-elrico' ||
-          actor.email !== 'elrico@tsjoinery.co.za')
-        return res.status(403).json({ error: 'MASTER access required.' });
+      const override = (await getServerFirestore().collection('userPermissionOverrides')
+        .doc(actor.profileId).get()).data();
+      if (!override || override.userId !== actor.profileId || override.userEmail !== actor.email ||
+          !hasFullManagedAdministration(override.permissions))
+        return res.status(403).json({ error: 'Explicit Full Access is required for user administration.' });
       res.locals.actor = actor.uid;
       next();
     } catch {
@@ -35,7 +41,11 @@ export function createManagedUserRouter() {
   };
   const run = (operation: (req: express.Request, actor: string) => Promise<unknown>) =>
     async (req: express.Request, res: express.Response) => {
-      try { return res.json(await operation(req, res.locals.actor)); }
+      try {
+        if (req.params.uid && req.params.uid === res.locals.actor)
+          return res.status(403).json({ error: 'You cannot change your own account through user administration.' });
+        return res.json(await operation(req, res.locals.actor));
+      }
       catch (error: any) {
         const message = error instanceof Error ? error.message : '';
         const safe = /^(Invalid |Missing |Unknown |Selected |Permissions |Password |Notification |A user profile |Duplicate |Protected |User is |Account |User creation |Managed |Legacy |Cannot )/.test(message);
