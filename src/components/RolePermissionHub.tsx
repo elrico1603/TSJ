@@ -18,7 +18,7 @@ import {
   DEFAULT_ROLES
 } from '../services/permissionService';
 import { companyService } from '../services/companyService';
-import { db, APP_ID_PATH } from '../firebase';
+import { auth, db, APP_ID_PATH } from '../firebase';
 import { canMutateAuthOrRBAC } from '../services/previewSafety';
 import {
   NotificationEventDefinition,
@@ -912,10 +912,11 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
       announce?.('Master administrator account status cannot be deactivated.');
       return;
     }
-    if (MANAGED_USER_UI) { announce?.('Account status changes are not yet available in managed mode.'); return; }
     const newActive = user.active === false ? true : false;
     try {
-      if (updateActiveUser) {
+      if (MANAGED_USER_UI) {
+        await managedUserRequest(managedUserUid(user) + '/status', { active: newActive });
+      } else if (updateActiveUser) {
         await updateActiveUser(user.id, { active: newActive });
       } else if (db && APP_ID_PATH && canMutateAuthOrRBAC('updateActiveStatus', user.id)) {
         await db.collection('artifacts')
@@ -930,6 +931,21 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
     } catch (err) {
       console.error(err);
       announce?.('Failed to update user status.');
+    }
+  };
+
+  const [resettingPasswordIds, setResettingPasswordIds] = useState<Record<string,boolean>>({});
+  const handleSendPasswordReset = async (user: AppUser) => {
+    if (!MANAGED_USER_UI || isReadOnly || !user.firebaseUid || user.active === false || resettingPasswordIds[user.id]) return;
+    if (!window.confirm('Send a password reset email to ' + user.email + '?')) return;
+    setResettingPasswordIds(prev => ({ ...prev, [user.id]: true }));
+    try {
+      await auth.sendPasswordResetEmail(user.email);
+      announce?.('Password reset requested for ' + user.email + '. Check their inbox.');
+    } catch {
+      announce?.('Password reset request failed. Check the Firebase email configuration.');
+    } finally {
+      setResettingPasswordIds(prev => ({ ...prev, [user.id]: false }));
     }
   };
 
@@ -1700,6 +1716,15 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
                           {/* Actions */}
                           <td className="p-4 text-right">
                             <div className="flex items-center justify-end space-x-2">
+                              {MANAGED_USER_UI && !isReadOnly && user.firebaseUid && user.active !== false && !isMasterAccount && (
+                                <button type="button"
+                                  onClick={() => handleSendPasswordReset(user)}
+                                  disabled={!!resettingPasswordIds[user.id]}
+                                  title="Send password reset email"
+                                  className="px-2 py-1 text-[10px] font-bold text-blue-300 hover:text-white disabled:opacity-50">
+                                  {resettingPasswordIds[user.id] ? 'Sending…' : 'Reset Password'}
+                                </button>
+                              )}
                               {!isReadOnly && (
                                 <button
                                   onClick={() => handleOpenEditUser(user)}
