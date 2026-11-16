@@ -64,7 +64,10 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
   const canEditPolicies = permissionService.hasPermission(currentUser, 'Notifications', 'Edit');
 
   const hasAccess = canViewUsers || canEditUsers || canApproveUsers || canAccessAdmin || canViewPolicies;
-  const isReadOnly = !canEditUsers || (MANAGED_USER_UI && currentUser?.id !== 'usr-admin-elrico');
+  const hasFullManagedAccess = !!currentUser?.firebaseUid &&
+    PERMISSION_CATEGORIES_CONFIG.every(group => group.modules.every(module =>
+      ALL_PERMISSION_ACTIONS.every(action => permissionService.hasPermission(currentUser, module, action))));
+  const isReadOnly = !canEditUsers || (MANAGED_USER_UI && !hasFullManagedAccess);
 
   const [subTab, setSubTab] = useState<'users' | 'roles' | 'audit' | 'policies'>(
     initialSubTab === 'matrix' ? 'roles' : (initialSubTab as any) || 'users'
