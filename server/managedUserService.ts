@@ -15,7 +15,7 @@ import {
 
 const APP_ID = 'timbersmith-terminal-v1';
 
-const MODULES = [
+export const MANAGED_PERMISSION_MODULES = [
   'Company Information',
   'Branch Management',
   'User Assignments',
@@ -53,7 +53,7 @@ const MODULES = [
   'System Settings'
 ] as const;
 
-const ACTIONS = [
+export const MANAGED_PERMISSION_ACTIONS = [
   'View',
   'Create',
   'Edit',
@@ -163,7 +163,7 @@ function normalizePermissions(
   const output: AccessMap = {};
 
   for (const [module, actions] of Object.entries(input)) {
-    if (!(MODULES as readonly string[]).includes(module)) {
+    if (!(MANAGED_PERMISSION_MODULES as readonly string[]).includes(module)) {
       throw new Error(`Unknown permission module: ${module}`);
     }
 
@@ -176,7 +176,7 @@ function normalizePermissions(
     }
 
     for (const [action, value] of Object.entries(actions)) {
-      if (!(ACTIONS as readonly string[]).includes(action)) {
+      if (!(MANAGED_PERMISSION_ACTIONS as readonly string[]).includes(action)) {
         throw new Error(`Unknown action: ${action}`);
       }
 
@@ -192,10 +192,10 @@ function normalizePermissions(
   // Every permission is explicit.
   // Unselected permissions are denied by default.
 
-  for (const module of MODULES) {
+  for (const module of MANAGED_PERMISSION_MODULES) {
     output[module] = {};
 
-    for (const action of ACTIONS) {
+    for (const action of MANAGED_PERMISSION_ACTIONS) {
       const value = input[module]?.[action];
 
       output[module][action] =
