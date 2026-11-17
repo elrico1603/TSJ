@@ -68,7 +68,7 @@ async function main() {
   assert.equal(override.deviceViewAccess.tablet.kanban,true);
   pass('Device access and views saved');
   assert.equal(profile.branchId,'TEST-BFN');
-  assert.equal(profile.branchName,'Bloemfontein Test');
+  assert.equal(profile.branchName,'Emulator Fixture Branch');
   pass('Branch saved');
   const low=(await policies.doc('LOW_STOCK').get()).data()!;
   assert.deepEqual(new Set(low.recipientUserIds),new Set(['other-test-recipient',uid]));
