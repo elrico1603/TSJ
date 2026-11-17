@@ -1,7 +1,7 @@
 name: Managed user integration
 on:
   push:
-    branches: [fix/user-authentication-cleanup]
+    branches: [fix/user-authentication-cleanup, work/user-backend-finalization]
   pull_request:
     branches: [main]
     paths:
