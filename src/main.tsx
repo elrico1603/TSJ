@@ -1,25 +1,18 @@
-import {StrictMode, Suspense, lazy} from 'react';
+import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
+import App from './App.tsx';
 import './index.css';
 import { BUILD_ID, BUILD_TIMESTAMP, HAS_FORM_DATA_FIX, CURRENT_VERSION_STRING } from './version';
-
-// The sandbox is available ONLY on an actual Netlify pull-request deploy
-// preview. This route does not import the production App or Firebase client.
-const hostname=window.location.hostname.toLowerCase();
-const isDeployPreview=/^deploy-preview-[0-9]+--/.test(hostname) && hostname.endsWith('.netlify.app');
-const isUserDemo=isDeployPreview && new URLSearchParams(window.location.search).get('demo')==='user-admin';
-const App=lazy(()=>import('./App.tsx'));
-const UserManagementDemo=lazy(()=>import('./components/UserManagementDemo'));
 
 console.log('[TSHUB BUILD]', {
   version: CURRENT_VERSION_STRING,
   buildId: BUILD_ID,
   buildTimestamp: BUILD_TIMESTAMP,
-  hasFormDataFix: HAS_FORM_DATA_FIX,
-  isUserDemo
+  hasFormDataFix: HAS_FORM_DATA_FIX
 });
 
-if (!isUserDemo && 'serviceWorker' in navigator) {
+// Register Service Worker for PWA support
+if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js')
       .then((registration) => {
@@ -30,10 +23,10 @@ if (!isUserDemo && 'serviceWorker' in navigator) {
       });
   });
 }
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <Suspense fallback={<div style={{padding:32,color:'#fff',background:'#111',minHeight:'100vh'}}>Loading TS Hub...</div>}>
-      {isUserDemo ? <UserManagementDemo/> : <App/>}
-    </Suspense>
+    <App />
   </StrictMode>,
 );
+
