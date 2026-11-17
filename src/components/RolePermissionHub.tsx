@@ -2809,14 +2809,25 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
                         const explicitVal = editUserForm.deviceViewAccess[selectedDeviceViewTab]?.[moduleDef.id];
                         
                         // Compute effective status
+                        // The existing device preview must obey both user gates.
+                        // Device visibility cannot grant a missing View permission.
                         let isEffectiveAllowed = false;
-                        if (explicitVal !== undefined) {
+                        if (MANAGED_USER_UI) {
+                          const mappedPermissions = (moduleDef.permissionModules || []).map(name =>
+                            name === 'System Configuration' ? 'System Settings' : name
+                          );
+                          const hasViewPermission = mappedPermissions.some(name =>
+                            userPermissionOverridesBuffer[name]?.View === 'allow'
+                          );
+                          const enabledOnDevice = editUserForm.deviceAccess[selectedDeviceViewTab] === true;
+                          isEffectiveAllowed = enabledOnDevice && explicitVal !== false &&
+                            hasViewPermission && (moduleDef.id !== 'gemini_ai' || explicitVal === true);
+                        } else if (explicitVal !== undefined) {
                           isEffectiveAllowed = !!explicitVal;
                         } else {
-                          // Preview the actual unsaved user-specific permission buffer.
-                          // Roles are labels only, not permission grants.
                           isEffectiveAllowed = moduleDef.id === 'gemini_ai' ||
-                            Boolean(moduleDef.permissionModules?.some(name => userPermissionOverridesBuffer[name]?.View === 'allow'));
+                            Boolean(moduleDef.permissionModules?.some(name =>
+                              userPermissionOverridesBuffer[name]?.View === 'allow'));
                         }
 
                         const isExplicitOverride = explicitVal !== undefined;
