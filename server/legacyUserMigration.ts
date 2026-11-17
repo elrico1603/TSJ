@@ -73,11 +73,28 @@ export class LegacyUserMigration {
 
   // Dry-run reads production if explicitly invoked there. The write path is
   // deliberately restricted to the local test project until cutover is tested.
-  async migrate(target: LegacyIdentityTarget, apply = false) {
-    if (apply && (this.auth.app.options.projectId !== 'demo-tsj-user-admin' ||
-        process.env.FIRESTORE_EMULATOR_HOST !== '127.0.0.1:8085' ||
-        process.env.FIREBASE_AUTH_EMULATOR_HOST !== '127.0.0.1:9099'))
-      throw new Error('Production migration is disabled; use the isolated demo emulators.');
+  async migrate(
+    target: LegacyIdentityTarget,
+    apply = false,
+    options?: { approvedProductionCutover?: boolean }
+  ) {
+    const projectId = this.auth.app.options.projectId;
+    const emulator = projectId === 'demo-tsj-user-admin' &&
+      process.env.FIRESTORE_EMULATOR_HOST === '127.0.0.1:8085' &&
+      process.env.FIREBASE_AUTH_EMULATOR_HOST === '127.0.0.1:9099';
+    if (apply && !emulator) {
+      const knownTarget = LEGACY_TARGETS.find(item =>
+        item.uid === target.uid && item.profileId === target.profileId &&
+        item.email === target.email);
+      const productionAuthorized = projectId === 'timbersmithapp' &&
+        !process.env.FIRESTORE_EMULATOR_HOST &&
+        !process.env.FIREBASE_AUTH_EMULATOR_HOST &&
+        options?.approvedProductionCutover === true &&
+        process.env.TSJ_USER_CUTOVER_APPROVAL === 'I_REVIEWED_BACKUP_AND_SECURITY' &&
+        !!knownTarget;
+      if (!productionAuthorized)
+        throw new Error('Production migration requires a reviewed backup and explicit cutover approval.');
+    }
     const account = await this.auth.getUser(target.uid);
     if (account.disabled || emailOf(account.email) !== target.email ||
         !account.providerData.some(provider => provider.providerId === 'password'))
