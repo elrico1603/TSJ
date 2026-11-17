@@ -4,9 +4,6 @@ import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 import { ManagedUserService } from '../server/managedUserService';
 import { ManagedUserLifecycle } from '../server/managedUserLifecycle';
-import { resolveRecipients } from '../src/services/recipientResolver';
-import { notificationEventRegistry } from '../src/services/notificationEventRegistry';
-import type { AppUser } from '../src/auth';
 
 if (process.env.FIRESTORE_EMULATOR_HOST !== '127.0.0.1:8085' ||
     process.env.FIREBASE_AUTH_EMULATOR_HOST !== '127.0.0.1:9099')
