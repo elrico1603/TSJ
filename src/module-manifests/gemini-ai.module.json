@@ -2,6 +2,15 @@
   "id": "gemini_ai",
   "name": "Gemini AI Hub",
   "category": "INTELLIGENCE",
+  "description": "Workshop AI assistant",
+  "supportsDevices": {
+    "desktop": true,
+    "tablet": true,
+    "phone": true,
+    "terminal": false
+  },
+  "appMode": "gemini_chat",
+  "icon": "bot",
   "permissions": [
     "Gemini AI Hub"
   ]

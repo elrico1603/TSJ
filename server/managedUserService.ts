@@ -55,7 +55,10 @@ export const MANAGED_PERMISSION_MODULES = [
   'System Settings'
 ,
   ...GENERATED_PERMISSION_MODULE_NAMES
- ] as string[];
+  ] as string[];
+
+export const MANAGED_ADMIN_BASE_MODULES = MANAGED_PERMISSION_MODULES.filter(name =>
+  !GENERATED_PERMISSION_MODULE_NAMES.includes(name));
 
 export const MANAGED_PERMISSION_ACTIONS = [
   'View',

@@ -2,7 +2,7 @@ import express from 'express';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirebaseAdminApp, getServerFirestore } from './firebaseAdmin';
 import { firebaseIdentityService } from './firebaseIdentityService';
-import { ManagedUserService, MANAGED_PERMISSION_MODULES, MANAGED_PERMISSION_ACTIONS } from './managedUserService';
+import { ManagedUserService, MANAGED_ADMIN_BASE_MODULES, MANAGED_PERMISSION_ACTIONS } from './managedUserService';
 import { ManagedUserLifecycle } from './managedUserLifecycle';
 import { ManagedNotificationPolicies } from './managedNotificationPolicies';
 
@@ -13,7 +13,7 @@ export function managedUserApiEnabled() {
 // Full account administration requires explicit full access. Role labels and
 // browser claims never grant the ability to delegate permissions.
 export function hasFullManagedAdministration(permissions: any): boolean {
-  return MANAGED_PERMISSION_MODULES.every(module =>
+  return MANAGED_ADMIN_BASE_MODULES.every(module =>
     MANAGED_PERMISSION_ACTIONS.every(action =>
       permissions?.[module]?.[action] === 'allow' || permissions?.[module]?.[action] === true));
 }

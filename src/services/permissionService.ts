@@ -1,5 +1,5 @@
 import { db, APP_ID_PATH } from '../firebase';
-import { GENERATED_PERMISSION_MODULE_GROUPS } from '../generated/modulePermissionCatalog';
+import { GENERATED_PERMISSION_MODULE_GROUPS, GENERATED_MODULE_DEFINITIONS } from '../generated/modulePermissionCatalog';
 import { canMutateAuthOrRBAC } from './previewSafety';
 import {
   PermissionAction,
@@ -265,6 +265,12 @@ for (const group of GENERATED_PERMISSION_MODULE_GROUPS) {
   const existing = PERMISSION_CATEGORIES_CONFIG.find(item => item.category === category);
   if (existing) existing.modules.push(...names);
   else PERMISSION_CATEGORIES_CONFIG.push({ category, modules: [...names] });
+}
+// Registered feature manifests also populate the unchanged device-view editor.
+// Built-in modules remain the source of truth for their own existing definitions.
+for (const moduleDef of GENERATED_MODULE_DEFINITIONS) {
+  if (!CENTRAL_MODULE_REGISTRY.some(existing => existing.id === moduleDef.id))
+    CENTRAL_MODULE_REGISTRY.push(moduleDef);
 }
 export const ALL_MODULE_NAMES: string[] = PERMISSION_CATEGORIES_CONFIG.flatMap(c => c.modules);
 

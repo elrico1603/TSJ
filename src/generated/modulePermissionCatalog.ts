@@ -10,3 +10,22 @@ export const GENERATED_PERMISSION_MODULE_GROUPS: {category:string;modules:string
 export const GENERATED_PERMISSION_MODULE_NAMES: string[] = [
   "Gemini AI Hub"
 ];
+export const GENERATED_MODULE_DEFINITIONS: Array<{id:string;name:string;category:string;description:string;supportsDevices:Record<"phone"|"tablet"|"desktop"|"terminal",boolean>;appMode:string;icon:string;permissionModules:string[]}> = [
+  {
+    "id": "gemini_ai",
+    "name": "Gemini AI Hub",
+    "category": "INTELLIGENCE",
+    "description": "Workshop AI assistant",
+    "supportsDevices": {
+      "desktop": true,
+      "tablet": true,
+      "phone": true,
+      "terminal": false
+    },
+    "appMode": "gemini_chat",
+    "icon": "bot",
+    "permissionModules": [
+      "Gemini AI Hub"
+    ]
+  }
+];

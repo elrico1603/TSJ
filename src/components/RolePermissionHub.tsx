@@ -30,6 +30,7 @@ import {
 import { notificationEventRegistry } from '../services/notificationEventRegistry';
 import { notificationPolicyService } from '../services/notificationPolicyService';
 import { MANAGED_USER_UI, managedUserRequest, managedUserUid } from '../services/managedUserClient';
+import { GENERATED_PERMISSION_MODULE_NAMES } from '../generated/modulePermissionCatalog';
 
 export interface RolePermissionHubProps {
   currentUser?: any;
@@ -65,7 +66,8 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
 
   const hasAccess = canViewUsers || canEditUsers || canApproveUsers || canAccessAdmin || canViewPolicies;
   const hasFullManagedAccess = !!currentUser?.firebaseUid &&
-    PERMISSION_CATEGORIES_CONFIG.every(group => group.modules.every(module =>
+    PERMISSION_CATEGORIES_CONFIG.every(group => group.modules.filter(module =>
+       !GENERATED_PERMISSION_MODULE_NAMES.includes(module)).every(module =>
       ALL_PERMISSION_ACTIONS.every(action => permissionService.hasPermission(currentUser, module, action))));
   const isReadOnly = !canEditUsers || (MANAGED_USER_UI && !hasFullManagedAccess);
 
