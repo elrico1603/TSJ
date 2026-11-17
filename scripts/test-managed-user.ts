@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { initializeApp, deleteApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
-import { ManagedUserService, type CreateManagedUserInput } from '../server/managedUserService';
+import { ManagedUserService, MANAGED_PERMISSION_MODULES, type CreateManagedUserInput } from '../server/managedUserService';
 import { LegacyUserMigration, LEGACY_TARGETS } from '../server/legacyUserMigration';
 import { ManagedUserLifecycle } from '../server/managedUserLifecycle';
 import { USER_PROFILES_COLLECTION } from '../server/firebaseIdentityService';
@@ -161,7 +161,8 @@ async function main() {
   assert.equal((await db.collection('userPermissionOverrides').doc('franz@tsjoinery.co.za').get()).exists,false);
   pass('Legacy Frans identity consolidated and correct spelling retained');
   const migratedAccess=(await db.collection('userPermissionOverrides').doc(target.profileId).get()).data()!;
-  assert.equal(Object.keys(migratedAccess.permissions).length,35);
+  assert.equal(Object.keys(migratedAccess.permissions).length,MANAGED_PERMISSION_MODULES.length);
+  assert.equal(migratedAccess.permissions['Gemini AI Hub'].View,'allow');
   assert.equal(migratedAccess.permissions['User Assignments'].Edit,'allow');
   assert.equal(migratedAccess.deviceAccess.tablet,true);
   assert.equal(migratedAccess.deviceAccess.terminal,false);
