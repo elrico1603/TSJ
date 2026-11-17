@@ -168,7 +168,8 @@ export class LegacyUserMigration {
       if (!apply) return report;
 
       const now=new Date().toISOString();
-      const updated = {...clean(profile),id:target.profileId,firebaseUid:target.uid,email:target.email,name,
+      const {pin:_legacyPin,password:_legacyPassword,passwordHash:_legacyHash,...preservedProfile}=profile;
+      const updated = {...preservedProfile,id:target.profileId,firebaseUid:target.uid,email:target.email,name,
         firstName:name.split(' ')[0],lastName:name.split(' ').slice(1).join(' '),
         role:config.roleName,roleId,branchId:config.branchId,branchName:config.branchName,
         active:true,isApproved:true,status:'active',deviceAccess:access.deviceAccess,
