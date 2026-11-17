@@ -661,7 +661,7 @@ export class ManagedUserService {
 
   async saveUserAccess(
     uidInput: string,
-    input: UserAccessInput,
+    input: Omit<UserAccessInput, 'notificationEventIds'> & { notificationEventIds?: string[] },
     actor: string
   ) {
     const uid = safeId(uidInput, 'Firebase UID');
