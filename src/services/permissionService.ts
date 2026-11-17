@@ -1,4 +1,5 @@
 import { db, APP_ID_PATH } from '../firebase';
+import { GENERATED_PERMISSION_MODULE_GROUPS } from '../generated/modulePermissionCatalog';
 import { canMutateAuthOrRBAC } from './previewSafety';
 import {
   PermissionAction,
@@ -153,7 +154,7 @@ export const CENTRAL_MODULE_REGISTRY: ModuleDefinition[] = [
     supportsDevices: { phone: true, tablet: true, desktop: true, terminal: false },
     appMode: 'gemini_chat',
     icon: 'bot',
-    permissionModules: []
+    permissionModules: ['Gemini AI Hub']
   },
   {
     id: 'system_admin',
@@ -255,6 +256,16 @@ export const PERMISSION_CATEGORIES_CONFIG: ModuleCategoryGroup[] = [
   }
 ];
 
+// Feature modules with manifests appear in the user permission grid automatically.
+for (const group of GENERATED_PERMISSION_MODULE_GROUPS) {
+  const existingNames = new Set(PERMISSION_CATEGORIES_CONFIG.flatMap(item => item.modules));
+  const names = group.modules.filter(name => !existingNames.has(name));
+  if (!names.length) continue;
+  const category = group.category as PermissionCategory;
+  const existing = PERMISSION_CATEGORIES_CONFIG.find(item => item.category === category);
+  if (existing) existing.modules.push(...names);
+  else PERMISSION_CATEGORIES_CONFIG.push({ category, modules: [...names] });
+}
 export const ALL_MODULE_NAMES: string[] = PERMISSION_CATEGORIES_CONFIG.flatMap(c => c.modules);
 
 // Helper to construct full true actions matrix

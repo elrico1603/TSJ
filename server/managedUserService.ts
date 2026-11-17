@@ -1,4 +1,5 @@
 import { resolveManagedConfiguration } from './managedConfiguration';
+import { GENERATED_PERMISSION_MODULE_NAMES } from '../src/generated/modulePermissionCatalog';
 import type { Auth } from 'firebase-admin/auth';
 import type {
   Firestore,
@@ -52,7 +53,9 @@ export const MANAGED_PERMISSION_MODULES = [
   'Notifications',
   'Email Templates',
   'System Settings'
-] as const;
+,
+  ...GENERATED_PERMISSION_MODULE_NAMES
+ ] as string[];
 
 export const MANAGED_PERMISSION_ACTIONS = [
   'View',
