@@ -21,7 +21,7 @@ async function main() {
   let passed = 0;
   const pass = (name: string) => { passed++; console.log('PASS | ' + name); };
   await db.collection('roles').doc('TEST-KANBAN').set({roleName:'Kanban'});
-  await db.collection('branches').doc('TEST-BFN').set({branchName:'Bloemfontein Test'});
+  await db.collection('branches').doc('TEST-BFN').set({branchName:'Emulator Fixture Branch'});
   await policies.doc('LOW_STOCK').set({
     eventId:'LOW_STOCK', enabled:true, priority:'high',
     recipientUserIds:['other-test-recipient'], coalesceEnabled:true, coalesceWindowMinutes:60
