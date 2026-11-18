@@ -11,12 +11,11 @@ Do not reuse `timbersmithapp`, production Cloud Run or the live Netlify site.
 2. Create an isolated backend service for this branch with its **own**
    staging Firebase Admin credentials/project. Keep the user/notification and
    Clocking API feature flags off until staging identity and security rules pass.
-3. In GitHub repo Settings > Secrets and variables > Actions, set:
-   - Secret: TSJ_STAGING_FIREBASE_API_KEY
-   - Variables: TSJ_STAGING_FIREBASE_AUTH_DOMAIN,
-     TSJ_STAGING_FIREBASE_PROJECT_ID, TSJ_STAGING_FIREBASE_APP_ID,
-     TSJ_STAGING_FIREBASE_SENDER_ID, TSJ_STAGING_FIREBASE_STORAGE_BUCKET,
-     TSJ_STAGING_MANAGED_API_URL
+3. The Firebase Web App identifiers have been embedded in the isolated
+   staging branch and its GitHub build job (public browser configuration,
+   not service-account secrets). Only ONE GitHub Actions variable is pending:
+   `TSJ_STAGING_MANAGED_API_URL`, pointing to a separate staging backend.
+   Do not set it to the live Cloud Run or Netlify URL.
 4. Run GitHub Actions > Isolated TS Hub staging package > Run workflow.
    It will fail safely if project/API isolation is not configured.
 5. Create a **new** Netlify test site (not a deploy preview of the existing
@@ -38,3 +37,15 @@ Confirmed staging identifiers (18 November 2026):
 The staging build gate now requires this **exact** project ID. This GitHub
 commit does not create a Firestore database, enable Authentication, provision
 a web app, or deploy a site; those must still be configured independently.
+
+Registered staging Web App:
+- API key: embedded in staging client and GitHub build (public browser key)
+- Auth domain: `timbersmith-staging.firebaseapp.com`
+- Project: `timbersmith-staging`
+- Storage: `timbersmith-staging.firebasestorage.app`
+- Sender ID: `351455828495`
+- App ID: `1:351455828495:web:0fd1d0a7846feb7a92a17a`
+
+Firebase Authentication Email/Password and Cloud Firestore have been enabled
+manually in the isolated project. The backend and separate Netlify staging site
+are not yet deployed. Do not use real employee data in this test project.
