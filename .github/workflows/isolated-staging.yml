@@ -32,7 +32,7 @@ jobs:
             exit 1
           fi
   stage:
-    if: ${{ vars.TSJ_STAGING_FIREBASE_PROJECT_ID == 'timbersmith-staging' && vars.TSJ_STAGING_MANAGED_API_URL != '' }}
+    if: ${{ vars.TSJ_STAGING_MANAGED_API_URL != '' }}
     needs: safety
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -55,23 +55,23 @@ jobs:
       - name: Refuse production Firebase or API
         run: node scripts/check-staging-environment.mjs
         env:
-          VITE_FIREBASE_API_KEY: ${{ secrets.TSJ_STAGING_FIREBASE_API_KEY }}
-          VITE_FIREBASE_AUTH_DOMAIN: ${{ vars.TSJ_STAGING_FIREBASE_AUTH_DOMAIN }}
-          VITE_FIREBASE_PROJECT_ID: ${{ vars.TSJ_STAGING_FIREBASE_PROJECT_ID }}
-          VITE_FIREBASE_APP_ID: ${{ vars.TSJ_STAGING_FIREBASE_APP_ID }}
-          VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ vars.TSJ_STAGING_FIREBASE_SENDER_ID }}
-          VITE_FIREBASE_STORAGE_BUCKET: ${{ vars.TSJ_STAGING_FIREBASE_STORAGE_BUCKET }}
+          VITE_FIREBASE_API_KEY: AIzaSyAuUMb1blX8fwUkHMgu5WYagm37kDMhO5Q
+          VITE_FIREBASE_AUTH_DOMAIN: timbersmith-staging.firebaseapp.com
+          VITE_FIREBASE_PROJECT_ID: timbersmith-staging
+          VITE_FIREBASE_APP_ID: 1:351455828495:web:0fd1d0a7846feb7a92a17a
+          VITE_FIREBASE_MESSAGING_SENDER_ID: 351455828495
+          VITE_FIREBASE_STORAGE_BUCKET: timbersmith-staging.firebasestorage.app
           VITE_TSJ_MANAGED_USER_API_BASE_URL: ${{ vars.TSJ_STAGING_MANAGED_API_URL }}
           VITE_TSJ_MANAGED_USER_UI: 'true'
       - name: Build isolated staging PWA
         run: npm run build
         env:
-          VITE_FIREBASE_API_KEY: ${{ secrets.TSJ_STAGING_FIREBASE_API_KEY }}
-          VITE_FIREBASE_AUTH_DOMAIN: ${{ vars.TSJ_STAGING_FIREBASE_AUTH_DOMAIN }}
-          VITE_FIREBASE_PROJECT_ID: ${{ vars.TSJ_STAGING_FIREBASE_PROJECT_ID }}
-          VITE_FIREBASE_APP_ID: ${{ vars.TSJ_STAGING_FIREBASE_APP_ID }}
-          VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ vars.TSJ_STAGING_FIREBASE_SENDER_ID }}
-          VITE_FIREBASE_STORAGE_BUCKET: ${{ vars.TSJ_STAGING_FIREBASE_STORAGE_BUCKET }}
+          VITE_FIREBASE_API_KEY: AIzaSyAuUMb1blX8fwUkHMgu5WYagm37kDMhO5Q
+          VITE_FIREBASE_AUTH_DOMAIN: timbersmith-staging.firebaseapp.com
+          VITE_FIREBASE_PROJECT_ID: timbersmith-staging
+          VITE_FIREBASE_APP_ID: 1:351455828495:web:0fd1d0a7846feb7a92a17a
+          VITE_FIREBASE_MESSAGING_SENDER_ID: 351455828495
+          VITE_FIREBASE_STORAGE_BUCKET: timbersmith-staging.firebasestorage.app
           VITE_TSJ_MANAGED_USER_API_BASE_URL: ${{ vars.TSJ_STAGING_MANAGED_API_URL }}
           VITE_TSJ_MANAGED_USER_UI: 'true'
           VITE_FIREBASE_LOGIN_PILOT: 'true'
