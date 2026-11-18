@@ -6,7 +6,34 @@ on:
 permissions:
   contents: read
 jobs:
+  safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run lint
+      - run: npx --no-install tsx scripts/test-clocking-mutation-guard.ts
+      - run: npx --no-install tsx scripts/test-clocking-branch-manifest.ts
+      - name: Assert missing staging configuration is rejected
+        run: |
+          if node scripts/check-staging-environment.mjs; then
+            echo "::error::Staging safety gate accepted empty configuration."
+            exit 1
+          fi
+      - name: Assert live Firebase configuration is rejected
+        run: |
+          if VITE_FIREBASE_API_KEY=invalid VITE_FIREBASE_AUTH_DOMAIN=timbersmithapp.firebaseapp.com VITE_FIREBASE_PROJECT_ID=timbersmithapp VITE_FIREBASE_APP_ID=invalid VITE_FIREBASE_MESSAGING_SENDER_ID=invalid VITE_FIREBASE_STORAGE_BUCKET=timbersmithapp.firebasestorage.app VITE_TSJ_MANAGED_USER_API_BASE_URL=https://timbersmith-terminal.netlify.app VITE_TSJ_MANAGED_USER_UI=true node scripts/check-staging-environment.mjs; then
+            echo "::error::Staging safety gate accepted production Firebase."
+            exit 1
+          fi
   stage:
+    if: ${{ vars.TSJ_STAGING_FIREBASE_PROJECT_ID != '' && vars.TSJ_STAGING_MANAGED_API_URL != '' }}
+    needs: safety
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
