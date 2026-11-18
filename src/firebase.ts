@@ -5,6 +5,23 @@ import 'firebase/compat/storage';
 
 const env = typeof import.meta !== 'undefined' ? (import.meta as unknown as { env?: Record<string, string> }).env || {} : {};
 
+// This staging branch must never use the live TS Hub Firebase project.
+const STAGING_ONLY = true;
+if (STAGING_ONLY) {
+  const required=['VITE_FIREBASE_API_KEY','VITE_FIREBASE_AUTH_DOMAIN',
+    'VITE_FIREBASE_PROJECT_ID','VITE_FIREBASE_APP_ID',
+    'VITE_FIREBASE_MESSAGING_SENDER_ID','VITE_FIREBASE_STORAGE_BUCKET',
+    'VITE_TSJ_MANAGED_USER_API_BASE_URL'];
+  const missing=required.filter(k=>!env[k]?.trim());
+  if (missing.length || env.VITE_FIREBASE_PROJECT_ID==='timbersmithapp' ||
+      /timbersmithapp/i.test(env.VITE_FIREBASE_AUTH_DOMAIN || '') ||
+      /timbersmithapp/i.test(env.VITE_FIREBASE_STORAGE_BUCKET || '') ||
+      !/^https:\/\//.test(env.VITE_TSJ_MANAGED_USER_API_BASE_URL || '') ||
+      /tsjoinery\.co\.za|timbersmith-terminal/i.test(env.VITE_TSJ_MANAGED_USER_API_BASE_URL || '')) {
+    throw new Error('STAGING SAFETY: isolated Firebase project and separate HTTPS test API are required. No production connection was opened.');
+  }
+}
+
 export const firebaseConfig = {
     apiKey: env.VITE_FIREBASE_API_KEY || "AIzaSyA4J1TVcpqNBvBoq242vXWwguAAnh3G6ks",
     authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || "timbersmithapp.firebaseapp.com",
