@@ -13,7 +13,11 @@ import { getFirestore, Firestore } from 'firebase-admin/firestore';
  * - Never imported or exposed to browser / frontend clients.
  */
 
-const FIREBASE_PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT_ID || process.env.FIREBASE_PROJECT_ID || 'timbersmithapp';
+const FIREBASE_PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT_ID || process.env.FIREBASE_PROJECT_ID || '';
+// Fail closed on this dedicated staging branch; never load production ADC.
+if (!FIREBASE_PROJECT_ID || FIREBASE_PROJECT_ID === 'timbersmithapp') {
+  throw new Error('STAGING BACKEND SAFETY: configure a distinct Firebase test project before starting.');
+}
 
 let adminApp: App | null = null;
 
