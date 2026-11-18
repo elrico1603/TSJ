@@ -39,16 +39,27 @@ async function main() {
   const uid=await seed('limited-rules',userEmail,{'Kanban Designer':{View:'allow'}});
   await seed('admin-rules',adminEmail,{'User Assignments':{View:'allow'},Notifications:{View:'allow'}});
   await db.doc(policies+'/LOW_STOCK').set({enabled:true,recipientUserIds:['limited-rules']});
+  const inbox='artifacts/timbersmith-terminal-v1/users';
+  await db.doc(inbox+'/limited-rules/notifications/notification-one')
+    .set({notificationId:'notification-one',recipientUserId:'limited-rules',isRead:false});
+  await db.doc(inbox+'/admin-rules/notifications/notification-two')
+    .set({notificationId:'notification-two',recipientUserId:'admin-rules',isRead:false});
   const guest=await session();
   await denied(getDocFromServer(doc(guest.d,profiles+'/limited-rules')));
   pass('Unauthenticated profile reads denied');
   await signInAnonymously(guest.a);
   await denied(getDocsFromServer(collection(guest.d,profiles)));
   pass('Anonymous user listing denied');
+  await denied(getDocsFromServer(collection(guest.d,inbox+'/limited-rules/notifications')));
+  pass('Anonymous cannot read notification inbox');
   const limited=await session(userEmail);
   assert.equal((await getDocFromServer(doc(limited.d,'authUserLinks/'+uid))).exists(),true);
   assert.equal((await getDocFromServer(doc(limited.d,profiles+'/limited-rules'))).exists(),true);
   pass('Linked user can read own identity and profile');
+  assert.equal((await getDocsFromServer(collection(limited.d,inbox+'/limited-rules/notifications'))).size,1);
+  await denied(getDocsFromServer(collection(limited.d,inbox+'/admin-rules/notifications')));
+  await denied(setDoc(doc(limited.d,inbox+'/limited-rules/notifications/notification-one'),{isRead:true},{merge:true}));
+  pass('Inbox read is isolated and browser writes are blocked');
   await denied(getDocFromServer(doc(limited.d,profiles+'/admin-rules')));
   await denied(getDocsFromServer(collection(limited.d,profiles)));
   pass('Limited user cannot read other profiles or list users');
@@ -63,6 +74,9 @@ async function main() {
   assert.ok((await getDocsFromServer(collection(manager.d,profiles))).size>=2);
   assert.equal((await getDocFromServer(doc(manager.d,policies+'/LOW_STOCK'))).exists(),true);
   pass('Explicit admin read permissions enforced');
+  assert.equal((await getDocsFromServer(collection(manager.d,inbox+'/admin-rules/notifications'))).size,1);
+  await denied(getDocsFromServer(collection(manager.d,inbox+'/limited-rules/notifications')));
+  pass('Administrator cannot read other user inbox');
   await denied(setDoc(doc(manager.d,policies+'/LOW_STOCK'),{enabled:false},{merge:true}));
   await denied(setDoc(doc(manager.d,profiles+'/limited-rules'),{active:false},{merge:true}));
   pass('Even admin client writes require protected backend');
@@ -76,7 +90,7 @@ async function main() {
   await db.doc(profiles+'/limited-rules').update({firebaseUid:uid,isApproved:false});
   await denied(getDocFromServer(doc(limited.d,profiles+'/limited-rules')));
   pass('Unapproved profile denied');
-  console.log(n+'/12 SECURITY RULES TESTS PASSED');
+  console.log(n+'/15 SECURITY RULES TESTS PASSED');
 }
 main().catch(e=>{console.error(e);process.exitCode=1;}).finally(async()=>{
   for(const c of clients){await terminate(clientDb(c));await deleteClient(c);}

@@ -54,6 +54,12 @@ service cloud.firestore {
       allow read: if permitted('Notifications','View');
       allow write: if false;
     }
+    // Each authenticated employee can read only their own inbox.
+    // All notification delivery and inbox mutations use the protected server.
+    match /artifacts/timbersmith-terminal-v1/users/{id}/notifications/{notificationId} {
+      allow get, list: if activeIdentity() && id == profileId();
+      allow write: if false;
+    }
     match /{document=**} { allow read, write: if false; }
   }
 }
