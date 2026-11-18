@@ -111,3 +111,21 @@ export async function moveEmployeeBranch(
     return {employeeId,from:expectedBranchId,to:destinationBranchId};
   });
 }
+
+/** Read-only, admin-only employee assignment overview. No secret fields. */
+export async function listClockingEmployeeBranches(db:Firestore){
+  const [employees,assignments]=await Promise.all([
+    db.collection(EMPLOYEES_PATH).get(),db.collection(ASSIGNMENTS_PATH).get()
+  ]);
+  const byEmployee=new Map(assignments.docs.map(doc=>[doc.id,doc.data()]));
+  return {employees:employees.docs.map(doc=>{
+    const data=doc.data(),assignment=byEmployee.get(doc.id);
+    return {
+      employeeId:doc.id,
+      employeeName:[data.name,data.surname].filter(Boolean).join(' ').trim(),
+      branchId:assignment?.active===true && assignment.employeeId===doc.id
+        ? String(assignment.branchId) : null
+    };
+  }).sort((a,b)=>a.employeeName.localeCompare(b.employeeName)),
+  assigned:assignments.size};
+}
