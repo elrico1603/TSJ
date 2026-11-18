@@ -4,6 +4,7 @@
  * It never creates, deletes, or renames employees.
  */
 import { Router } from 'express';
+import { timingSafeEqual } from 'node:crypto';
 import type { Firestore } from 'firebase-admin/firestore';
 import { firebaseIdentityService } from './firebaseIdentityService';
 import { getServerFirestore } from './firebaseAdmin';
@@ -16,6 +17,17 @@ export const ASSIGNMENTS_PATH='artifacts/timbersmith-terminal-v1/private/clockin
 const RECEIPTS_PATH='artifacts/timbersmith-terminal-v1/private/clocking/event_receipts';
 const safeId=(x:unknown):x is string=>typeof x==='string'&&/^[a-zA-Z0-9_-]{1,128}$/.test(x);
 const allowed=(x:unknown)=>x===true||x==='allow';
+function validEmployeePin(existing:Record<string,unknown>,submitted:string):boolean{
+  if(!/^[0-9]{4}$/.test(submitted))return false;
+  // Match the same primary field precedence as the legacy terminal, but
+  // never accept shared fallback PINs or return the stored value.
+  const secret=existing.personalCode||existing.pin||existing.clockPin;
+  if(typeof secret!=='string'&&typeof secret!=='number')return false;
+  const expected=String(secret);
+  if(!/^[0-9]{4}$/.test(expected))return false;
+  return timingSafeEqual(Buffer.from(expected),Buffer.from(submitted));
+}
+
 
 export function clockingApiEnabled(){
   return process.env.TSJ_CLOCKING_API_ENABLED==='true' &&
@@ -62,6 +74,7 @@ export async function readBranchEmployees(db:Firestore,actor:ClockingActor) {
 export interface ClockingCommand {
   eventId:string;
   employeeId:string;
+  personalPin:string;
   expectedStatus:string;
   expectedShiftCount:number;
   update:Record<string,unknown>;
@@ -69,6 +82,7 @@ export interface ClockingCommand {
 export async function commitClockingEvent(db:Firestore,actor:ClockingActor,input:ClockingCommand) {
   if(!actor.canProcess||!actor.canView)throw new Error('CLOCKING_ACCESS_DENIED');
   if(!safeId(input?.eventId)||!safeId(input?.employeeId)||
+     typeof input.personalPin!=='string'||!/^[0-9]{4}$/.test(input.personalPin)||
      !['In','Out','Break'].includes(input?.expectedStatus)||
      !Number.isSafeInteger(input?.expectedShiftCount)||input.expectedShiftCount<0||
      !input?.update||typeof input.update!=='object'||Array.isArray(input.update))
@@ -89,6 +103,8 @@ export async function commitClockingEvent(db:Firestore,actor:ClockingActor,input
     }
     if(!current.exists)throw new Error('CLOCKING_EMPLOYEE_NOT_FOUND');
     const existing=current.data()!;
+    if(!validEmployeePin(existing,input.personalPin))
+      throw new Error('CLOCKING_EMPLOYEE_PIN_INVALID');
     // Fail closed until explicit, independently reviewed branch assignments
     // exist. Do not touch the legacy employee document to add branchId.
     const assigned=assignment.data();
@@ -126,7 +142,8 @@ export function createClockingRouter() {
     const status=message==='CLOCKING_ACCESS_DENIED'?403:
       message==='CLOCKING_EMPLOYEE_NOT_FOUND'?404:
       message==='CLOCKING_STALE_EVENT_RELOAD_REQUIRED'||message==='CLOCKING_BRANCH_NOT_VERIFIED'?409:
-      message==='CLOCKING_INVALID_COMMAND'?400:503;
+      message==='CLOCKING_INVALID_COMMAND'?400:
+      message==='CLOCKING_EMPLOYEE_PIN_INVALID'?403:503;
     return res.status(status).json({error:message.startsWith('CLOCKING_')?message:'CLOCKING_UNAVAILABLE'});
   }
   router.get('/employees',async(req,res)=>{

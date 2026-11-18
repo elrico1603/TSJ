@@ -10,7 +10,7 @@ const actor:ClockingActor={profileId:'clocking-test-user',email:'clocking@exampl
   branchId:'BR-001',canView:true,canProcess:true};
 const branchB:ClockingActor={...actor,profileId:'brandfort-actor',branchId:'BR-002'};
 const shift={date:'2026-11-17',clockIn:'07:00',clockOut:'16:00',hours:9};
-const base={name:'Test Worker',branchId:'BR-001',status:'In',isArchived:false,shifts:[shift]};
+const base={name:'Test Worker',branchId:'BR-001',status:'In',isArchived:false,shifts:[shift],personalCode:'2419'};
 const ref=db.collection(EMPLOYEES_PATH).doc('clocking-test-worker');
 const legacy=db.collection(EMPLOYEES_PATH).doc('legacy-no-branch');
 async function rejects(code:string,task:()=>Promise<unknown>) {
@@ -33,8 +33,13 @@ async function run(){
   pass('Employee list is isolated by verified branch');
   await rejects('CLOCKING_ACCESS_DENIED',()=>readBranchEmployees(db,{...actor,canView:false}));
   await rejects('CLOCKING_ACCESS_DENIED',()=>commitClockingEvent(db,{...actor,canProcess:false},
-    {eventId:'blocked',employeeId:ref.id,expectedStatus:'In',expectedShiftCount:1,update:{status:'Out'}}));
+    {eventId:'blocked',employeeId:ref.id,personalPin:'2419',expectedStatus:'In',expectedShiftCount:1,update:{status:'Out'}}));
   pass('View and Process permissions fail closed');
+  await rejects('CLOCKING_EMPLOYEE_PIN_INVALID',()=>commitClockingEvent(db,actor,
+    {eventId:'wrong-pin',employeeId:ref.id,personalPin:'0000',
+      expectedStatus:'In',expectedShiftCount:1,update:{status:'Out'}}));
+  pass('Wrong and shared fallback PINs cannot authorize Clocking');
+
   const update={status:'Out',shiftStartTime:null,shifts:[shift,{date:'2026-11-18',clockIn:'07:00',clockOut:'16:00',hours:9}]};
   const command={eventId:'shift-test-1',employeeId:ref.id,expectedStatus:'In',
     expectedShiftCount:1,update};
@@ -70,6 +75,6 @@ async function run(){
   pass('Clocking API cannot rewrite employee pay fields');
   assert.deepEqual((await ref.get()).data()?.shifts,update.shifts);
   pass('All negative tests left employee shifts unchanged');
-  console.log(n+'/10 ISOLATED MANAGED CLOCKING TESTS PASSED');
+  console.log(n+'/11 ISOLATED MANAGED CLOCKING TESTS PASSED');
 }
 run().catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>deleteApp(app));
