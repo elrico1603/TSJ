@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { initializeApp,deleteApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
-import { commitClockingEvent,readBranchEmployees,EMPLOYEES_PATH,type ClockingActor } from '../server/managedClockingRouter';
+import { commitClockingEvent,readBranchEmployees,EMPLOYEES_PATH,ASSIGNMENTS_PATH,type ClockingActor } from '../server/managedClockingRouter';
 
 if(process.env.FIRESTORE_EMULATOR_HOST!=='127.0.0.1:8085')throw Error('Isolated emulator required');
 const app=initializeApp({projectId:'demo-tsj-user-admin'},'clocking-integration-test');
@@ -20,6 +20,10 @@ async function run(){
   let n=0;const pass=(message:string)=>{n++;console.log('PASS | '+message);};
   await ref.set({...base,pin:'never-expose-me',hourlyRate:120,idNumber:'secret-id'});
   await legacy.set({...base,branchId:null});
+  await db.collection(ASSIGNMENTS_PATH).doc(ref.id)
+    .set({employeeId:ref.id,branchId:'BR-001',active:true});
+  await db.collection(ASSIGNMENTS_PATH).doc(legacy.id)
+    .set({employeeId:legacy.id,branchId:'BR-001',active:false});
   const rows=await readBranchEmployees(db,actor);
   const ours=rows.find(row=>row.id==='clocking-test-worker');
   assert.ok(ours,'Our worker must be visible within its own branch');
@@ -50,6 +54,12 @@ async function run(){
   await rejects('CLOCKING_BRANCH_NOT_VERIFIED',()=>commitClockingEvent(db,actor,
     {...command,eventId:'no-branch',employeeId:legacy.id}));
   pass('Cross-branch and unassigned employee writes denied');
+  await db.collection(ASSIGNMENTS_PATH).doc(ref.id).update({active:false});
+  assert.equal((await readBranchEmployees(db,actor)).some(row=>row.id===ref.id),false);
+  await rejects('CLOCKING_BRANCH_NOT_VERIFIED',()=>commitClockingEvent(db,actor,
+    {...command,eventId:'suspended-assignment',expectedStatus:'Out',expectedShiftCount:2}));
+  await db.collection(ASSIGNMENTS_PATH).doc(ref.id).update({active:true});
+  pass('Suspended branch assignment immediately revokes Clocking access');
   await rejects('CLOCKING_HISTORICAL_SHIFTS_MUST_BE_PRESERVED',()=>commitClockingEvent(db,actor,
     {...command,eventId:'delete-shift',expectedStatus:'Out',expectedShiftCount:2,
      update:{status:'Out',shifts:[shift]}}));
@@ -60,6 +70,6 @@ async function run(){
   pass('Clocking API cannot rewrite employee pay fields');
   assert.deepEqual((await ref.get()).data()?.shifts,update.shifts);
   pass('All negative tests left employee shifts unchanged');
-  console.log(n+'/9 ISOLATED MANAGED CLOCKING TESTS PASSED');
+  console.log(n+'/10 ISOLATED MANAGED CLOCKING TESTS PASSED');
 }
 run().catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>deleteApp(app));

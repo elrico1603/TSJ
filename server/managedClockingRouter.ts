@@ -10,6 +10,9 @@ import { getServerFirestore } from './firebaseAdmin';
 import { validateClockingUpdate } from './clockingMutationGuard';
 
 export const EMPLOYEES_PATH='artifacts/timbersmith-terminal-v1/public/data/employees';
+// Branch assignments are separate from employee records to guarantee that
+// historical shifts, payroll fields and active Clocking state remain untouched.
+export const ASSIGNMENTS_PATH='artifacts/timbersmith-terminal-v1/private/clocking/employee_branches';
 const RECEIPTS_PATH='artifacts/timbersmith-terminal-v1/private/clocking/event_receipts';
 const safeId=(x:unknown):x is string=>typeof x==='string'&&/^[a-zA-Z0-9_-]{1,128}$/.test(x);
 const allowed=(x:unknown)=>x===true||x==='allow';
@@ -37,14 +40,21 @@ export async function verifyClockingActor(token:string,database:Firestore):Promi
 }
 export async function readBranchEmployees(db:Firestore,actor:ClockingActor) {
   if(!actor.canView)throw new Error('CLOCKING_ACCESS_DENIED');
-  const snap=await db.collection(EMPLOYEES_PATH).where('branchId','==',actor.branchId).get();
+  // Legacy factory employee documents have no branchId. We therefore use an
+  // explicit mapping collection instead of rewriting any employee record.
+  const assigned=await db.collection(ASSIGNMENTS_PATH)
+    .where('branchId','==',actor.branchId).get();
+  if(assigned.size>300)throw new Error('CLOCKING_ASSIGNMENT_LIMIT');
+  const mappings=assigned.docs.filter(d=>d.data().active===true && d.data().employeeId===d.id);
+  if(!mappings.length)return [];
+  const employees=await db.getAll(...mappings.map(d=>db.collection(EMPLOYEES_PATH).doc(d.id)));
   // Only operational fields; never return PINs, personal codes, national
   // IDs, wages, tax details or internal employee credentials to a client.
   const visible=['name','surname','role','status','isArchived','lastClock',
     'shiftStartTime','shifts','history','breaks','todayHours',
     'yesterdayHours','weeklyHours','monthlyHours','currentBreakReason'] as const;
-  return snap.docs.map(d=>{
-    const data=d.data(),result:Record<string,unknown>={id:d.id};
+  return employees.filter(doc=>doc.exists).map(d=>{
+    const data=d.data()!,result:Record<string,unknown>={id:d.id};
     for(const field of visible)if(data[field]!==undefined)result[field]=data[field];
     return result;
   });
@@ -67,7 +77,10 @@ export async function commitClockingEvent(db:Firestore,actor:ClockingActor,input
   const receipt=db.collection(RECEIPTS_PATH).doc(actor.profileId+'_'+input.eventId);
   return db.runTransaction(async tx=>{
     // All reads happen before any write, preserving Firestore transaction ordering.
-    const [duplicate,current]=await Promise.all([tx.get(receipt),tx.get(ref)]);
+    const assignmentRef=db.collection(ASSIGNMENTS_PATH).doc(input.employeeId);
+    const [duplicate,current,assignment]=await Promise.all([
+      tx.get(receipt),tx.get(ref),tx.get(assignmentRef)
+    ]);
     if(duplicate.exists) {
       const result=duplicate.data();
       if(result?.employeeId!==input.employeeId||result?.actorProfileId!==actor.profileId)
@@ -76,9 +89,13 @@ export async function commitClockingEvent(db:Firestore,actor:ClockingActor,input
     }
     if(!current.exists)throw new Error('CLOCKING_EMPLOYEE_NOT_FOUND');
     const existing=current.data()!;
-    // Existing records without an assigned branch are intentionally blocked.
-    // Never guess an employee's branch or allow cross-branch writes.
-    if(!safeId(existing.branchId)||existing.branchId!==actor.branchId)
+    // Fail closed until explicit, independently reviewed branch assignments
+    // exist. Do not touch the legacy employee document to add branchId.
+    const assigned=assignment.data();
+    if(!assignment.exists || assigned?.active!==true ||
+       assigned?.employeeId!==input.employeeId ||
+       assigned?.branchId!==actor.branchId ||
+       (existing.branchId && existing.branchId!==actor.branchId))
       throw new Error('CLOCKING_BRANCH_NOT_VERIFIED');
     if(existing.status!==input.expectedStatus ||
        !Array.isArray(existing.shifts) ||
