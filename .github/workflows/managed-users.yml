@@ -35,6 +35,7 @@ jobs:
       - run: npx --no-install tsx scripts/test-production-migration-guard.ts
       - run: npx --no-install tsx scripts/test-clocking-history-integrity.ts
       - run: npx --no-install tsx scripts/test-clocking-mutation-guard.ts
+      - run: npx --no-install tsx scripts/test-clocking-branch-manifest.ts
       - name: Run isolated Firebase integration tests
         run: npx --yes firebase-tools emulators:exec --config tests/managed-users/firebase.json --project demo-tsj-user-admin --only auth,firestore 'npx --no-install tsx scripts/test-managed-user.ts && npx --no-install tsx scripts/test-managed-security-rules.ts && npx --no-install tsx scripts/test-managed-policy-service.ts && npx --no-install tsx scripts/test-factory-user-workflow.ts && npx --no-install tsx scripts/test-managed-clocking-integration.ts'
       - name: Build both managed login and user interface
