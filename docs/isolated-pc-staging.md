@@ -6,7 +6,7 @@ This branch deliberately refuses to initialize the application unless it
 points to a **separate Firebase test project** and a **separate HTTPS test API**.
 Do not reuse `timbersmithapp`, production Cloud Run or the live Netlify site.
 
-1. Create an isolated Firebase project, enable Email/Password Auth and configure
+1. Use the isolated Firebase project `timbersmith-staging` (GCP project #351455828495), enable Email/Password Auth and configure
    test Firestore with test records only. Do not import real worker/PIN/payroll data.
 2. Create an isolated backend service for this branch with its **own**
    staging Firebase Admin credentials/project. Keep the user/notification and
@@ -29,3 +29,12 @@ Do not reuse `timbersmithapp`, production Cloud Run or the live Netlify site.
 Important: A successful frontend build is **not** evidence that the backend,
 Firebase rules, test identity provisioning or Netlify test site are configured.
 These must be validated separately.
+
+Confirmed staging identifiers (18 November 2026):
+- Firebase project ID: `timbersmith-staging`
+- Project number: `351455828495`
+- Parent organization: `tsjoinery.co.za`
+
+The staging build gate now requires this **exact** project ID. This GitHub
+commit does not create a Firestore database, enable Authentication, provision
+a web app, or deploy a site; those must still be configured independently.

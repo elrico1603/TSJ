@@ -32,7 +32,7 @@ jobs:
             exit 1
           fi
   stage:
-    if: ${{ vars.TSJ_STAGING_FIREBASE_PROJECT_ID != '' && vars.TSJ_STAGING_MANAGED_API_URL != '' }}
+    if: ${{ vars.TSJ_STAGING_FIREBASE_PROJECT_ID == 'timbersmith-staging' && vars.TSJ_STAGING_MANAGED_API_URL != '' }}
     needs: safety
     runs-on: ubuntu-latest
     timeout-minutes: 20

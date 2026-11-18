@@ -15,7 +15,7 @@ import { getFirestore, Firestore } from 'firebase-admin/firestore';
 
 const FIREBASE_PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT_ID || process.env.FIREBASE_PROJECT_ID || '';
 // Fail closed on this dedicated staging branch; never load production ADC.
-if (!FIREBASE_PROJECT_ID || FIREBASE_PROJECT_ID === 'timbersmithapp') {
+if (FIREBASE_PROJECT_ID !== 'timbersmith-staging') {
   throw new Error('STAGING BACKEND SAFETY: configure a distinct Firebase test project before starting.');
 }
 
@@ -29,6 +29,8 @@ export function getFirebaseAdminApp(): App {
   const existingApps = getApps();
   const defaultApp = existingApps.find(app => app.name === '[DEFAULT]');
   if (defaultApp) {
+    if(defaultApp.options.projectId !== FIREBASE_PROJECT_ID)
+      throw new Error('STAGING BACKEND SAFETY: default Firebase admin app references the wrong project.');
     adminApp = defaultApp;
     return adminApp;
   }
