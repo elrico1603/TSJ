@@ -41,7 +41,7 @@ async function run(){
   pass('Wrong and shared fallback PINs cannot authorize Clocking');
 
   const update={status:'Out',shiftStartTime:null,shifts:[shift,{date:'2026-11-18',clockIn:'07:00',clockOut:'16:00',hours:9}]};
-  const command={eventId:'shift-test-1',employeeId:ref.id,expectedStatus:'In',
+  const command={eventId:'shift-test-1',employeeId:ref.id,personalPin:'2419',expectedStatus:'In',
     expectedShiftCount:1,update};
   const first=await commitClockingEvent(db,actor,command);
   assert.equal(first.applied,true);
