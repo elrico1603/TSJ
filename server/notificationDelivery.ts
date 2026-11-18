@@ -6,17 +6,17 @@
  * Policy recipients are explicit application user IDs, never roles or emails.
  */
 import { Router, type Request, type Response } from 'express';
-import { getAuth } from 'firebase-admin/auth';
 import { createHash } from 'node:crypto';
-import { getFirebaseAdminApp, getServerFirestore } from './firebaseAdmin';
+import { getServerFirestore } from './firebaseAdmin';
+import { firebaseIdentityService } from './firebaseIdentityService';
 
 const APP = 'timbersmith-terminal-v1';
 const EVENT = 'STOCK_REQUEST_SUBMITTED';
 const safeId = (value:unknown): value is string =>
   typeof value === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(value);
 const hash = (value:string) => createHash('sha256').update(value).digest('hex');
-const activeAccount = (data:any) => !!data && data.active !== false &&
-  data.isApproved !== false && String(data.status || '').toLowerCase() !== 'inactive';
+const activeAccount = (data:any) => !!data && data.active === true &&
+  data.isApproved === true && String(data.status || '').toLowerCase() === 'active';
 
 export function notificationDeliveryEnabled(): boolean {
   return process.env.TSJ_NOTIFICATION_DELIVERY_ENABLED === 'true' &&
@@ -36,21 +36,20 @@ export function createNotificationDeliveryRouter(): Router {
   async function identity(req:Request) {
     const token = /^Bearer (\S+)$/.exec(req.headers.authorization || '')?.[1];
     if (!token || token.length > 8192) throw new Error('UNAUTHORIZED');
-    const decoded = await getAuth(getFirebaseAdminApp()).verifyIdToken(token,true).catch(()=>null);
-    if (!decoded || decoded.firebase.sign_in_provider === 'anonymous' ||
-        !safeId(decoded.tsj_app_user_id)) throw new Error('UNAUTHORIZED');
-    // The application ID must come from an administrator-provisioned signed
-    // claim. A locally stored AppUser or supplied email never grants identity.
+    // The server verifies the Firebase token and the authoritative UID ->
+    // canonical profile link. The browser cannot choose or invent a user ID.
+    const verified = await firebaseIdentityService.resolveToken(token).catch(()=>null);
+    if (!verified || !safeId(verified.profileId)) throw new Error('UNAUTHORIZED');
     const database = getServerFirestore();
     const root = database.collection('artifacts').doc(APP);
     const active = root.collection('private').doc('users').collection('active');
-    const userId = decoded.tsj_app_user_id as string;
+    const userId = verified.profileId;
     const record = await active.doc(userId).get();
     if (!record.exists || !activeAccount(record.data()) ||
-        (record.data()?.id && record.data()?.id !== userId)) throw new Error('FORBIDDEN');
-    if (!decoded.email || String(record.data()?.email || '').toLowerCase().trim() !== decoded.email.toLowerCase().trim()) {
+        record.data()?.firebaseUid !== verified.uid ||
+        String(record.data()?.email||'').trim().toLowerCase() !== verified.email ||
+        (record.data()?.id && record.data()?.id !== userId))
       throw new Error('FORBIDDEN');
-    }
     return {database,root,active,userId};
   }
   function fail(res:Response,error:unknown) {

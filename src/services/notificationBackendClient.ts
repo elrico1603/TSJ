@@ -10,12 +10,14 @@ export async function notificationBackendRequest(userId:string,path:string):Prom
   if (!protectedNotificationDeliveryEnabled()) throw new Error('Protected notification delivery is disabled.');
   const user=auth.currentUser;
   if (!user || user.isAnonymous) throw new Error('Verified Firebase sign-in is required for notification delivery.');
-  const token=await user.getIdTokenResult();
-  if(token.claims.tsj_app_user_id!==userId)throw new Error('The signed application identity does not match this account.');
+  // Server maps this Firebase UID to the canonical profileId; never
+  // trust an application user ID or custom claim supplied by the browser.
+  if(!userId || userId.includes('/'))throw new Error('Invalid notification identity.');
+  const token=await user.getIdToken();
   const base=String(env.VITE_TSJ_NOTIFICATION_API_BASE_URL||'').replace(/\/+$/,'');
   if(base&&!/^https:\/\/[^/]+$/.test(base))throw new Error('Notification API requires a trusted HTTPS origin.');
   const response=await fetch(base+'/api/notifications/'+path,{
-    method:'POST',headers:{Authorization:'Bearer '+token.token},cache:'no-store'
+    method:'POST',headers:{Authorization:'Bearer '+token},cache:'no-store'
   });
   const payload=await response.json().catch(()=>null);
   if(!response.ok||!payload)throw new Error(payload?.error||'Notification delivery unavailable.');
