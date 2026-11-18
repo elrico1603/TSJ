@@ -52,10 +52,14 @@ async function main() {
   pass('Anonymous user listing denied');
   await denied(getDocsFromServer(collection(guest.d,inbox+'/limited-rules/notifications')));
   pass('Anonymous cannot read notification inbox');
+  await db.doc('artifacts/timbersmith-terminal-v1/public/data/employees/worker-emulator')
+    .set({branchId:'BR-001',name:'Test Worker',shifts:[]});
   const limited=await session(userEmail);
   assert.equal((await getDocFromServer(doc(limited.d,'authUserLinks/'+uid))).exists(),true);
   assert.equal((await getDocFromServer(doc(limited.d,profiles+'/limited-rules'))).exists(),true);
   pass('Linked user can read own identity and profile');
+  await denied(getDocFromServer(doc(limited.d,'artifacts/timbersmith-terminal-v1/public/data/employees/worker-emulator')));
+  pass('Client cannot bypass secure Clocking backend to read employee credentials');
   assert.equal((await getDocsFromServer(collection(limited.d,inbox+'/limited-rules/notifications'))).size,1);
   await denied(getDocsFromServer(collection(limited.d,inbox+'/admin-rules/notifications')));
   await denied(setDoc(doc(limited.d,inbox+'/limited-rules/notifications/notification-one'),{isRead:true},{merge:true}));
@@ -90,7 +94,7 @@ async function main() {
   await db.doc(profiles+'/limited-rules').update({firebaseUid:uid,isApproved:false});
   await denied(getDocFromServer(doc(limited.d,profiles+'/limited-rules')));
   pass('Unapproved profile denied');
-  console.log(n+'/15 SECURITY RULES TESTS PASSED');
+  console.log(n+'/16 SECURITY RULES TESTS PASSED');
 }
 main().catch(e=>{console.error(e);process.exitCode=1;}).finally(async()=>{
   for(const c of clients){await terminate(clientDb(c));await deleteClient(c);}

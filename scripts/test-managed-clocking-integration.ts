@@ -18,11 +18,13 @@ async function rejects(code:string,task:()=>Promise<unknown>) {
 }
 async function run(){
   let n=0;const pass=(message:string)=>{n++;console.log('PASS | '+message);};
-  await ref.set(base);
+  await ref.set({...base,pin:'never-expose-me',hourlyRate:120,idNumber:'secret-id'});
   await legacy.set({...base,branchId:null});
   const rows=await readBranchEmployees(db,actor);
   assert.equal(rows.length,1);
   assert.equal(rows[0].id,'clocking-test-worker');
+  assert.equal(Object.prototype.hasOwnProperty.call(rows[0],'pin'),false);
+  assert.equal(Object.prototype.hasOwnProperty.call(rows[0],'hourlyRate'),false);
   assert.equal((await readBranchEmployees(db,branchB)).length,0);
   pass('Employee list is isolated by verified branch');
   await rejects('CLOCKING_ACCESS_DENIED',()=>readBranchEmployees(db,{...actor,canView:false}));

@@ -38,7 +38,16 @@ export async function verifyClockingActor(token:string,database:Firestore):Promi
 export async function readBranchEmployees(db:Firestore,actor:ClockingActor) {
   if(!actor.canView)throw new Error('CLOCKING_ACCESS_DENIED');
   const snap=await db.collection(EMPLOYEES_PATH).where('branchId','==',actor.branchId).get();
-  return snap.docs.map(d=>({id:d.id,...d.data()}));
+  // Only operational fields; never return PINs, personal codes, national
+  // IDs, wages, tax details or internal employee credentials to a client.
+  const visible=['name','surname','role','status','isArchived','lastClock',
+    'shiftStartTime','shifts','history','breaks','todayHours',
+    'yesterdayHours','weeklyHours','monthlyHours','currentBreakReason'] as const;
+  return snap.docs.map(d=>{
+    const data=d.data(),result:Record<string,unknown>={id:d.id};
+    for(const field of visible)if(data[field]!==undefined)result[field]=data[field];
+    return result;
+  });
 }
 export interface ClockingCommand {
   eventId:string;
