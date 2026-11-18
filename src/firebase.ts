@@ -5,9 +5,14 @@ import 'firebase/compat/storage';
 
 const env = typeof import.meta !== 'undefined' ? (import.meta as unknown as { env?: Record<string, string> }).env || {} : {};
 
-// This staging branch must never use the live TS Hub Firebase project.
-const STAGING_ONLY = true;
-if (STAGING_ONLY) {
+// Isolated local PC test — never permit connecting from a remote hostname.
+const LOCAL_PC_TEST = env.VITE_TSJ_LOCAL_PC_TEST === 'true';
+if (LOCAL_PC_TEST) {
+  if (typeof window !== 'undefined' && !['localhost','127.0.0.1'].includes(window.location.hostname))
+    throw new Error('LOCAL TEST SAFETY: localhost is required.');
+  if (env.VITE_TSJ_MANAGED_USER_API_BASE_URL !== 'http://127.0.0.1:3000')
+    throw new Error('LOCAL TEST SAFETY: use the isolated loopback API.');
+} else {
   const required=['VITE_FIREBASE_API_KEY','VITE_FIREBASE_AUTH_DOMAIN',
     'VITE_FIREBASE_PROJECT_ID','VITE_FIREBASE_APP_ID',
     'VITE_FIREBASE_MESSAGING_SENDER_ID','VITE_FIREBASE_STORAGE_BUCKET',
@@ -17,9 +22,8 @@ if (STAGING_ONLY) {
       /timbersmithapp/i.test(env.VITE_FIREBASE_AUTH_DOMAIN || '') ||
       /timbersmithapp/i.test(env.VITE_FIREBASE_STORAGE_BUCKET || '') ||
       !/^https:\/\//.test(env.VITE_TSJ_MANAGED_USER_API_BASE_URL || '') ||
-      /tsjoinery\.co\.za|timbersmith-terminal/i.test(env.VITE_TSJ_MANAGED_USER_API_BASE_URL || '')) {
-    throw new Error('STAGING SAFETY: isolated Firebase project and separate HTTPS test API are required. No production connection was opened.');
-  }
+      /tsjoinery\.co\.za|timbersmith-terminal/i.test(env.VITE_TSJ_MANAGED_USER_API_BASE_URL || ''))
+    throw new Error('STAGING SAFETY: isolated Firebase project and separate HTTPS test API are required.');
 }
 
 export const firebaseConfig = {
@@ -31,13 +35,16 @@ export const firebaseConfig = {
     appId: "1:351455828495:web:0fd1d0a7846feb7a92a17a"
 };
 
-if (!firebase.apps.length) {
-    firebase.initializeApp(firebaseConfig);
-}
-
+if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
 export const auth = firebase.auth();
 export const db = firebase.firestore();
 export const storage = firebase.storage();
+if (LOCAL_PC_TEST) {
+  auth.useEmulator('http://127.0.0.1:9099');
+  db.useEmulator('127.0.0.1',8085);
+  // The Storage emulator is intentionally not running: cloud uploads fail closed.
+  storage.useEmulator('127.0.0.1',9199);
+}
 
 // Configure Firestore WebChannel transport to use long-polling in browser environments
 // This eliminates WebChannelConnection RPC 'Listen' transport errors behind buffering proxies

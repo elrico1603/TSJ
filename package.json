@@ -18,7 +18,9 @@
     "release:minor": "node scripts/release.js --minor",
     "release:major": "node scripts/release.js --major",
     "permissions:sync": "node scripts/sync-module-permissions.mjs",
-    "permissions:check": "node scripts/sync-module-permissions.mjs --check"
+    "permissions:check": "node scripts/sync-module-permissions.mjs --check",
+    "local:test": "node scripts/start-local-pc-test.mjs",
+    "local:seed": "node --import tsx scripts/seed-local-pc-test.ts"
   },
   "dependencies": {
     "@google-cloud/storage": "^8.0.0",

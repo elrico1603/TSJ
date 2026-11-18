@@ -29,6 +29,12 @@ function parseCookies(req: express.Request): Record<string, string> {
 }
 
 async function startServer() {
+  const localOnly = process.env.TSJ_LOCAL_PC_TEST === 'true';
+  if (localOnly && (
+    process.env.FIRESTORE_EMULATOR_HOST !== '127.0.0.1:8085' ||
+    process.env.FIREBASE_AUTH_EMULATOR_HOST !== '127.0.0.1:9099' ||
+    process.env.FIREBASE_PROJECT_ID !== 'timbersmith-staging'
+  )) throw new Error('LOCAL PC SAFETY: both local emulators are required.');
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
 
@@ -75,6 +81,10 @@ async function startServer() {
   // API ROUTES (FIRST)
   // ==========================================
 
+  if (localOnly) app.use('/api', (req,res,next) => {
+    if (req.path === '/health' || req.path.startsWith('/managed-users/')) return next();
+    return res.status(403).json({error:'Local PC test: production integrations are disabled.'});
+  });
   // Protected delivery is off until verified identity and database rules are in place.
   if (notificationDeliveryEnabled()) app.use('/api/notifications', createNotificationDeliveryRouter());
 
@@ -396,7 +406,7 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  app.listen(PORT, localOnly ? '127.0.0.1' : '0.0.0.0', () => {
     console.log(`[TimberSmith Server] Running on http://0.0.0.0:${PORT}`);
   });
 }

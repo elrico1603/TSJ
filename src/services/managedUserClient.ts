@@ -11,7 +11,11 @@ export async function managedUserRequest(path: string, body: unknown): Promise<a
   const user = auth.currentUser;
   if (!user || user.isAnonymous) throw new Error('Sign in with your Firebase account first.');
   const base = String(env.VITE_TSJ_MANAGED_USER_API_BASE_URL || '').replace(/\/+$/, '');
-  if (base && !/^https:\/\/[^/]+$/.test(base)) throw new Error('Managed user API requires HTTPS.');
+  if (env.VITE_TSJ_LOCAL_PC_TEST === 'true') {
+    if (base !== 'http://127.0.0.1:3000') throw new Error('Local test backend must use loopback.');
+  } else if (base && !/^https:\/\/[^/]+$/.test(base)) {
+    throw new Error('Managed user API requires HTTPS.');
+  }
   const token = await user.getIdToken();
   const response = await fetch(base + '/api/managed-users/' + path, {
     method: 'POST', cache: 'no-store',

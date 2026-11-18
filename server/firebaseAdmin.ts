@@ -13,6 +13,10 @@ import { getFirestore, Firestore } from 'firebase-admin/firestore';
  * - Never imported or exposed to browser / frontend clients.
  */
 
+if (process.env.TSJ_LOCAL_PC_TEST === 'true' &&
+  (process.env.FIRESTORE_EMULATOR_HOST !== '127.0.0.1:8085' ||
+   process.env.FIREBASE_AUTH_EMULATOR_HOST !== '127.0.0.1:9099'))
+  throw new Error('LOCAL PC SAFETY: both localhost Firebase emulators are required.');
 const FIREBASE_PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT_ID || process.env.FIREBASE_PROJECT_ID || '';
 // Fail closed on this dedicated staging branch; never load production ADC.
 if (FIREBASE_PROJECT_ID !== 'timbersmith-staging') {
