@@ -5,6 +5,8 @@ import { firebaseIdentityService } from './firebaseIdentityService';
 import { ManagedUserService, MANAGED_ADMIN_BASE_MODULES, MANAGED_PERMISSION_ACTIONS } from './managedUserService';
 import { ManagedUserLifecycle } from './managedUserLifecycle';
 import { ManagedNotificationPolicies } from './managedNotificationPolicies';
+import { initializeBranchAssignments,moveEmployeeBranch } from './clockingBranchAssignments';
+import type { BranchId } from './clockingBranchManifest';
 
 export function managedUserApiEnabled() {
   return process.env.TSJ_MANAGED_USER_API === 'true';
@@ -62,6 +64,14 @@ export function createManagedUserRouter() {
     };
   router.post('/notification-policy/save', run((req) => new ManagedNotificationPolicies(getServerFirestore()).save(req.body, req.res!.locals.actorProfileId)));
   router.post('/notification-policy/reset', run((req) => new ManagedNotificationPolicies(getServerFirestore()).reset(req.body?.eventId, req.res!.locals.actorProfileId)));
+  // Explicit Full Access and verified Firebase identity are required by the
+  // router guard. Neither operation modifies legacy employee documents.
+  router.post('/clocking/branches/initialize',run((req) =>
+    initializeBranchAssignments(getServerFirestore(),req.body?.assignments,req.res!.locals.actorProfileId)));
+  router.post('/clocking/branches/transfer',run((req) =>
+    moveEmployeeBranch(getServerFirestore(),req.body?.employeeId,
+      req.body?.expectedBranchId as BranchId,req.body?.destinationBranchId as BranchId,
+      req.res!.locals.actorProfileId)));
   router.post('/create', run((req, actor) => services().managed.createUser(req.body, actor)));
   router.post('/:uid/access', run((req, actor) => services().managed.saveUserAccess(req.params.uid, req.body, actor)));
   router.post('/:uid/status', run((req, actor) => services().lifecycle.setActive(req.params.uid, req.body?.active, actor)));
