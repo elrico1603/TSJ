@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { CompanySettingsHub } from './CompanySettingsHub';
 import { RolePermissionHub } from './RolePermissionHub';
+import { ClockingBranchManagement } from './ClockingBranchManagement';
 import { Icon } from './Icon';
 import { AppUser } from '../auth';
 import { RoleDefinition } from '../types';
@@ -10,6 +11,7 @@ import { APP_VERSION, CURRENT_VERSION_STRING, getGitTag } from '../version';
 export type SystemAdminTab = 
   | 'company_settings'
   | 'roles_permissions'
+  | 'clocking_branches'
   | 'system_health'
   | 'audit_log'
   | 'notification_settings'
@@ -80,6 +82,7 @@ export const SystemAdministrationHub: React.FC<SystemAdministrationHubProps> = (
   const navItems: { id: SystemAdminTab; label: string; icon: string; badge?: string }[] = [
     { id: 'company_settings', label: 'Company Settings', icon: 'building' },
     { id: 'roles_permissions', label: 'Roles & User Access', icon: 'shield', badge: pendingUsers.length > 0 ? `${pendingUsers.length}` : undefined },
+    { id: 'clocking_branches', label: 'Clocking Branches', icon: 'users' },
     { id: 'system_health', label: 'System Health', icon: 'activity' },
     { id: 'audit_log', label: 'Audit Log', icon: 'file-text' },
     { id: 'notification_settings', label: 'Notification Settings', icon: 'bell' },
@@ -187,6 +190,10 @@ export const SystemAdministrationHub: React.FC<SystemAdministrationHubProps> = (
             updateActiveUser={updateActiveUser}
             announce={announce}
           />
+        )}
+
+        {activeTab === 'clocking_branches' && (
+          <ClockingBranchManagement currentUser={currentUser} announce={announce} />
         )}
 
         {/* Tab 3: System Health */}
