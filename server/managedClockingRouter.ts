@@ -91,7 +91,7 @@ export function createClockingRouter() {
     next();
   });
   async function actor(req:any) {
-    const match=/^Bearer (\\S+)$/.exec(req.headers.authorization||'');
+    const match=/^Bearer (\S+)$/.exec(req.headers.authorization||'');
     if(!match||match[1].length>8192)throw new Error('CLOCKING_ACCESS_DENIED');
     return verifyClockingActor(match[1],getServerFirestore());
   }

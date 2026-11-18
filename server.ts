@@ -12,6 +12,7 @@ import { gmailOAuthService, SendPOPayload } from './server/gmailOAuthService';
 import { sessionStore } from './server/sessionStore';
 import { createNotificationDeliveryRouter, notificationDeliveryEnabled } from './server/notificationDelivery';
 import { createManagedUserRouter, managedUserApiEnabled } from './server/managedUserRouter';
+import { createClockingRouter, clockingApiEnabled } from './server/managedClockingRouter';
 import { StorageUploadRequest } from './src/types/storage';
 import { ChatGenerateRequest } from './src/types/chat';
 
@@ -78,6 +79,8 @@ async function startServer() {
   if (notificationDeliveryEnabled()) app.use('/api/notifications', createNotificationDeliveryRouter());
 
   if (managedUserApiEnabled()) app.use('/api/managed-users', createManagedUserRouter());
+  // Strictly opt-in managed Clocking API; the existing production client is unchanged.
+  if (clockingApiEnabled()) app.use('/api/clocking', createClockingRouter());
 
   // 1. Backend Health & Service Status
   app.get('/api/health', (req, res) => {
