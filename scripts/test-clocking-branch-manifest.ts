@@ -6,7 +6,7 @@ const good=[{employeeId:'worker-a',employeeName:'Worker A',branchId:'BR-001'},
 assert.equal(validateClockingBranchAssignments(good,live).errors.length,0);
 assert.equal(validateClockingBranchAssignments(good,live).assignments.length,2);
 console.log('PASS | explicitly reviewed assignments accepted');
-const cases:[
+const cases=[
   good.map(x=>({...x,branchId:null})),
   good.slice(0,1),
   [...good,good[0]],
