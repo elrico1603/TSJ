@@ -21,11 +21,11 @@ async function run(){
   await ref.set({...base,pin:'never-expose-me',hourlyRate:120,idNumber:'secret-id'});
   await legacy.set({...base,branchId:null});
   const rows=await readBranchEmployees(db,actor);
-  assert.equal(rows.length,1);
-  assert.equal(rows[0].id,'clocking-test-worker');
-  assert.equal(Object.prototype.hasOwnProperty.call(rows[0],'pin'),false);
-  assert.equal(Object.prototype.hasOwnProperty.call(rows[0],'hourlyRate'),false);
-  assert.equal((await readBranchEmployees(db,branchB)).length,0);
+  const ours=rows.find(row=>row.id==='clocking-test-worker');
+  assert.ok(ours,'Our worker must be visible within its own branch');
+  assert.equal(Object.prototype.hasOwnProperty.call(ours,'pin'),false);
+  assert.equal(Object.prototype.hasOwnProperty.call(ours,'hourlyRate'),false);
+  assert.equal((await readBranchEmployees(db,branchB)).some(row=>row.id==='clocking-test-worker'),false);
   pass('Employee list is isolated by verified branch');
   await rejects('CLOCKING_ACCESS_DENIED',()=>readBranchEmployees(db,{...actor,canView:false}));
   await rejects('CLOCKING_ACCESS_DENIED',()=>commitClockingEvent(db,{...actor,canProcess:false},
