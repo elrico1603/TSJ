@@ -181,6 +181,7 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
   });
 
   const [showEditUserModal, setShowEditUserModal] = useState(false);
+  const [userSaveSuccess, setUserSaveSuccess] = useState('');
   const [editingUser, setEditingUser] = useState<AppUser | null>(null);
   const [showEditPin, setShowEditPin] = useState(false);
   const [selectedDeviceViewTab, setSelectedDeviceViewTab] = useState<DeviceInterface>('phone');
@@ -591,6 +592,7 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
   // Open Edit User Modal
   const handleOpenEditUser = (user: AppUser) => {
     setUserSaveError('');
+    setUserSaveSuccess('');
     setRoleTemplateApplied(false);
     setEditingUser(user);
     const assignedRoleId = userRolesMap[user.id]?.roleId || user.roleId || roles.find(r => r.roleName.toLowerCase() === (user.role || '').toLowerCase())?.id || roles[0]?.id || '';
@@ -783,7 +785,7 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
   };
 
   // Save Edit User with Admin Lockout Protection
-  const handleEditUserSubmit = async (e: React.FormEvent) => {
+  const handleEditUserSubmit = async (e: React.SyntheticEvent, closeAfterSave = true) => {
     e.preventDefault();
     if (isReadOnly || !editingUser) return;
 
@@ -800,6 +802,7 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
     }
 
     setUserSaveError('');
+    setUserSaveSuccess('');
     setIsSavingUser(true);
     try {
       const selectedRole = roles.find(r => r.id === editUserForm.roleId);
@@ -842,8 +845,12 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
           permissions: userPermissionOverridesBuffer
         });
         announce?.(`User ${editUserForm.name} permissions and access updated successfully.`);
-        setShowEditUserModal(false);
-        setEditingUser(null);
+        if (closeAfterSave) {
+          setShowEditUserModal(false);
+          setEditingUser(null);
+        } else {
+          setUserSaveSuccess('Changes applied successfully. You can continue editing.');
+        }
         return;
       }
 
@@ -872,8 +879,12 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
         currentUser?.name || 'Administrator'
       );
       announce?.(`User ${editUserForm.name} permissions and access updated successfully.`);
-      setShowEditUserModal(false);
-      setEditingUser(null);
+      if (closeAfterSave) {
+        setShowEditUserModal(false);
+        setEditingUser(null);
+      } else {
+        setUserSaveSuccess('Changes applied successfully. You can continue editing.');
+      }
     } catch (err: any) {
       console.error('Failed to update user:', err);
       setUserSaveError(err.message || 'Failed to update user.');
@@ -2566,6 +2577,7 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
 
             <form onSubmit={handleEditUserSubmit} className="flex flex-col flex-1 overflow-hidden space-y-4">
                 {userSaveError && <p role="alert" className="rounded-xl bg-red-950/50 border border-red-500/40 p-3 text-sm text-red-200">{userSaveError}</p>}
+                {userSaveSuccess && <p role="status" className="rounded-xl bg-green-950/40 border border-green-500/30 p-3 text-sm text-green-200">{userSaveSuccess}</p>}
               {/* Two-Column Responsive Layout */}
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 flex-1 overflow-hidden">
                 {/* LEFT COLUMN: User Info, Device Access, Branch & Location */}
@@ -3207,13 +3219,23 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
                   <button
                     type="button"
                     onClick={() => setShowEditUserModal(false)}
+                    disabled={isSavingUser}
                     className="px-4 py-2.5 bg-white/10 text-gray-300 text-xs font-bold rounded-xl hover:bg-white/20 transition-colors"
                   >
                     Cancel
                   </button>
                   <button
+                    type="button"
+                    onClick={(e) => void handleEditUserSubmit(e, false)}
+                    disabled={isSavingUser || isReadOnly}
+                    className="px-4 py-2.5 bg-white/10 hover:bg-white/20 text-white font-black text-xs uppercase rounded-xl transition-colors flex items-center gap-2"
+                  >
+                    <Icon name="check" size={14} />
+                    <span>Apply</span>
+                  </button>
+                  <button
                     type="submit"
-                    disabled={isSavingUser}
+                    disabled={isSavingUser || isReadOnly}
                     className="px-6 py-2.5 bg-purple-600 hover:bg-purple-500 text-white font-black text-xs uppercase rounded-xl shadow-lg transition-colors flex items-center gap-2"
                   >
                     {isSavingUser ? (
@@ -3224,7 +3246,7 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
                     ) : (
                       <>
                         <Icon name="check" size={14} />
-                        <span>Save User Permissions & Access</span>
+                        <span>Save & Close</span>
                       </>
                     )}
                   </button>
