@@ -1,6 +1,11 @@
 import React, { useState, useEffect, useRef, Fragment, useCallback } from 'react';
 import { db, auth, APP_ID_PATH, APP_MOBILE_LINK } from './firebase';
 import {
+  FIREBASE_LOGIN_PILOT,
+  authenticateFirebasePilot,
+  signOutFirebasePilot
+} from './services/firebaseLoginPilot';
+import {
   SA_HOLIDAYS,
   Employee,
   ShiftRecord,
@@ -18,6 +23,8 @@ import {
   SECURITY,
   rolePermissions,
   authManager,
+  MANAGED_AUTH,
+  sanitizedManagedProfile,
   AppUser,
   DEFAULT_ACCOUNTS
 } from './auth';
@@ -106,7 +113,9 @@ export default function App() {
 
   // Navigation State
   const [currentUser, setCurrentUser] = useState<any>(() => {
-    const session = authManager.getStoredSession();
+    const session = FIREBASE_LOGIN_PILOT
+      ? null
+      : authManager.getStoredSession();
     if (session) {
       const ov = permissionService.getUserOverride(session);
       return {
@@ -118,9 +127,13 @@ export default function App() {
     }
     return null;
   });
-  const [isLocked, setIsLocked] = useState(() => !authManager.getStoredSession());
+  const [isLocked, setIsLocked] = useState(
+    () => FIREBASE_LOGIN_PILOT || !authManager.getStoredSession()
+  );
   const [appMode, setAppMode] = useState<string>(() => {
-    const session = authManager.getStoredSession();
+    const session = FIREBASE_LOGIN_PILOT
+      ? null
+      : authManager.getStoredSession();
     return session ? permissionService.getInitialModeAndView(session, layoutMode).appMode : 'employee';
   });
   const [showPinModal, setShowPinModal] = useState(false);
@@ -128,7 +141,9 @@ export default function App() {
   const [unlockPassword, setUnlockPassword] = useState('');
   const [pinInput, setPinInput] = useState('');
   const [view, setView] = useState<string>(() => {
-    const session = authManager.getStoredSession();
+    const session = FIREBASE_LOGIN_PILOT
+      ? null
+      : authManager.getStoredSession();
     return session ? permissionService.getInitialModeAndView(session, layoutMode).view : 'dashboard';
   });
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
@@ -717,7 +732,11 @@ export default function App() {
 
     // 2. Re-hydrate active session and currentUser with latest permissions
     setCurrentUser((prevUser: any) => {
-      const targetUser = prevUser || authManager.getStoredSession();
+      const targetUser = prevUser || (
+        FIREBASE_LOGIN_PILOT
+          ? null
+          : authManager.getStoredSession()
+      );
       if (!targetUser) return null;
       const ov = permissionService.getUserOverride(targetUser);
       const updatedUser: AppUser = {
@@ -821,8 +840,66 @@ export default function App() {
         // Clean up any prior listeners before establishing fresh subscriptions
         cleanupFirestoreListeners();
 
-        if (u) {
+        if (u && (!MANAGED_AUTH || !u.isAnonymous)) {
           setIsCloudLive(true);
+
+          if (MANAGED_AUTH) {
+            const stillCurrent=()=>isMounted && auth.currentUser?.uid===u.uid;
+            const invalidate=()=>{
+              if (!stillCurrent()) return;
+              permissionService.replaceManagedOverrides([]);
+              setCurrentUser(null);
+              setIsLocked(true);
+              void auth.signOut();
+            };
+            try {
+              const linkRef=db.collection('authUserLinks').doc(u.uid);
+              const link=(await linkRef.get({source:'server'})).data();
+              if (!stillCurrent()) return;
+              if (!link || link.uid!==u.uid || link.email!==u.email || link.active!==true ||
+                typeof link.profileId!=='string' || !link.profileId || link.profileId.includes('/')) {
+                invalidate();return;
+              }
+              const profileId=link.profileId;
+              const ownProfile=db.collection('artifacts').doc(APP_ID_PATH).collection('private').doc('users').collection('active').doc(profileId);
+              const ownOverride=db.collection('userPermissionOverrides').doc(profileId);
+              let stopAllOverrides:(()=>void)|null=null;
+              unsubs.push(()=>stopAllOverrides?.());
+              unsubs.push(linkRef.onSnapshot(snap=>{
+                if (!stillCurrent()) return;
+                const value=snap.data();
+                if (!value || value.active!==true || value.uid!==u.uid || value.profileId!==profileId || value.email!==u.email) invalidate();
+              },invalidate));
+              unsubs.push(ownProfile.onSnapshot(snap=>{
+                if (!stillCurrent()) return;
+                const value=snap.data();
+                if (!value || value.firebaseUid!==u.uid || value.email!==u.email ||
+                  value.active!==true || value.isApproved!==true || value.status!=='active') {invalidate();return;}
+                const safe=sanitizedManagedProfile({...value,id:profileId} as AppUser);
+                setCurrentUser((previous:any)=>previous?.firebaseUid===u.uid?{...previous,...safe}:previous);
+              },invalidate));
+              unsubs.push(ownOverride.onSnapshot(snap=>{
+                if (!stillCurrent()) return;
+                const override=snap.data() as UserPermissionOverride|undefined;
+                if (!override || override.userId!==profileId || override.userEmail!==u.email) {invalidate();return;}
+                permissionService.replaceManagedOverrides([{id:profileId,data:override}]);
+                const view=override.permissions?.['User Assignments']?.View;
+                if ((view==='allow'||view===true) && !stopAllOverrides) {
+                  stopAllOverrides=db.collection('userPermissionOverrides').onSnapshot(all=>{
+                    if (!stillCurrent()) return;
+                    permissionService.replaceManagedOverrides(all.docs.map(doc=>({id:doc.id,data:doc.data() as UserPermissionOverride})));
+                  },()=>{
+                    stopAllOverrides=null;
+                    if (stillCurrent()) permissionService.replaceManagedOverrides([{id:profileId,data:override}]);
+                  });
+                } else if (view!=='allow'&&view!==true&&stopAllOverrides) {
+                  stopAllOverrides();stopAllOverrides=null;
+                }
+              },invalidate));
+            } catch {
+              invalidate();return;
+            }
+          }
 
           // 1. Listen to employees list
           try {
@@ -911,7 +988,7 @@ export default function App() {
                       isApproved: data.isApproved !== undefined ? data.isApproved : true
                     } as AppUser;
                   });
-                  const mergedUsers = authManager.setUsers(users);
+                  const mergedUsers = authManager.setUsers(MANAGED_AUTH ? users.map(sanitizedManagedProfile) : users);
                   setActiveUsers(mergedUsers);
                   // A tablet that is already signed in must see the saved
                   // account role/device settings, not its older session copy.
@@ -919,9 +996,18 @@ export default function App() {
                   setCurrentUser((previous: any) => {
                     if (!previous) return previous;
                     const email = String(previous.email || '').trim().toLowerCase();
-                    const fresh = mergedUsers.find(u => u.id === previous.id ||
-                      (email && String(u.email || '').trim().toLowerCase() === email));
-                    if (!fresh) return previous;
+                    const fresh = FIREBASE_LOGIN_PILOT
+                      ? mergedUsers.find(u => u.id === previous.id)
+                      : mergedUsers.find(u =>
+                          u.id === previous.id ||
+                          (
+                            email &&
+                            String(u.email || '')
+                              .trim()
+                              .toLowerCase() === email
+                          )
+                        );
+                    if (!fresh) return MANAGED_AUTH ? null : previous;
                     const ov = permissionService.getUserOverride(fresh);
                     const next = {
                       ...previous,
@@ -1008,6 +1094,16 @@ export default function App() {
 
         } else {
           dismissSplash();
+          if (MANAGED_AUTH) {
+            setIsCloudLive(false);
+            permissionService.replaceManagedOverrides([]);
+            setCurrentUser(null);
+            setIsLocked(true);
+            setActiveUsers(authManager.setUsers([]));
+            setIsUsersLoading(false);
+            if (u?.isAnonymous) void auth.signOut();
+            return;
+          }
           auth.signInAnonymously().catch(e => {
             console.warn("[AUTH INIT WARNING] Anonymous sign-in notice:", e);
           });
@@ -1432,14 +1528,31 @@ TS Joinery Kanban System`
     }, 800);
   };
 
-  const submitAdminPin = () => {
+  const submitAdminPin = async () => {
     const trimmedUser = unlockUsername.trim().toLowerCase();
     const trimmedPass = unlockPassword.trim();
 
     // Validate against registered active users (Standard User-Centric Authorization)
-    const matchedUser = authManager.authenticateUser(activeUsers, trimmedUser, trimmedPass);
+    let matchedUser: AppUser | null = null;
+
+    try {
+      matchedUser = FIREBASE_LOGIN_PILOT
+        ? await authenticateFirebasePilot(trimmedUser, trimmedPass)
+        : authManager.authenticateUser(activeUsers, trimmedUser, trimmedPass);
+    } catch (error) {
+      console.warn('[MANAGEMENT LOGIN] Verification failed');
+      setAdminPinError(true);
+      setTimeout(() => setAdminPinError(false), 1500);
+      return;
+    }
 
     if (matchedUser) {
+      if (MANAGED_AUTH && !permissionService.canAccessDevice(matchedUser,layoutMode)) {
+        setAdminPinError(true);
+        await auth.signOut();
+        announce('This account is not authorized for this device.');
+        return;
+      }
       setIsLocked(false);
       const override = permissionService.getUserOverride(matchedUser);
       const normUser: AppUser = {
@@ -1565,13 +1678,14 @@ TS Joinery Kanban System`
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError('');
+    if (MANAGED_AUTH && authView !== 'login') { setLoginError('Ask your administrator to create an account.'); return; }
     if (authView === 'login') {
-      if (isUsersLoading && (!activeUsers || activeUsers.length === 0)) {
+      if (!MANAGED_AUTH && isUsersLoading && (!activeUsers || activeUsers.length === 0)) {
         setLoginError('Loading user accounts. Please wait...');
         announce('Loading user accounts. Please wait...');
         return;
       }
-      if (usersLoadError && (!activeUsers || activeUsers.length === 0)) {
+      if (!MANAGED_AUTH && usersLoadError && (!activeUsers || activeUsers.length === 0)) {
         setLoginError(usersLoadError);
         announce(usersLoadError);
         return;
@@ -1618,8 +1732,15 @@ TS Joinery Kanban System`
       });
 
       try {
-        const match = authManager.authenticateUser(activeUsers, emailInput, pinInput);
+        const match = FIREBASE_LOGIN_PILOT
+          ? await authenticateFirebasePilot(emailInput, pinInput)
+          : authManager.authenticateUser(activeUsers, emailInput, pinInput);
         if (match) {
+          if (MANAGED_AUTH && !permissionService.canAccessDevice(match,layoutMode)) {
+            setLoginError('This account is not authorized for this device.');
+            await auth.signOut();
+            return;
+          }
           if (match.active === false) {
             setLoginError('Account is currently deactivated. Contact administration.');
             announce('Account deactivated.');
@@ -2393,10 +2514,10 @@ TS Joinery Kanban System`
 
               <button 
                 type="submit" 
-                disabled={isUsersLoading && (!activeUsers || activeUsers.length === 0)}
+                disabled={!MANAGED_AUTH && isUsersLoading && (!activeUsers || activeUsers.length === 0)}
                 className="w-full py-4 bg-[#ff8c00] hover:bg-[#e07b00] disabled:opacity-60 disabled:cursor-not-allowed active:scale-[0.98] text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl transition-all min-h-[48px]"
               >
-                {isUsersLoading && (!activeUsers || activeUsers.length === 0) ? 'Loading Accounts...' : 'Authenticate Login'}
+                {!MANAGED_AUTH && isUsersLoading && (!activeUsers || activeUsers.length === 0) ? 'Loading Accounts...' : 'Authenticate Login'}
               </button>
             </form>
 
@@ -2413,6 +2534,7 @@ TS Joinery Kanban System`
           setView={setView}
           onSignOut={() => {
             authManager.clearSession();
+            void signOutFirebasePilot();
             setCurrentUser(null);
             setAppMode('clocking_terminal');
             setIsLocked(true);
@@ -2782,7 +2904,8 @@ TS Joinery Kanban System`
                   </button>
                 ) : (
                   <button 
-                    onClick={() => { authManager.clearSession(); setIsLocked(true); setAppMode('employee'); setCurrentUser(null); }} 
+                    onClick={() => { authManager.clearSession();
+            void signOutFirebasePilot(); setIsLocked(true); setAppMode('employee'); setCurrentUser(null); }} 
                     className="w-full py-3.5 xl:py-4 bg-red-600/10 border border-red-500/30 hover:bg-red-600/20 rounded-2xl text-xs font-black uppercase tracking-widest text-red-500 transition-all flex items-center justify-center space-x-3 font-sans"
                   >
                     <Icon name="unlock" size={16} />
@@ -3084,14 +3207,14 @@ TS Joinery Kanban System`
                           </div>
                         )}
 
-                        <button type="submit" disabled={isUsersLoading && (!activeUsers || activeUsers.length === 0)} className="w-full py-5 bg-[#ff8c00] hover:bg-[#e07b00] disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl transition-colors mt-8">
-                          {isUsersLoading && (!activeUsers || activeUsers.length === 0) ? 'Loading Accounts...' : (authView === 'login' ? 'Authenticate Login' : 'Request Registry Access')}
+                        <button type="submit" disabled={!MANAGED_AUTH && isUsersLoading && (!activeUsers || activeUsers.length === 0)} className="w-full py-5 bg-[#ff8c00] hover:bg-[#e07b00] disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl transition-colors mt-8">
+                          {!MANAGED_AUTH && isUsersLoading && (!activeUsers || activeUsers.length === 0) ? 'Loading Accounts...' : (authView === 'login' ? 'Authenticate Login' : 'Request Registry Access')}
                         </button>
                       </form>
 
                       <div className="mt-8 border-t border-white/5 pt-6 flex justify-between text-[11px] font-bold uppercase text-gray-500 font-sans">
                         {authView === 'login' ? (
-                          <button onClick={() => setAuthView('register')} className="hover:text-white transition-colors">Request Access</button>
+                          (!MANAGED_AUTH && <button onClick={() => setAuthView('register')} className="hover:text-white transition-colors">Request Access</button>)
                         ) : (
                           <button onClick={() => setAuthView('login')} className="hover:text-white transition-colors">Back to Login</button>
                         )}
@@ -4683,6 +4806,7 @@ TS Joinery Kanban System`
           onClose={() => setShowUserProfileModal(false)}
           onLock={() => {
             authManager.clearSession();
+            void signOutFirebasePilot();
             setIsLocked(true);
             setAppMode('employee');
             setCurrentUser(null);

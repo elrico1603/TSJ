@@ -6,17 +6,19 @@
   "scripts": {
     "dev": "tsx server.ts",
     "generate-icons": "node scripts/generate-icons.js",
-    "prebuild": "node scripts/generate-icons.js",
+    "prebuild": "node scripts/sync-module-permissions.mjs && node scripts/generate-icons.js",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "gcp-build": "npm run build",
     "start": "node dist/server.cjs",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit",
+    "lint": "npm run permissions:check && tsc --noEmit",
     "release": "node scripts/release.js",
     "release:patch": "node scripts/release.js --patch",
     "release:minor": "node scripts/release.js --minor",
-    "release:major": "node scripts/release.js --major"
+    "release:major": "node scripts/release.js --major",
+    "permissions:sync": "node scripts/sync-module-permissions.mjs",
+    "permissions:check": "node scripts/sync-module-permissions.mjs --check"
   },
   "dependencies": {
     "@google-cloud/storage": "^8.0.0",

@@ -11,6 +11,7 @@ import { serverGemini } from './server/geminiService';
 import { gmailOAuthService, SendPOPayload } from './server/gmailOAuthService';
 import { sessionStore } from './server/sessionStore';
 import { createNotificationDeliveryRouter, notificationDeliveryEnabled } from './server/notificationDelivery';
+import { createManagedUserRouter, managedUserApiEnabled } from './server/managedUserRouter';
 import { StorageUploadRequest } from './src/types/storage';
 import { ChatGenerateRequest } from './src/types/chat';
 
@@ -75,6 +76,8 @@ async function startServer() {
 
   // Protected delivery is off until verified identity and database rules are in place.
   if (notificationDeliveryEnabled()) app.use('/api/notifications', createNotificationDeliveryRouter());
+
+  if (managedUserApiEnabled()) app.use('/api/managed-users', createManagedUserRouter());
 
   // 1. Backend Health & Service Status
   app.get('/api/health', (req, res) => {

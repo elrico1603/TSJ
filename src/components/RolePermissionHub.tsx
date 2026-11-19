@@ -18,7 +18,7 @@ import {
   DEFAULT_ROLES
 } from '../services/permissionService';
 import { companyService } from '../services/companyService';
-import { db, APP_ID_PATH } from '../firebase';
+import { auth, db, APP_ID_PATH } from '../firebase';
 import { canMutateAuthOrRBAC } from '../services/previewSafety';
 import {
   NotificationEventDefinition,
@@ -29,6 +29,7 @@ import {
 } from '../types/notification';
 import { notificationEventRegistry } from '../services/notificationEventRegistry';
 import { notificationPolicyService } from '../services/notificationPolicyService';
+import { MANAGED_USER_UI, managedUserRequest, managedUserUid } from '../services/managedUserClient';
 
 export interface RolePermissionHubProps {
   currentUser?: any;
@@ -63,7 +64,10 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
   const canEditPolicies = permissionService.hasPermission(currentUser, 'Notifications', 'Edit');
 
   const hasAccess = canViewUsers || canEditUsers || canApproveUsers || canAccessAdmin || canViewPolicies;
-  const isReadOnly = !canEditUsers;
+  const hasFullManagedAccess = !!currentUser?.firebaseUid &&
+    PERMISSION_CATEGORIES_CONFIG.every(group => group.modules.every(module =>
+      ALL_PERMISSION_ACTIONS.every(action => permissionService.hasPermission(currentUser, module, action))));
+  const isReadOnly = !canEditUsers || (MANAGED_USER_UI && !hasFullManagedAccess);
 
   const [subTab, setSubTab] = useState<'users' | 'roles' | 'audit' | 'policies'>(
     initialSubTab === 'matrix' ? 'roles' : (initialSubTab as any) || 'users'
@@ -518,9 +522,16 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
         permissions: {}
       };
 
-      const created = await authManager.createActiveUser(newUserData);
+      const created = MANAGED_USER_UI
+        ? await managedUserRequest('create', {
+            name, email, password: pin, roleId, branchId,
+            department: createUserForm.department || 'Workshop',
+            deviceAccess: { desktop: false, phone: false, tablet: false, terminal: false },
+            deviceViewAccess: {}, permissions: {}, notificationEventIds: []
+          })
+        : await authManager.createActiveUser(newUserData);
 
-      if (created && roleId) {
+      if (!MANAGED_USER_UI && created && roleId) {
         try {
           await permissionService.assignUserRole(
             created.id,
@@ -535,7 +546,7 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
       }
 
       const successTitle = 'USER CREATED SUCCESSFULLY';
-      const successMsg = `${created.name || created.email} (${created.email}) has been added to TS Hub.`;
+      const successMsg = `${created.name || created.email} (${created.email}) has been added to TS Hub.` + (MANAGED_USER_UI ? ' Open Edit User to grant access; all permissions and devices start denied.' : '');
       
       setCreateUserResult({
         type: 'success',
@@ -597,7 +608,7 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
       branchId: user.branchId || userOverride?.branchId || userBranch?.id || '',
       branchName: user.branchName || userOverride?.branchName || userBranch?.branchName || '',
       physicalLocation: user.physicalLocation || userOverride?.physicalLocation || '',
-      pin: user.pin || '',
+      pin: MANAGED_USER_UI ? '' : (user.pin || ''),
       roleId: assignedRoleId,
       roleName: roles.find(r => r.id === assignedRoleId)?.roleName || user.role || 'Employee',
       department: user.department || 'Operations',
@@ -817,6 +828,23 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
         deviceViewAccess: editUserForm.deviceViewAccess
       };
 
+      if (MANAGED_USER_UI) {
+        if (editUserForm.email.trim().toLowerCase() !== editingUser.email.trim().toLowerCase()) throw new Error('Email changes require the identity migration workflow.');
+        if (editUserForm.active !== (editingUser.active !== false)) throw new Error('Account status changes are not yet supported by the managed editor.');
+        if (editUserForm.pin) throw new Error('Use the separate Change Password field in the user list.');
+        await managedUserRequest(managedUserUid(editingUser) + '/access', {
+          name: updates.name, roleId, branchId, department: updates.department,
+          physicalLocation: updates.physicalLocation,
+          deviceAccess: { ...editUserForm.deviceAccess, terminal: !!editUserForm.deviceAccess.terminal },
+          deviceViewAccess: editUserForm.deviceViewAccess,
+          permissions: userPermissionOverridesBuffer
+        });
+        announce?.(`User ${editUserForm.name} permissions and access updated successfully.`);
+        setShowEditUserModal(false);
+        setEditingUser(null);
+        return;
+      }
+
       // Only update PIN/password if explicitly provided and intentionally changed
       if (editUserForm.pin && editUserForm.pin.trim() !== '' && editUserForm.pin.trim() !== (editingUser.pin || '')) {
         updates.pin = editUserForm.pin.trim();
@@ -864,12 +892,14 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
     }
 
     try {
-      if (deleteActiveUser) {
+      if (MANAGED_USER_UI) {
+        await managedUserRequest(managedUserUid(deleteConfirmUser) + '/delete', {});
+      } else if (deleteActiveUser) {
         await deleteActiveUser(deleteConfirmUser);
       } else {
         await authManager.deleteActiveUser(deleteConfirmUser);
       }
-      announce?.(`User ${deleteConfirmUser.name} deleted.`);
+      announce?.(MANAGED_USER_UI ? `User ${deleteConfirmUser.name} deleted. The email can be reused.` : `User ${deleteConfirmUser.name} deleted.`);
       setDeleteConfirmUser(null);
     } catch (err: any) {
       console.error('Failed to delete user:', err);
@@ -887,7 +917,9 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
     }
     const newActive = user.active === false ? true : false;
     try {
-      if (updateActiveUser) {
+      if (MANAGED_USER_UI) {
+        await managedUserRequest(managedUserUid(user) + '/status', { active: newActive });
+      } else if (updateActiveUser) {
         await updateActiveUser(user.id, { active: newActive });
       } else if (db && APP_ID_PATH && canMutateAuthOrRBAC('updateActiveStatus', user.id)) {
         await db.collection('artifacts')
@@ -905,13 +937,30 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
     }
   };
 
+  const [resettingPasswordIds, setResettingPasswordIds] = useState<Record<string,boolean>>({});
+  const handleSendPasswordReset = async (user: AppUser) => {
+    if (!MANAGED_USER_UI || isReadOnly || !user.firebaseUid || user.active === false || resettingPasswordIds[user.id]) return;
+    if (!window.confirm('Send a password reset email to ' + user.email + '?')) return;
+    setResettingPasswordIds(prev => ({ ...prev, [user.id]: true }));
+    try {
+      await auth.sendPasswordResetEmail(user.email);
+      announce?.('Password reset requested for ' + user.email + '. Check their inbox.');
+    } catch {
+      announce?.('Password reset request failed. Check the Firebase email configuration.');
+    } finally {
+      setResettingPasswordIds(prev => ({ ...prev, [user.id]: false }));
+    }
+  };
+
   // Save quick PIN edit
   const handleSaveQuickPin = async (user: AppUser) => {
     const newPin = editingPins[user.id];
     if (!newPin || !newPin.trim()) return;
 
     try {
-      if (updateActiveUser) {
+      if (MANAGED_USER_UI) {
+        await managedUserRequest(managedUserUid(user) + '/password', { password: newPin });
+      } else if (updateActiveUser) {
         await updateActiveUser(user.id, { pin: newPin.trim() });
       } else if (db && APP_ID_PATH && canMutateAuthOrRBAC('updateQuickPin', user.id)) {
         await db.collection('artifacts')
@@ -927,10 +976,10 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
         delete copy[user.id];
         return copy;
       });
-      announce?.(`PIN updated for ${user.name}.`);
+      announce?.(MANAGED_USER_UI ? `Firebase password updated for ${user.name}.` : `PIN updated for ${user.name}.`);
     } catch (err) {
       console.error(err);
-      announce?.('Failed to save PIN.');
+      announce?.(err instanceof Error ? err.message : 'Failed to change password.');
     }
   };
 
@@ -1549,7 +1598,7 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
                     <th className="p-4">User Details</th>
                     <th className="p-4">Branch / Depot</th>
                     <th className="p-4">Assigned Role</th>
-                    <th className="p-4">PIN / Credentials</th>
+                    <th className="p-4">{MANAGED_USER_UI ? 'Change Password' : 'PIN / Credentials'}</th>
                     <th className="p-4">Status</th>
                     <th className="p-4 text-right">Actions</th>
                   </tr>
@@ -1567,8 +1616,8 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
                       const assignedInfo = userRolesMap[user.id];
                       const currentRoleId = assignedInfo?.roleId || user.roleId || roles.find(r => r.roleName.toLowerCase() === (user.role || '').toLowerCase())?.id || roles[0]?.id || '';
                       const isPasswordVisible = !!showPasswordIds[user.id];
-                      const currentPinVal = editingPins[user.id] !== undefined ? editingPins[user.id] : (user.pin || '');
-                      const isPinChanged = currentPinVal !== (user.pin || '');
+                      const currentPinVal = editingPins[user.id] !== undefined ? editingPins[user.id] : (MANAGED_USER_UI ? '' : (user.pin || ''));
+                      const isPinChanged = MANAGED_USER_UI ? currentPinVal.length > 0 : currentPinVal !== (user.pin || '');
                       const userBranch = branches.find(b => b.id === user.branchId) || branches.find(b => b.branchName === user.branchName);
 
                       return (
@@ -1624,7 +1673,9 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
                                 <input
                                   type={isPasswordVisible ? 'text' : 'password'}
                                   value={currentPinVal}
-                                  disabled={isReadOnly}
+                                  placeholder={MANAGED_USER_UI ? 'New password' : undefined}
+                                  autoComplete={MANAGED_USER_UI ? 'new-password' : undefined}
+                                  disabled={isReadOnly || (MANAGED_USER_UI && isMasterAccount)}
                                   onChange={e => setEditingPins(prev => ({ ...prev, [user.id]: e.target.value }))}
                                   className="w-full bg-black/60 border border-white/10 rounded-xl pl-2.5 pr-7 py-1 text-xs text-white font-mono outline-none focus:border-purple-500 disabled:opacity-50"
                                 />
@@ -1668,6 +1719,15 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
                           {/* Actions */}
                           <td className="p-4 text-right">
                             <div className="flex items-center justify-end space-x-2">
+                              {MANAGED_USER_UI && !isReadOnly && user.firebaseUid && user.active !== false && !isMasterAccount && (
+                                <button type="button"
+                                  onClick={() => handleSendPasswordReset(user)}
+                                  disabled={!!resettingPasswordIds[user.id]}
+                                  title="Send password reset email"
+                                  className="px-2 py-1 text-[10px] font-bold text-blue-300 hover:text-white disabled:opacity-50">
+                                  {resettingPasswordIds[user.id] ? 'Sending…' : 'Reset Password'}
+                                </button>
+                              )}
                               {!isReadOnly && (
                                 <button
                                   onClick={() => handleOpenEditUser(user)}
@@ -2533,6 +2593,7 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
                           type="email"
                           required
                           value={editUserForm.email}
+                          disabled={MANAGED_USER_UI}
                           onChange={e => setEditUserForm({ ...editUserForm, email: e.target.value })}
                           className="w-full bg-black/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500 font-mono"
                         />
@@ -2570,11 +2631,12 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
                       </div>
 
                       <div className="space-y-1">
-                        <label className="text-[11px] font-bold text-gray-400 uppercase">PIN / Password</label>
+                        <label className="text-[11px] font-bold text-gray-400 uppercase">{MANAGED_USER_UI ? 'Password (change separately)' : 'PIN / Password'}</label>
                         <div className="relative">
                           <input
                             type={showEditPin ? 'text' : 'password'}
-                            required
+                            disabled={MANAGED_USER_UI}
+                            required={!MANAGED_USER_UI}
                             value={editUserForm.pin}
                             onChange={e => setEditUserForm({ ...editUserForm, pin: e.target.value })}
                             className="w-full bg-black/60 border border-white/10 rounded-xl pl-3 pr-9 py-2 text-xs text-white font-mono focus:outline-none focus:border-purple-500"
@@ -2592,6 +2654,7 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
                       <div className="space-y-1">
                         <label className="text-[11px] font-bold text-gray-400 uppercase">Account Status</label>
                         <select
+                          disabled={MANAGED_USER_UI}
                           value={editUserForm.active ? 'active' : 'suspended'}
                           onChange={e => setEditUserForm({ ...editUserForm, active: e.target.value === 'active' })}
                           className="w-full bg-black/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500 font-bold"
@@ -2746,14 +2809,25 @@ export const RolePermissionHub: React.FC<RolePermissionHubProps> = ({
                         const explicitVal = editUserForm.deviceViewAccess[selectedDeviceViewTab]?.[moduleDef.id];
                         
                         // Compute effective status
+                        // The existing device preview must obey both user gates.
+                        // Device visibility cannot grant a missing View permission.
                         let isEffectiveAllowed = false;
-                        if (explicitVal !== undefined) {
+                        if (MANAGED_USER_UI) {
+                          const mappedPermissions = (moduleDef.permissionModules || []).map(name =>
+                            name === 'System Configuration' ? 'System Settings' : name
+                          );
+                          const hasViewPermission = mappedPermissions.some(name =>
+                            userPermissionOverridesBuffer[name]?.View === 'allow'
+                          );
+                          const enabledOnDevice = editUserForm.deviceAccess[selectedDeviceViewTab] === true;
+                          isEffectiveAllowed = enabledOnDevice && explicitVal !== false &&
+                            hasViewPermission && (moduleDef.id !== 'gemini_ai' || explicitVal === true);
+                        } else if (explicitVal !== undefined) {
                           isEffectiveAllowed = !!explicitVal;
                         } else {
-                          // Preview the actual unsaved user-specific permission buffer.
-                          // Roles are labels only, not permission grants.
                           isEffectiveAllowed = moduleDef.id === 'gemini_ai' ||
-                            Boolean(moduleDef.permissionModules?.some(name => userPermissionOverridesBuffer[name]?.View === 'allow'));
+                            Boolean(moduleDef.permissionModules?.some(name =>
+                              userPermissionOverridesBuffer[name]?.View === 'allow'));
                         }
 
                         const isExplicitOverride = explicitVal !== undefined;

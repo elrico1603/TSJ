@@ -6,6 +6,7 @@ import { NotificationEventDefinition, NotificationPolicy } from '../types/notifi
 import { notificationEventRegistry } from './notificationEventRegistry';
 import { db, APP_ID_PATH } from '../firebase';
 import { canMutateNotificationPolicies, isDevelopmentPreview } from './previewSafety';
+import { MANAGED_USER_UI, managedUserRequest } from './managedUserClient';
 
 const storedPolicies = new Map<string, NotificationPolicy>();
 const localPolicyOverrides = new Map<string, NotificationPolicy>();
@@ -93,6 +94,13 @@ export const notificationPolicyService = {
   async savePolicy(policy: NotificationPolicy): Promise<void> {
     const normalized = normalize(policy?.eventId,policy);
     if (!normalized) throw new Error('Invalid notification policy.');
+    if (MANAGED_USER_UI) {
+      const response = await managedUserRequest('notification-policy/save', normalized);
+      const confirmed = normalize(normalized.eventId, response.policy);
+      if (!confirmed) throw new Error('Server did not confirm the notification policy.');
+      storedPolicies.set(normalized.eventId,confirmed);
+      localPolicyOverrides.delete(normalized.eventId);notifySubscribers();return;
+    }
     if (!canMutateNotificationPolicies('savePolicy',normalized.eventId)) {
       this.setLocalPolicyOverride(normalized);return;
     }
@@ -111,6 +119,10 @@ export const notificationPolicyService = {
   },
   async resetPolicy(eventId: string): Promise<void> {
     if (!this.getDefaultPolicy(eventId)) return;
+    if (MANAGED_USER_UI) {
+      await managedUserRequest('notification-policy/reset',{eventId});
+      storedPolicies.delete(eventId);localPolicyOverrides.delete(eventId);notifySubscribers();return;
+    }
     if (!canMutateNotificationPolicies('resetPolicy',eventId)) {
       localPolicyOverrides.set(eventId,this.getDefaultPolicy(eventId)!);notifySubscribers();return;
     }
@@ -120,6 +132,10 @@ export const notificationPolicyService = {
     storedPolicies.delete(eventId);localPolicyOverrides.delete(eventId);notifySubscribers();
   },
   async resetAllPolicies(): Promise<void> {
+    if (MANAGED_USER_UI) {
+      for (const event of this.getAllEventDefinitions()) await this.resetPolicy(event.eventId);
+      return;
+    }
     if (!canMutateNotificationPolicies('resetAllPolicies')) {
       for (const policy of Object.values(notificationEventRegistry.getDefaultPoliciesMap())) localPolicyOverrides.set(policy.eventId,policy);
       notifySubscribers();return;

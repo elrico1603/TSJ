@@ -30,7 +30,10 @@ function isUserActive(user: AppUser): boolean {
   if (!user || !user.id) return false;
   if (user.active === false) return false;
   if (user.isApproved === false) return false;
-  if (user.status && user.status.toLowerCase() === 'inactive') return false;
+  // Suspended/archived/deleted accounts must never receive events.
+  // A disabled or unapproved account is not an eligible policy recipient.
+  const status = String(user.status || '').trim().toLowerCase();
+  if (['inactive', 'suspended', 'archived', 'deleted', 'disabled'].includes(status)) return false;
   return true;
 }
 

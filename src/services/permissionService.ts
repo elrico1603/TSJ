@@ -1,4 +1,5 @@
 import { db, APP_ID_PATH } from '../firebase';
+import { GENERATED_PERMISSION_MODULE_GROUPS } from '../generated/modulePermissionCatalog';
 import { canMutateAuthOrRBAC } from './previewSafety';
 import {
   PermissionAction,
@@ -13,6 +14,9 @@ import {
   EffectiveUserPermissions,
   ModuleDefinition
 } from '../types';
+
+const managedEnv = (import.meta as unknown as {env?:Record<string,string>}).env || {};
+const MANAGED_PERMISSION_MODE = managedEnv.VITE_TSJ_MANAGED_USER_UI === 'true';
 
 const STORAGE_ROLES_KEY = 'tsj_roles_v1';
 const STORAGE_ROLE_PERMISSIONS_KEY = 'tsj_role_permissions_v1';
@@ -150,7 +154,7 @@ export const CENTRAL_MODULE_REGISTRY: ModuleDefinition[] = [
     supportsDevices: { phone: true, tablet: true, desktop: true, terminal: false },
     appMode: 'gemini_chat',
     icon: 'bot',
-    permissionModules: []
+    permissionModules: ['Gemini AI Hub']
   },
   {
     id: 'system_admin',
@@ -252,6 +256,16 @@ export const PERMISSION_CATEGORIES_CONFIG: ModuleCategoryGroup[] = [
   }
 ];
 
+// Feature modules with manifests appear in the user permission grid automatically.
+for (const group of GENERATED_PERMISSION_MODULE_GROUPS) {
+  const existingNames = new Set(PERMISSION_CATEGORIES_CONFIG.flatMap(item => item.modules));
+  const names = group.modules.filter(name => !existingNames.has(name));
+  if (!names.length) continue;
+  const category = group.category as PermissionCategory;
+  const existing = PERMISSION_CATEGORIES_CONFIG.find(item => item.category === category);
+  if (existing) existing.modules.push(...names);
+  else PERMISSION_CATEGORIES_CONFIG.push({ category, modules: [...names] });
+}
 export const ALL_MODULE_NAMES: string[] = PERMISSION_CATEGORIES_CONFIG.flatMap(c => c.modules);
 
 // Helper to construct full true actions matrix
@@ -582,6 +596,7 @@ export const permissionService = {
   },
 
   getLocalUserOverrides(): Record<string, UserPermissionOverride> {
+    if (MANAGED_PERMISSION_MODE) return activeUserOverrides || {};
     if (activeUserOverrides && Object.keys(activeUserOverrides).length > 0) {
       return activeUserOverrides;
     }
@@ -607,6 +622,7 @@ export const permissionService = {
   },
 
   saveLocalUserOverrides(overrides: Record<string, UserPermissionOverride>): void {
+    if (MANAGED_PERMISSION_MODE) return;
     try {
       localStorage.setItem(STORAGE_USER_OVERRIDES_KEY, JSON.stringify(overrides));
     } catch (e) {
@@ -636,6 +652,14 @@ export const permissionService = {
   // Resolves against live userId, normalized email, document ID, or user object
   getUserOverride(userOrIdOrEmail: any): UserPermissionOverride | null {
     if (!userOrIdOrEmail) return null;
+    if (MANAGED_PERMISSION_MODE) {
+      // Canonical document ID only; never resolve a legacy alias or cached grant.
+      const id = typeof userOrIdOrEmail === 'string' ? userOrIdOrEmail.trim() :
+        String(userOrIdOrEmail.id || userOrIdOrEmail.userId || '').trim();
+      const record = overridesByDocId.get(id);
+      const email = typeof userOrIdOrEmail === 'object' ? String(userOrIdOrEmail.email || userOrIdOrEmail.userEmail || '').trim().toLowerCase() : '';
+      return record && record.userId === id && (!email || record.userEmail === email) ? record : null;
+    }
 
     // Ensure cache / store is initialized
     if (!activeUserOverrides || (overridesByUserId.size === 0 && overridesByEmail.size === 0)) {
@@ -948,6 +972,11 @@ export const permissionService = {
   // ================= DEVICE CONTEXT EVALUATION =================
   canAccessDevice(user: any, deviceContext?: DeviceInterface): boolean {
     if (!user) return false;
+    if (MANAGED_PERMISSION_MODE) {
+      if (!user.firebaseUid || user.active !== true || user.isApproved !== true) return false;
+      if (!deviceContext) return true;
+      return this.getUserOverride(user)?.deviceAccess?.[deviceContext] === true;
+    }
     if (user.active === false) return false;
     if (!deviceContext) return true;
 
@@ -987,6 +1016,18 @@ export const permissionService = {
     // Check if module physically supports this device
     if (moduleDef.supportsDevices && moduleDef.supportsDevices[deviceContext] === false) {
       return false;
+    }
+
+    // Managed mode: a view is an additional restriction, never a grant
+    // of missing functional permission.
+    if (MANAGED_PERMISSION_MODE) {
+      const override = this.getUserOverride(user);
+      if (!override) return false;
+      const view = override.deviceViewAccess?.[deviceContext]?.[moduleId];
+      if (view === false) return false;
+      if (moduleId === 'gemini_ai') return view === true;
+      const mapped = (moduleDef.permissionModules || []).map(name => name === 'System Configuration' ? 'System Settings' : name);
+      return mapped.some(name => this.hasPermission(user,name,'View',deviceContext));
     }
 
     // 1. Check explicit user override for this device view
@@ -1052,6 +1093,16 @@ export const permissionService = {
   ): boolean {
     if (!user) return false;
     if (user.active === false) return false;
+    if (MANAGED_PERMISSION_MODE) {
+      if (!user.firebaseUid || user.active !== true || user.isApproved !== true) return false;
+      if (deviceContext && !this.canAccessDevice(user,deviceContext)) return false;
+      const override=this.getUserOverride(user);
+      const value=override?.permissions?.[moduleName]?.[action];
+      if (value !== 'allow' && value !== true) return false;
+      if (deviceContext && (override?.deviceOverrides?.[deviceContext]?.actions?.[moduleName]?.[action] === false ||
+        override?.deviceOverrides?.[deviceContext]?.modules?.[moduleName] === false)) return false;
+      return true;
+    }
 
     // Device access gate: If deviceContext is specified, verify device authorization
     if (deviceContext && !this.canAccessDevice(user, deviceContext)) {
@@ -1920,7 +1971,18 @@ export const permissionService = {
     return () => {};
   },
 
+  replaceManagedOverrides(records: Array<{id:string;data:UserPermissionOverride}>): void {
+    if (!MANAGED_PERMISSION_MODE) return;
+    const fresh=rebuildPermissionMaps(records.filter(({id,data})=>!!data && data.userId===id && !!data.userEmail));
+    overrideListeners.forEach(listener=>{try{listener(fresh);}catch(error){console.warn('Managed permission listener failed:',error);}});
+  },
+
   subscribeUserOverrides(callback: (overrides: Record<string, UserPermissionOverride>) => void) {
+    if (MANAGED_PERMISSION_MODE) {
+      callback(this.getLocalUserOverrides());
+      overrideListeners.add(callback);
+      return () => {overrideListeners.delete(callback);};
+    }
     // Immediately emit current in-memory / local state
     callback(this.getLocalUserOverrides());
 

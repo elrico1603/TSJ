@@ -47,6 +47,7 @@ export const rolePermissions = {
 
 export interface AppUser {
   id: string;
+  firebaseUid?: string;
   firstName?: string;
   lastName?: string;
   name: string;
@@ -80,7 +81,21 @@ export const DEFAULT_ACCOUNTS: AppUser[] = [
 const STORAGE_SESSION_KEY = 'ts_hub_active_session_v1';
 const STORAGE_CACHED_USERS_KEY = 'ts_hub_cached_users_v1';
 
+const managedEnv = (import.meta as unknown as {env?: Record<string,string>}).env || {};
+export const MANAGED_AUTH = managedEnv.VITE_TSJ_MANAGED_USER_UI === 'true';
+export function sanitizedManagedProfile(user: AppUser): AppUser {
+  const {pin, password, passwordHash, ...safe} = user as AppUser & {password?:string;passwordHash?:string};
+  return {...safe,pin:''};
+}
+
 const getInitialUsersPool = (): AppUser[] => {
+  if (MANAGED_AUTH) {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(STORAGE_CACHED_USERS_KEY);
+      localStorage.removeItem(STORAGE_SESSION_KEY);
+    }
+    return [];
+  }
   try {
     if (typeof localStorage !== 'undefined') {
       const cached = localStorage.getItem(STORAGE_CACHED_USERS_KEY);
@@ -110,6 +125,7 @@ let internalUsersPool: AppUser[] = getInitialUsersPool();
 
 export const authManager = {
   getStoredSession(): AppUser | null {
+    if (MANAGED_AUTH) return null;
     try {
       const raw = localStorage.getItem(STORAGE_SESSION_KEY);
       if (raw) {
@@ -142,6 +158,7 @@ export const authManager = {
   },
 
   saveSession(user: AppUser): void {
+    if (MANAGED_AUTH) return;
     try {
       if (!user || !user.email) return;
       const override = permissionService.getUserOverride(user);
@@ -212,6 +229,18 @@ export const authManager = {
   },
 
   setUsers(users: AppUser[]): AppUser[] {
+    if (MANAGED_AUTH) {
+      const unique = new Map<string, AppUser>();
+      const ambiguous = new Set<string>();
+      for (const user of users || []) {
+        if (!user?.firebaseUid || !user.id || !user.email) continue;
+        const email = user.email.trim().toLowerCase();
+        if (unique.has(email)) ambiguous.add(email);
+        unique.set(email,sanitizedManagedProfile(user));
+      }
+      internalUsersPool = [...unique.entries()].filter(([email])=>!ambiguous.has(email)).map(([,user])=>user);
+      return internalUsersPool;
+    }
     const canonicalMap = new Map<string, AppUser>();
 
     // Seed defaults first into the map
@@ -290,10 +319,11 @@ export const authManager = {
   },
 
   getUsers(): AppUser[] {
-    return internalUsersPool.length > 0 ? internalUsersPool : DEFAULT_ACCOUNTS;
+    return MANAGED_AUTH ? internalUsersPool : (internalUsersPool.length > 0 ? internalUsersPool : DEFAULT_ACCOUNTS);
   },
 
   authenticateUser(activeUsers: AppUser[], emailOrUsername: string, pin: string): AppUser | null {
+    if (MANAGED_AUTH) return null;
     const emailStateLength = (emailOrUsername || '').length;
     const emailStateNormalizedLength = (emailOrUsername || '').trim().length;
     const pinStateLength = (pin || '').length;

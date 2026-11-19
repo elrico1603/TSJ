@@ -1,0 +1,8 @@
+{
+  "id": "gemini_ai",
+  "name": "Gemini AI Hub",
+  "category": "INTELLIGENCE",
+  "permissions": [
+    "Gemini AI Hub"
+  ]
+}
